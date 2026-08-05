@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0a0b0e" />
+  <title>秦风 · 3D 中国象棋</title>
+
+  <!-- 零构建步骤：importmap 映射 Three.js（CDN） -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.169.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.169.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <!-- 美术样式由 art-director 提供；此处仅内联关键布局兜底，防止 CSS 未就绪时白屏/错位 -->
+  <style>
+    :root { --qin-bg: #0a0b0e; --qin-ink: #e6dcc3; --qin-gold: #c9a227; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; background: var(--qin-bg); color: var(--qin-ink);
+      font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif; overflow: hidden; }
+    #canvas-container { position: fixed; inset: 0; z-index: 1; }
+    #canvas-container .game-canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+
+    /* 加载界面：全屏覆盖，必须最先可见 */
+    #loading-screen { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 18px; background:
+      radial-gradient(ellipse at center, #15171c 0%, #0a0b0e 70%); transition: opacity .7s ease; }
+    #loading-screen.is-hidden { opacity: 0; pointer-events: none; }
+    #loading-screen.has-error .loading-inner { border-color: #ff2b1d; }
+    .loading-title { font-size: 26px; letter-spacing: .3em; color: var(--qin-gold); }
+    .loading-bar { width: min(320px, 60vw); height: 8px; border-radius: 99px; overflow: hidden;
+      background: rgba(201,162,39,.18); border: 1px solid rgba(201,162,39,.35); }
+    .loading-fill { width: 0%; height: 100%; background: linear-gradient(90deg, #c9a227, #e8cf72);
+      transition: width .25s ease; }
+    .loading-text { font-size: 14px; opacity: .85; min-height: 1.2em; }
+    .loading-error { display: none; max-width: min(680px, 86vw); max-height: 40vh; overflow: auto;
+      white-space: pre-wrap; font-size: 12px; line-height: 1.5; color: #ff8a7a;
+      background: rgba(40,12,10,.6); border: 1px solid rgba(255,43,29,.4); border-radius: 8px; padding: 10px 12px; }
+
+    /* HUD / 面板：默认布局兜底，art CSS 会覆盖美化 */
+    #hud { position: fixed; top: 14px; left: 14px; z-index: 20; display: flex; flex-direction: column;
+      gap: 8px; pointer-events: none; }
+    #hud .turn-indicator, #hud .captured-row { pointer-events: auto; background: rgba(16,17,21,.82);
+      border: 1px solid rgba(201,162,39,.42); border-radius: 10px; padding: 8px 12px; }
+    .turn-indicator { display: flex; align-items: center; gap: 10px; }
+    .turn-swatch { width: 14px; height: 14px; border-radius: 50%; background: #d8483a; box-shadow: 0 0 12px #d8483a; }
+    .turn-label { font-weight: 600; letter-spacing: .08em; }
+    .turn-meta { opacity: .7; font-size: 12px; }
+    .hud-timer { font-variant-numeric: tabular-nums; opacity: .8; font-size: 13px; }
+    .captured-label { font-size: 11px; opacity: .6; margin-right: 6px; }
+    .captured-red, .captured-black { display: inline; }
+    .captured-chip { display: inline-block; margin: 1px 2px; padding: 1px 6px; border-radius: 6px;
+      font-size: 13px; }
+    .captured-chip.is-red { color: #ffd9d0; background: rgba(176,40,31,.35); }
+    .captured-chip.is-black { color: #d8d2c2; background: rgba(28,31,38,.6); }
+
+    .check-banner { position: fixed; top: 8%; left: 50%; transform: translateX(-50%); z-index: 60;
+      font-size: 34px; font-weight: 800; letter-spacing: .5em; color: #ff3b2d; text-shadow:
+      0 0 18px rgba(255,43,29,.8); opacity: 0; pointer-events: none; transition: opacity .2s ease; }
+    .check-banner.is-visible { opacity: 1; }
+
+    #move-log { position: fixed; top: 14px; right: 14px; z-index: 20; width: 220px; max-height: 70vh;
+      display: flex; flex-direction: column; background: rgba(16,17,21,.82);
+      border: 1px solid rgba(201,162,39,.42); border-radius: 10px; overflow: hidden; }
+    .panel-header { padding: 8px 12px; font-weight: 600; letter-spacing: .1em;
+      border-bottom: 1px solid rgba(201,162,39,.25); }
+    .move-log-scroll { overflow-y: auto; padding: 6px 8px; }
+    .move-log-list { list-style: none; margin: 0; padding: 0; }
+    .move-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; font-size: 13px; }
+    .move-no { width: 26px; opacity: .5; }
+    .move-cell { cursor: pointer; padding: 1px 6px; border-radius: 5px; }
+    .move-cell.is-active { background: rgba(201,162,39,.3); }
+    .move-black { color: #cfd3da; }
+    .move-red { color: #ff9a8c; }
+    .move-log-empty { padding: 10px 12px; opacity: .5; font-size: 12px; }
+
+    #controls { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); z-index: 30;
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center;
+      padding: 8px 10px; background: rgba(16,17,21,.82); border: 1px solid rgba(201,162,39,.42);
+      border-radius: 12px; max-width: 94vw; }
+    .control-field { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+    .btn { font: inherit; cursor: pointer; color: var(--qin-ink); background: rgba(201,162,39,.14);
+      border: 1px solid rgba(201,162,39,.45); border-radius: 9px; padding: 8px 12px; letter-spacing: .04em;
+      transition: background .15s ease, transform .08s ease; }
+    .btn:hover { background: rgba(201,162,39,.28); }
+    .btn:active { transform: translateY(1px); }
+    .btn:disabled, .btn.is-disabled { opacity: .4; cursor: not-allowed; }
+    .btn.is-armed { background: rgba(255,43,29,.85); border-color: #ff6a5a; color: #fff; }
+    .btn-primary { background: rgba(201,162,39,.32); border-color: var(--qin-gold); }
+    .btn-danger { background: rgba(176,40,31,.3); border-color: rgba(255,90,78,.6); }
+    .btn.is-off { opacity: .55; }
+
+    #game-over { position: fixed; inset: 0; z-index: 80; display: none; align-items: center;
+      justify-content: center; background: rgba(5,6,8,.6); backdrop-filter: blur(3px); }
+    #game-over.is-visible { display: flex; }
+    .game-over-panel { position: relative; width: min(440px, 88vw); padding: 26px 28px;
+      background: rgba(16,17,21,.96); border: 1px solid rgba(201,162,39,.5); border-radius: 16px;
+      text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,.6); }
+    .game-over-panel.tone-win { border-color: #6fd6a8; }
+    .game-over-panel.tone-lose { border-color: #ff2b1d; }
+    .game-over-title { font-size: 28px; letter-spacing: .2em; margin: 4px 0 10px; color: var(--qin-gold); }
+    .game-over-detail { opacity: .85; margin: 0 0 14px; }
+    .game-over-stats { display: flex; flex-direction: column; gap: 6px; margin-bottom: 18px; }
+    .stat-row { display: flex; justify-content: space-between; font-size: 13px; opacity: .8;
+      border-bottom: 1px dashed rgba(201,162,39,.2); padding-bottom: 4px; }
+    .game-over-close { position: absolute; top: 10px; right: 14px; background: none; border: none;
+      color: var(--qin-ink); font-size: 22px; cursor: pointer; opacity: .6; }
+    .game-over-close:hover { opacity: 1; }
+
+    .help-toggle { position: fixed; bottom: 14px; right: 14px; z-index: 30; }
+    .help-panel { position: fixed; top: 0; right: 0; bottom: 0; z-index: 70; width: min(360px, 90vw);
+      background: rgba(16,17,21,.97); border-left: 1px solid rgba(201,162,39,.45);
+      padding: 22px 20px; overflow-y: auto; transform: translateX(100%); transition: transform .28s ease;
+      box-shadow: -10px 0 40px rgba(0,0,0,.5); }
+    .help-panel.is-open { transform: translateX(0); }
+    .help-title { color: var(--qin-gold); letter-spacing: .1em; margin: 14px 0 8px; font-size: 15px; }
+    .help-rule { display: flex; gap: 10px; padding: 5px 0; font-size: 13px; line-height: 1.5;
+      border-bottom: 1px dashed rgba(201,162,39,.15); }
+    .help-piece { flex: 0 0 84px; color: #ffd9d0; font-weight: 600; }
+    .help-key-row { display: flex; gap: 10px; align-items: center; padding: 4px 0; font-size: 13px; }
+    .help-key-row kbd { background: rgba(201,162,39,.2); border: 1px solid rgba(201,162,39,.4);
+      border-radius: 6px; padding: 1px 8px; font-family: inherit; }
+
+    #toast-container { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); z-index: 90;
+      display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; }
+    .toast { pointer-events: auto; padding: 9px 16px; border-radius: 10px; font-size: 13px;
+      background: rgba(16,17,21,.94); border: 1px solid rgba(201,162,39,.5); color: var(--qin-ink);
+      box-shadow: 0 8px 24px rgba(0,0,0,.4); opacity: 0; transform: translateY(8px);
+      transition: opacity .3s ease, transform .3s ease; max-width: 80vw; text-align: center; }
+    .toast.is-in { opacity: 1; transform: translateY(0); }
+    .toast.is-out { opacity: 0; transform: translateY(-8px); }
+    .toast-warn { border-color: rgba(255,180,60,.7); }
+    .toast-error { border-color: #ff2b1d; }
+    .toast-check { border-color: #ff2b1d; color: #ffb0a6; }
+    .toast-success { border-color: #6fd6a8; }
+
+    .noscript-warn { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      padding: 24px; text-align: center; z-index: 200; background: var(--qin-bg); }
+  </style>
+
+  <link rel="stylesheet" href="styles/main.css" />
+</head>
+<body>
+  <!-- 3D 画布容器（WebGL 渲染器将 canvas 注入此处） -->
+  <div id="canvas-container"></div>
+
+  <!-- 加载界面 -->
+  <div id="loading-screen">
+    <div class="loading-inner">
+      <div class="loading-title">秦风 · 3D 中国象棋</div>
+      <div class="loading-bar"><div class="loading-fill"></div></div>
+      <div class="loading-text">正在载入…</div>
+      <pre class="loading-error"></pre>
+    </div>
+  </div>
+
+  <!-- 左上角 HUD：回合 / 计时 / 吃子陈列 -->
+  <aside id="hud">
+    <div class="turn-indicator">
+      <span class="turn-swatch"></span>
+      <span class="turn-label">红方走棋</span>
+      <span class="turn-meta">第 1 回合</span>
+    </div>
+    <div class="hud-timer">00:00</div>
+    <div class="captured-row"><span class="captured-label">吃黑</span><span class="captured-red"></span></div>
+    <div class="captured-row"><span class="captured-label">吃红</span><span class="captured-black"></span></div>
+  </aside>
+
+  <!-- 将军横幅 -->
+  <div class="check-banner" aria-hidden="true">将 军 ！</div>
+
+  <!-- 右侧走子记录 -->
+  <section id="move-log">
+    <header class="panel-header">对局记录</header>
+    <div class="move-log-scroll"><ul class="move-log-list"></ul></div>
+    <div class="move-log-empty">尚无着法</div>
+  </section>
+
+  <!-- 底部控制栏 -->
+  <nav id="controls">
+    <div class="control-field">
+      <label for="select-difficulty">难度</label>
+      <select id="select-difficulty">
+        <option value="1">入门</option>
+        <option value="2" selected>进阶</option>
+        <option value="3">高手</option>
+      </select>
+    </div>
+    <button id="btn-restart" class="btn btn-primary" type="button">重新开局</button>
+    <button id="btn-undo" class="btn" type="button">悔棋</button>
+    <button id="btn-reset-view" class="btn" type="button">复位视角</button>
+    <button id="btn-flip" class="btn" type="button">翻转视角</button>
+    <button id="btn-top" class="btn" type="button">俯视视角</button>
+    <button id="btn-sound" class="btn" type="button">音效 开</button>
+    <button id="btn-ai" class="btn" type="button">人机 开</button>
+    <button id="btn-resign" class="btn btn-danger" type="button">认输</button>
+  </nav>
+
+  <!-- 结束面板 -->
+  <div id="game-over" aria-hidden="true">
+    <div class="game-over-panel">
+      <button class="game-over-close" type="button" aria-label="关闭">×</button>
+      <h2 class="game-over-title">对局结束</h2>
+      <p class="game-over-detail"></p>
+      <div class="game-over-stats"></div>
+      <button id="btn-again" class="btn btn-primary" type="button">再来一局</button>
+    </div>
+  </div>
+
+  <!-- 帮助面板 -->
+  <button class="help-toggle btn" type="button" aria-expanded="false">规则 ?</button>
+  <aside class="help-panel" aria-hidden="true">
+    <div class="help-content"></div>
+  </aside>
+
+  <!-- toast 容器 -->
+  <div id="toast-container"></div>
+
+  <noscript>
+    <div class="noscript-warn">本游戏需要启用 JavaScript，并使用支持 WebGL 的现代浏览器（Chrome / Edge / Firefox / Safari）才能运行。</div>
+  </noscript>
+
+  <!-- 入口（ES Module，无构建步骤） -->
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
