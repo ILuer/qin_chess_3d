@@ -1,9 +1,30 @@
 # 部署指南 · Cloudflare Pages 连接 GitHub 自动部署
 
-> 本项目是**纯静态、零构建**站点（Three.js 走 importmap 从 CDN 加载），
+> 本项目是**纯静态、零构建**站点（Three.js 已 vendor 进仓库，无外部依赖），
 > 因此部署配置的核心只有一句话：**不要填构建命令，输出目录填仓库根**。
 
 仓库：`https://github.com/ILuer/qin_chess_3d`
+
+---
+
+## 本地预览
+
+**必须走 HTTP，不能双击 `index.html` 用 `file://` 打开**——
+AI 用的 module Worker 会被同源策略直接拒绝，棋能下但 AI 不动。
+
+任选一条，在仓库根目录执行：
+
+```bash
+npx serve -l 5173          # Node，无需预装
+python -m http.server 5173 # Python 3
+php -S localhost:5173      # PHP
+```
+
+然后访问 `http://localhost:5173`。
+
+> 仓库已精简为纯部署面，原先的 `serve.mjs`（零依赖静态服务器）、
+> `tests/`（三道质量门）、团队设计文档均已移出。
+> 需要时从历史取回：`git checkout 68700dd -- tests/ serve.mjs docs/`
 
 ---
 
@@ -92,8 +113,8 @@ npx wrangler pages deploy . --project-name=qin-chess-3d --branch=main
 发布预览版把 `--branch` 换成别的名字即可，例如 `--branch=preview`。
 
 > 注：直传会上传当前目录全部文件（`.git`、`node_modules` 自动排除）。
-> `docs/`、`tests/` 也会一起上传——本来在公开仓库里也是可见的，无额外风险；
-> 介意的话可以先 `git archive` 出干净目录再传。
+> 本仓库已精简为纯部署面（`index.html` / `styles/` / `src/` / `vendor/` / `_headers`），
+> 直传即最小集，无需额外过滤。
 
 ---
 
@@ -135,15 +156,19 @@ jobs:
         with:
           node-version: '22'
 
-      # 质量门：规则引擎 95 条断言不过就不发布
-      - name: 规则引擎测试
-        run: node tests/rules.test.mjs
-
-      - name: 跨模块符号对账
-        run: node tests/integration-check.mjs
-
-      - name: ESM 语法检查
-        run: node tests/syntax-check.mjs
+      # 质量门（可选）：本仓库已精简，tests/ 不在部署面内。
+      # 如需恢复「测试不过不许发布」，先取回测试文件：
+      #   git checkout 68700dd -- tests/
+      # 再取消下面三步的注释。
+      #
+      # - name: 规则引擎测试（95 条断言）
+      #   run: node tests/rules.test.mjs
+      #
+      # - name: 跨模块符号对账（112 个符号）
+      #   run: node tests/integration-check.mjs
+      #
+      # - name: ESM 语法检查
+      #   run: node tests/syntax-check.mjs
 
       - name: Deploy
         uses: cloudflare/wrangler-action@v3
@@ -169,8 +194,14 @@ jobs:
 
 约 1 分钟后可访问 `https://iluer.github.io/qin_chess_3d/`，此后 push 即自动更新。
 
-项目里已放好 `.nojekyll`（空文件），作用是关闭 Jekyll 处理——否则
-下划线开头的文件（如 `_headers`）会被 Jekyll 静默忽略。
+**走 GitHub Pages 需要先补一个 `.nojekyll`**（空文件，放仓库根）：
+
+```bash
+touch .nojekyll && git add .nojekyll && git commit -m "chore: 关闭 Jekyll 处理" && git push
+```
+
+不加的话 Jekyll 会**静默忽略**所有下划线开头的文件——`_headers` 直接消失，
+且不报任何错。本仓库为精简部署面已移除该文件（Cloudflare Pages 不需要它）。
 
 **与 Cloudflare Pages 的差异**
 
@@ -189,7 +220,8 @@ jobs:
 
 打开线上地址，按顺序确认：
 
-1. **加载进度条走完并淡出** — 若卡住不动，八成是 unpkg CDN 被墙或超时
+1. **加载进度条走完并淡出** — 卡住不动先看 Network 里
+   `vendor/three/three.module.js` 是否 200（1.27MB，慢网首访需几秒）
 2. **棋盘与 32 枚棋子正常渲染** — 白屏则看 DevTools Console
 3. **AI 能落子** — 验证 module Worker 正常。若报
    `Failed to construct 'Worker'`，检查 `src/ai/worker.js` 是否返回 `200` 且
@@ -199,25 +231,47 @@ jobs:
 
 ---
 
-## 已知风险：CDN 单点依赖
+## 依赖策略：Three.js 已本地化（无外部依赖）
 
-`index.html` 的 importmap 从 `unpkg.com` 拉 Three.js 0.169.0。
-**unpkg 抖动或被网络屏蔽时，线上会直接白屏**——这是当前架构最大的可用性风险。
+早期 importmap 从 `unpkg.com` 拉 Three.js，CDN 抖动会直接导致线上白屏。
+**该风险已消除**——三个文件全部 vendor 进仓库：
 
-三种加固方式，按推荐度排序：
+```
+vendor/three/three.module.js                        1.27 MB   REVISION 169
+vendor/three/addons/controls/OrbitControls.js         32 KB
+vendor/three/addons/utils/BufferGeometryUtils.js      31 KB   ← 易漏
+```
 
-**① Vendor 到仓库（最稳，推荐）**
-把 `three.module.js` 和用到的 `examples/jsm/controls/OrbitControls.js`
-下载进 `vendor/three/`，importmap 改为相对路径。代价是仓库多约 1.2MB，
-换来零外部依赖 + 首屏更快（同源、无额外 DNS 与 TLS 握手）。
+第三个最容易漏：`boardMesh.js` 与 `pieceFactory.js` 用它做几何体合并，
+只搬前两个会在建模阶段断链。
 
-**② 换更稳的 CDN**
-`https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js`
-—— 治标不治本，仍是外部依赖。
+importmap 用相对路径，子路径部署同样成立：
 
-**③ 加载失败兜底提示**
-`src/main.js` 已有全局错误捕获，不会白屏到底，但目前提示文案偏技术化，
-可针对 CDN 失败场景补一句「资源加载失败，请检查网络后刷新」。
+```json
+{ "imports": {
+    "three": "./vendor/three/three.module.js",
+    "three/addons/": "./vendor/three/addons/"
+} }
+```
+
+两个 addon 内部写的是 `from 'three'` 裸标识符，由 importmap 按**文档基址**
+解析，无需改写 vendor 源码。
+
+`_headers` 给 `/vendor/*` 配了 `max-age=31536000, immutable`：
+版本锁定的库内容永不变更，升级走「改目录名 + 改 importmap」而非原地覆盖，
+所以长缓存安全。1.27 MB 首访下载一次，回访零请求。
+
+### 升级 Three.js 的正确姿势
+
+不要原地覆盖 `vendor/three/`（会被 immutable 缓存锁死旧版）。改为：
+
+```bash
+mkdir -p vendor/three-0.180/addons/controls vendor/three-0.180/addons/utils
+curl -sL -o vendor/three-0.180/three.module.js \
+  https://unpkg.com/three@0.180.0/build/three.module.js
+# ...两个 addon 同理
+```
+再把 importmap 指向新目录，确认无误后删旧目录。
 
 生产环境建议选 ①。
 

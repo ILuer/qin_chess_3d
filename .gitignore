@@ -1,21 +1,3 @@
-# ---- 校验过程产生的临时文件（不入库） ----
-_check*.cjs
-_chk
-_chk.txt
-_chk2.txt
-_chk2_err.txt
-_chk_src_*.mjs
-_chk2_src_*.mjs
-_chk_tmp/
-_err.txt
-_ran.txt
-_ran2.txt
-_scene.mjs
-_syntax
-_t.mjs
-_v.txt
-.synccheck/
-
 # ---- 依赖与构建产物 ----
 node_modules/
 dist/
@@ -30,3 +12,10 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# ---- Cloudflare / Wrangler ----
+.wrangler/
+.dev.vars
+
+# 注意：不要在此忽略下划线开头的文件。
+# _headers 是 Cloudflare Pages 的响应头配置，必须入库。
