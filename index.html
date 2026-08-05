@@ -6,12 +6,13 @@
   <meta name="theme-color" content="#0a0b0e" />
   <title>秦风 · 3D 中国象棋</title>
 
-  <!-- 零构建步骤：importmap 映射 Three.js（CDN） -->
+  <!-- 零构建步骤：importmap 映射 Three.js（本地 vendor，零外部依赖）
+       相对路径写法保证子路径部署（如 /qin_chess_3d/）同样成立 -->
   <script type="importmap">
   {
     "imports": {
-      "three": "https://unpkg.com/three@0.169.0/build/three.module.js",
-      "three/addons/": "https://unpkg.com/three@0.169.0/examples/jsm/"
+      "three": "./vendor/three/three.module.js",
+      "three/addons/": "./vendor/three/addons/"
     }
   }
   </script>

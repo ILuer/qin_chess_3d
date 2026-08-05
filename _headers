@@ -22,8 +22,14 @@
 /styles/*
   Cache-Control: public, max-age=0, must-revalidate
 
+# vendor 是版本锁定的第三方库（three@0.169.0），内容永不变更。
+# 升级走「改目录名 + 改 importmap」，不会原地覆盖，故可安全 immutable 长缓存。
+# 1.27MB 的 three.module.js 只在首访下载一次，回访零请求。
+/vendor/*
+  Cache-Control: public, max-age=31536000, immutable
+
 # 说明：本项目未设置 CSP。
 # importmap 与首屏兜底样式均为 inline，静态托管无法下发 nonce，
 # CSP 势必要放开 'unsafe-inline'，收益有限反而易误伤 Worker / CanvasTexture(data:)。
-# 若确需 CSP，最小可用版本：
-#   Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; worker-src 'self' blob:; connect-src 'self' https://unpkg.com
+# 若确需 CSP，最小可用版本（已无外部源，全部 'self'）：
+#   Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; worker-src 'self' blob:; connect-src 'self'
