@@ -1,0 +1,20 @@
+# 默认按平台自动处理换行
+* text=auto
+
+# 部署配置文件强制 LF —— Cloudflare Pages 对 _headers / _redirects
+# 的逐行解析在 CRLF 下可能出现尾随 \r，导致该行规则静默失效
+_headers   text eol=lf
+_redirects text eol=lf
+
+# Web 资源统一 LF，避免跨平台协作时产生无意义 diff
+*.html     text eol=lf
+*.css      text eol=lf
+*.js       text eol=lf
+*.mjs      text eol=lf
+*.json     text eol=lf
+*.md       text eol=lf
+
+# 二进制资源不做换行转换
+*.png      binary
+*.jpg      binary
+*.woff2    binary

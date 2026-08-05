@@ -26,6 +26,19 @@ python -m http.server 5173
 
 ---
 
+## 部署
+
+纯静态零构建，可直接托管。**构建命令留空，输出目录填仓库根 `/`** 即可。
+
+- Cloudflare Pages 关联 GitHub 自动部署（推荐）
+- Wrangler CLI 直传
+- GitHub Actions + 质量门
+- GitHub Pages
+
+完整操作步骤、验收清单与 CDN 单点风险加固方案见 **[docs/deploy.md](docs/deploy.md)**。
+
+---
+
 ## 项目结构
 
 ```

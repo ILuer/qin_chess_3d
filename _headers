@@ -1,0 +1,29 @@
+# Cloudflare Pages 响应头配置
+# 语法：路径匹配行顶格，头部行缩进两空格
+# 参考：https://developers.cloudflare.com/pages/configuration/headers/
+
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: SAMEORIGIN
+
+# 入口 HTML 不缓存，保证部署后立即生效
+/index.html
+  Cache-Control: no-cache
+
+/
+  Cache-Control: no-cache
+
+# 源码与样式没有内容哈希文件名，不能用 immutable 长缓存
+# 用 must-revalidate + ETag：浏览器每次发条件请求，未变更命中 304（几乎零开销）
+/src/*
+  Cache-Control: public, max-age=0, must-revalidate
+
+/styles/*
+  Cache-Control: public, max-age=0, must-revalidate
+
+# 说明：本项目未设置 CSP。
+# importmap 与首屏兜底样式均为 inline，静态托管无法下发 nonce，
+# CSP 势必要放开 'unsafe-inline'，收益有限反而易误伤 Worker / CanvasTexture(data:)。
+# 若确需 CSP，最小可用版本：
+#   Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; worker-src 'self' blob:; connect-src 'self' https://unpkg.com
