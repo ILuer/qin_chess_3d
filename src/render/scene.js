@@ -19,6 +19,14 @@ export const VIEW_PRESETS = {
 const MIN_POLAR = 0.15;
 const MAX_POLAR = 1.35;
 
+/**
+ * 场景底色 / 雾色：均较 PALETTE.bg（0x0a0b0e，近乎纯黑）提亮一档。
+ * 纯黑背景下玄黑棋子的轮廓会直接糊进背景，牺牲一点「玄」换取剪影可辨。
+ * 两者取同色系并让雾色略亮于底色，远端才读作空气透视而非一团死黑。
+ */
+const BG_COLOR = 0x1a2230;
+const FOG_COLOR = 0x232b38;
+
 /** easeInOutCubic */
 function easeInOutCubic(t) {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
@@ -53,19 +61,24 @@ export class SceneSystem {
     renderer.setPixelRatio(this.basePixelRatio);
     renderer.setSize(container.clientWidth || window.innerWidth, container.clientHeight || window.innerHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.06;
+    // ACESFilmic 会明显压暗中间调并去饱和，棋子字面与甲胄细节正好落在这一段，
+    // 换用 Khronos PBR Neutral：中间调保真、高光平滑滚降，
+    // 既提得起亮度又不会把鎏金/字面推成一片死白。
+    renderer.toneMapping = THREE.NeutralToneMapping;
+    renderer.toneMappingExposure = 1.14;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    renderer.setClearColor(PALETTE.bg, 1);
+    renderer.setClearColor(BG_COLOR, 1);
     renderer.domElement.classList.add('game-canvas');
     container.appendChild(renderer.domElement);
     this.renderer = renderer;
 
     // —— 场景 ——
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(PALETTE.bg);
-    scene.fog = new THREE.FogExp2(PALETTE.fog, 0.021);
+    scene.background = new THREE.Color(BG_COLOR);
+    // 密度 0.021 会让远端（黑方底线）棋子明显发灰变暗，直接伤可读性；
+    // 减半到 0.009 只保留纵深暗示，不再吃掉细节。
+    scene.fog = new THREE.FogExp2(FOG_COLOR, 0.009);
     this.scene = scene;
 
     // —— 分组（明确的层级，方便拾取与清理）——
@@ -128,7 +141,9 @@ export class SceneSystem {
     const scene = this.scene;
 
     // 主平行光（投影）
-    const key = new THREE.DirectionalLight(PALETTE.keyLight, 2.35);
+    // 强度自 2.35 下调：环境光与新增的相机补光already 抬高了基础亮度，
+    // 主光若不退让，鎏金与甲片高光会直接打爆。
+    const key = new THREE.DirectionalLight(PALETTE.keyLight, 1.95);
     key.position.set(6.5, 13.5, 7.5);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
@@ -142,34 +157,70 @@ export class SceneSystem {
     scene.add(key, key.target);
     this.keyLight = key;
 
-    // 半球光：天空冷、地面暖
-    const hemi = new THREE.HemisphereLight(PALETTE.hemiSky, PALETTE.hemiGround, 0.62);
+    // 半球光：天空冷、地面暖。天空色提亮，让棋子顶面与侧面拉开层次。
+    const hemi = new THREE.HemisphereLight(0x8da0b8, PALETTE.hemiGround, 0.98);
     hemi.position.set(0, 12, 0);
     scene.add(hemi);
     this.hemiLight = hemi;
 
-    // 环境光兜底，避免暗部死黑
-    const amb = new THREE.AmbientLight(0xffffff, 0.16);
+    // 环境光兜底。原值 0.16 太低，棋子背光面直接掉进死黑、
+    // 甲胄与人物轮廓全部糊成一坨；抬到 0.52 保住暗部细节，
+    // 同时让雾化地面不再与背景糊成一片死黑。
+    const amb = new THREE.AmbientLight(0xffffff, 0.52);
     scene.add(amb);
     this.ambientLight = amb;
 
     // 冷色补光（黑方一侧）
-    const fill = new THREE.DirectionalLight(PALETTE.fillLight, 0.75);
+    const fill = new THREE.DirectionalLight(PALETTE.fillLight, 0.95);
     fill.position.set(-8, 6.5, -8);
     scene.add(fill);
     this.fillLight = fill;
 
+    /**
+     * 相机跟随补光 —— 「任意视角下清晰可辨」的关键。
+     *
+     * 主光方向固定在红方右后上方，一旦用户把镜头转到对侧，
+     * 看到的全是背光面，再高的主光强度也救不回来。
+     * 这盏灯每帧跟着相机走，保证「你正在看的那一面」永远有光。
+     *
+     * 两点克制：
+     *  - 强度只给 0.62，够提亮但不夺主光的造型感；
+     *  - 位置在相机基础上抬高 3.5，避免与视线完全重合——
+     *    正面平打会消掉所有明暗交界，画面会变得像贴纸一样扁。
+     */
+    const head = new THREE.DirectionalLight(0xfff4e2, 0.62);
+    head.position.set(0, 10, 14);
+    scene.add(head, head.target);
+    this.headLight = head;
+    this._headDir = new THREE.Vector3();
+
     // 暖色轮廓光，营造秦式青铜氛围
-    const rim = new THREE.PointLight(PALETTE.rimLight, 26, 30, 2);
+    const rim = new THREE.PointLight(PALETTE.rimLight, 22, 30, 2);
     rim.position.set(0, 3.2, -8.5);
     scene.add(rim);
     this.rimLight = rim;
 
     // 红方侧微弱地灯
-    const under = new THREE.PointLight(PALETTE.chiHong, 14, 22, 2);
+    const under = new THREE.PointLight(PALETTE.chiHong, 12, 22, 2);
     under.position.set(0, 2.4, 8.5);
     scene.add(under);
     this.underLight = under;
+
+    this._updateHeadLight();
+  }
+
+  /** 把跟随补光挪到相机同侧（每帧调用） */
+  _updateHeadLight() {
+    const head = this.headLight;
+    if (!head) return;
+    const t = this.controls.target;
+    this._headDir.subVectors(this.camera.position, t);
+    if (this._headDir.lengthSq() < 1e-6) return;
+    this._headDir.normalize();
+    head.position.copy(t).addScaledVector(this._headDir, 15);
+    head.position.y += 3.5;
+    head.target.position.copy(t);
+    head.target.updateMatrixWorld();
   }
 
   // -------------------------------------------------------------------------
@@ -294,6 +345,7 @@ export class SceneSystem {
       this.controls.update();
     }
 
+    this._updateHeadLight();   // 补光跟随相机，保证当前视角的受光面始终可读
     this._updateShake(dt);
     this._trackFps(dt);
   }

@@ -60,8 +60,8 @@ export const PALETTE = {
   rope:        '#8a7455',
   bone:        '#e6ddc7',
   ink:         '#0d0c0b',
-  stone:       '#2a2830',
-  ground:      '#0c0b0e',
+  stone:       '#33323a',
+  ground:      '#14141a',
   flame:       '#ff9840',
   /* UI 同源色（styles/main.css 使用同一套） */
   uiBg:        '#12100e',
@@ -674,10 +674,18 @@ export function getBaseTopMaterial(glyph, side) {
   const key = 'basetop:' + glyph + ':' + side;
   let m = _extraMats.get(key);
   if (!m) {
+    const tex = createBaseTopTexture(glyph, side);
     m = new THREE.MeshStandardMaterial({
-      map: createBaseTopTexture(glyph, side),
-      roughness: 0.55,
-      metalness: 0.25
+      map: tex,
+      // 字面自发光：底座顶面朝上，在斜俯视角下极易整片落入棋子自身的阴影，
+      // 单靠外部布光无法根治。用同一张贴图兼作 emissiveMap，
+      // 让字形的亮部自带微光——暗处能读、亮处也不会糊成白斑。
+      // 强度压在 0.3 以内：再高会让字面在主光直射下过曝发白。
+      emissiveMap: tex,
+      emissive: new THREE.Color('#ffffff'),
+      emissiveIntensity: 0.28,
+      roughness: 0.5,
+      metalness: 0.2
     });
     _extraMats.set(key, m);
   }

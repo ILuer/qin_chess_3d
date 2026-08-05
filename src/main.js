@@ -145,8 +145,7 @@ function applyMove(from, to) {
         { count: rec.captured ? 60 : 42 }
       );
       afterMove(rec, from, to);
-      // 给消散动画一点收尾时间再交给 AI
-      setTimeout(maybeRequestAI, 60);
+      // AI 由 pumpAI 每帧轮询接管，此处无需再触发
     }
   });
 
@@ -182,16 +181,36 @@ function afterMove(rec, from, to) {
   syncControls();
 
   if (gs.isGameOver()) { onGameOver(); return; }
-
-  // 若轮到 AI，则请求 AI 走子
-  maybeRequestAI();
+  // 轮到 AI 时由 pumpAI 每帧轮询自动接管，不在此处一次性触发
 }
 
-/** 仅在轮到 AI 且空闲时请求一步 */
-function maybeRequestAI() {
-  if (!aiEnabled || gameOver) return;
+/**
+ * AI 回合泵 —— 每帧轮询「是否该轮到 AI 落子」。
+ *
+ * 【为什么不用事件触发】
+ * 原实现是一次性事件触发：走子动画结束时调一次 maybeRequestAI，
+ * 再 setTimeout 60ms 兜底调一次，两次都带 `animator.isBusy` 判断。
+ * 但吃子时被吃方的消散动画（延迟 0.19s + 时长 0.42s，0.61s 才解锁）
+ * 活得比主移动动画（0.38s）更久 —— 60ms 兜底在 0.44s 触发时锁还没放，
+ * 两次触发全部落空，且此后再无任何重试，AI 就此永久失联。
+ * 这正是「AI 棋子被吃后回合流转中断」的根因：
+ * 不吃子时消散动画不存在，所以只有吃子这一条路径会挂。
+ *
+ * 【为什么轮询是对的】
+ * 回合该不该流转是一个**持续为真的状态**，不是一个瞬时事件。
+ * 用状态轮询表达状态，触发条件只要成立就必然被命中，
+ * 结构上不存在「错过时间窗」这种失败模式——多晚都会自愈。
+ */
+const AI_THINK_DELAY = 0.16;   // 动画落定后的短暂停顿，避免 AI 抢拍显得机械
+let aiCooldown = 0;
+
+function pumpAI(dt) {
+  if (!gs || !aiEnabled || gameOver || aiBusy) return;
   if (gs.sideToMove !== aiSide) return;
-  if (animator.isBusy || aiBusy) return;
+  if (animator.isBusy) { aiCooldown = AI_THINK_DELAY; return; }  // 动画未落定，重置节奏
+  aiCooldown -= dt;
+  if (aiCooldown > 0) return;
+  aiCooldown = AI_THINK_DELAY;
   requestAI();
 }
 
@@ -203,9 +222,16 @@ async function requestAI() {
   const fen = gs.board.toFen();
   try {
     const res = await aiEngine.think(fen, aiSide);
-    if (!res || !res.from || !res.to) return;
     if (gameOver || gs.sideToMove !== aiSide) return;
-    // 先放开 AI 锁，落子动画会用 animator 锁接管输入
+    if (!res || !res.from || !res.to) {
+      // AI 无着可走。正常情况下 gs 早已判定将死/困毙并结束对局，
+      // 能走到这里说明逻辑状态与 AI 认知不同步——重判一次兜底，别让回合死等。
+      console.warn('[AI] 未返回着法，重新判定局面：', gs.status);
+      if (gs.isGameOver()) onGameOver();
+      return;
+    }
+    // 先解锁 AI：落子后的输入拦截交给 animator 的锁接管。
+    // 万一此刻 animator 仍忙导致 applyMove 空转，pumpAI 下一帧会自动重试。
     aiBusy = false;
     applyMove(res.from, res.to);
   } catch (e) {
@@ -264,7 +290,7 @@ function doReset() {
   SFX.play('start');
   syncControls();
   openingAnimation();
-  setTimeout(maybeRequestAI, 220);      // AI 执黑，正常由人类先手，这里仅兜底
+  aiCooldown = 0.9;                     // 开局动画期间不打扰；之后由 pumpAI 接管
 }
 
 function doResign() {
@@ -280,9 +306,7 @@ function toggleAI() {
   aiEnabled = !aiEnabled;
   hud.showToast(aiEnabled ? '已开启人机对战（你执红）' : '已切换为双人对战', 'info', 2.0);
   syncControls();
-  if (aiEnabled && !gameOver && gs.sideToMove === aiSide && !animator.isBusy) {
-    setTimeout(maybeRequestAI, 80);
-  }
+  // 若切回人机且此刻正轮到 AI，pumpAI 会在下一帧自动接手
 }
 
 function setDifficulty(level) {
@@ -570,6 +594,7 @@ function startLoop() {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     updateTweens(dt);                 // animator.update
+    pumpAI(dt);                       // 回合泵：轮到 AI 且动画落定时自动请求走子
     if (input) input.update();        // 悬停射线
     if (effects) effects.update(dt);  // 粒子 / 涟漪 / 标记 / 脉冲
     if (sceneSys) { sceneSys.update(dt); sceneSys.render(); }
