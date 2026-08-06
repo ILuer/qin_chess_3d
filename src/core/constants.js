@@ -292,6 +292,7 @@ export function hexToCss(hex) {
 export const TIMING = {
   moveDuration: 0.38,       // 普通移动
   captureLunge: 0.12,       // 吃子冲刺
+  strikeRecoil: 0.18,       // 吃子斩杀姿态（前刺回弹）时长
   captureDissolve: 0.42,    // 被吃方消散
   liftHeight: 0.85,         // 抛物线最高点相对高度
   squashDuration: 0.16,     // 落子回弹

@@ -9,9 +9,18 @@
  *   'N' 马     → 骑兵：人骑在马上，马四腿前腿抬起，骑手持长戟斜指
  *   'B' 象/相  → 书生：进贤冠 + 宽袖深衣，双手捧简牍，无兵器
  *   'A' 士/仕  → 卫兵：武弁 + 筒袖铠，双手拄剑于身前，笔直对称
- *   'R' 车     → 双轮古战车：8 辐大轮 + 车舆栏板 + 车辕衡轭 + 小旗
- *   'C' 炮     → 抛石车：A 字木架 + 斜指天空的抛杆 + 配重箱 + 石弹
- *   'K' 将/帅  → 主帅：披风 + 鱼鳞甲 + 鹖冠立缨 + 按剑 + 帅旗
+ *   'R' 车     → 双马战车：两匹战马并排 + 车舆 + 御马兵 + 持戈兵 + 小旗
+ *   'C' 炮     → 抛石车（修正朝向）：A 字木架 + 抛杆朝前 + 配重箱 + 两名操作士兵
+ *   'K' 将/帅  → 主帅端坐龙椅：龙椅（扶手/椅背/底座）+ 坐姿人物 + 鹖冠立缨 + 帅旗
+ *
+ * 阶段二分组契约（为阶段三动画预留）：
+ *   K: root > orient > { base, body(坐姿人物), throne(龙椅) }
+ *   C: root > orient > { base, trebuchet(抛石机), soldierL(左兵), soldierR(右兵) }
+ *   R: root > orient > { base, horses(双马), body(车体), driver(御马兵), spearman(持戈兵) }
+ *   其他: root > orient > { base, ...merged meshes... }
+ *
+ *   orient 继承阵营旋转（红方朝 -Z，黑方绕 Y 转 180°）。
+ *   子 Group 通过 root.userData.subGroups 或 orient.getObjectByName(name) 访问。
  *
  * 契约导出：
  *   createPieceMesh(type, side) -> THREE.Group
@@ -47,7 +56,7 @@ export const PIECE_GLYPH = {
 };
 
 /** 各类型标称总高（含最高装饰） */
-export const PIECE_TOP_Y = { P: 0.79, N: 0.95, B: 0.88, A: 0.88, R: 0.92, C: 1.00, K: 1.05 };
+export const PIECE_TOP_Y = { P: 0.79, N: 0.95, B: 0.88, A: 0.88, R: 1.08, C: 1.02, K: 1.12 };
 
 /* ============================================================
  * 几何体简写
@@ -114,7 +123,6 @@ class Parts {
     const g = new THREE.CylinderGeometry(
       rTop, (rBot === undefined ? rTop : rBot), len, seg || 8, 1
     );
-    // 默认 +Y 朝向 A→B 的反方向修正：几何体 +Y 端对应 rTop
     const q = new THREE.Quaternion().setFromUnitVectors(_up, dir.clone().negate());
     g.applyMatrix4(new THREE.Matrix4().compose(mid, q, new THREE.Vector3(1, 1, 1)));
     this.list.push({ geom: g, mat: mat });
@@ -138,7 +146,7 @@ class Parts {
         merged = geos[0];
       } else {
         merged = mergeGeometries(geos, false);
-        if (!merged) { merged = geos[0]; }       // 极端兜底
+        if (!merged) { merged = geos[0]; }
         else { for (const g of geos) g.dispose(); }
       }
       merged.computeBoundingSphere();
@@ -149,6 +157,36 @@ class Parts {
     }
     this.list.length = 0;
     return out;
+  }
+}
+
+/* ============================================================
+ * 多分组零件收集器（阶段二：K/C/R 使用命名子组）
+ * ============================================================ */
+
+class MultiParts {
+  constructor() {
+    this.groups = new Map();
+    /** 默认组名（底座等公共零件归入此组，最终放入 orient 层） */
+    this.defaultName = '_base';
+  }
+
+  /** 取指定名称的 Parts 收集器；不存在则创建 */
+  get(name) {
+    if (!this.groups.has(name)) this.groups.set(name, new Parts());
+    return this.groups.get(name);
+  }
+
+  /** 默认收集器（用于底座、装饰环等不归属动画子组的零件） */
+  get base() { return this.get(this.defaultName); }
+
+  /** 全部构建 -> { groupName: [THREE.Mesh][] } */
+  buildAll() {
+    const result = {};
+    for (const [name, parts] of this.groups) {
+      result[name] = parts.build();
+    }
+    return result;
   }
 }
 
@@ -383,205 +421,426 @@ function buildAdvisor(P, M, K) {
 }
 
 /* ============================================================
- * 'R' 车 —— 双轮古战车（车身沿 Z，车轮在左右）
+ * 'R' 车 —— 双马战车（两匹战马 + 车舆 + 御马兵 + 持戈兵）
+ * 分组：horses | body(车体) | driver(御马兵) | spearman(持戈兵)
  * ============================================================ */
 
-function buildChariot(P, M, K, side) {
-  const WR = 0.240, TUBE = 0.026, WX = 0.285;
-  const HUB = FOOT + WR + TUBE;      // 0.352
+function buildChariot(mp, M, K, side) {
+  const PB = mp.base;       // 底座等公共零件
+  const Ph = mp.get('horses'); // 双马
+  const Pc = mp.get('body');   // 车体
+  const Pd = mp.get('driver'); // 御马兵
+  const Ps = mp.get('spearman');// 持戈兵
+
+  /* ======== 车轮（放在 base 组，随整体旋转）======== */
+  const WR = 0.220, TUBE = 0.024, WX = 0.260;
+  const HUB = FOOT + WR + TUBE;
 
   for (let s = -1; s <= 1; s += 2) {
     const x = WX * s;
-    // 轮辋 + 内圈
-    P.add(tor(WR, TUBE, 8, 20), M.wood, { pos: [x, HUB, 0], rot: [0, Math.PI / 2, 0] });
-    P.add(tor(WR - 0.028, 0.011, 5, 18), M.woodDeep, { pos: [x, HUB, 0], rot: [0, Math.PI / 2, 0] });
-    // 8 辐（4 根通杆）
+    PB.add(tor(WR, TUBE, 8, 18), M.wood, { pos: [x, HUB, 0], rot: [0, Math.PI / 2, 0] });
+    PB.add(tor(WR - 0.024, 0.010, 5, 16), M.woodDeep, { pos: [x, HUB, 0], rot: [0, Math.PI / 2, 0] });
     for (let k = 0; k < 4; k++) {
-      P.add(box(0.020, WR * 1.92, 0.020), M.wood, { pos: [x, HUB, 0], rot: [(k * Math.PI) / 4, 0, 0] });
+      PB.add(box(0.018, WR * 1.88, 0.018), M.wood, { pos: [x, HUB, 0], rot: [(k * Math.PI) / 4, 0, 0] });
     }
-    // 毂 + 軎
-    P.add(cyl(0.050, 0.050, 0.076, 12), M.woodDeep, { pos: [x, HUB, 0], rot: [0, 0, Math.PI / 2] });
-    P.add(sph(0.036, 10, 8), M.accentDim, { pos: [x * 1.14, HUB, 0] });
+    PB.add(cyl(0.044, 0.044, 0.068, 12), M.woodDeep, { pos: [x, HUB, 0], rot: [0, 0, Math.PI / 2] });
+    PB.add(sph(0.032, 10, 8), M.accentDim, { pos: [x * 1.12, HUB, 0] });
   }
-  // 车轴
-  P.add(cyl(0.026, 0.026, 0.600, 10), M.wood, { pos: [0, HUB, 0], rot: [0, 0, Math.PI / 2] });
+  PB.add(cyl(0.024, 0.024, 0.540, 10), M.wood, { pos: [0, HUB, 0], rot: [0, 0, Math.PI / 2] });
 
+  /* ======== 车体（body 组）======== */
   // 车舆（方形栏板车厢，前低后高）
-  P.add(box(0.340, 0.028, 0.300), M.wood, { pos: [0, 0.402, 0.020] });
-  P.add(box(0.340, 0.150, 0.024), M.wood, { pos: [0, 0.486, 0.166] });
-  P.add(box(0.024, 0.118, 0.300), M.wood, { pos: [0.158, 0.470, 0.020] });
-  P.add(box(0.024, 0.118, 0.300), M.wood, { pos: [-0.158, 0.470, 0.020] });
-  P.add(box(0.340, 0.076, 0.024), M.wood, { pos: [0, 0.450, -0.128] });
+  Pc.add(box(0.310, 0.026, 0.270), M.wood, { pos: [0, 0.392, 0.018] });
+  Pc.add(box(0.310, 0.130, 0.022), M.wood, { pos: [0, 0.472, 0.148] });
+  Pc.add(box(0.022, 0.105, 0.270), M.wood, { pos: [0.144, 0.458, 0.018] });
+  Pc.add(box(0.022, 0.105, 0.270), M.wood, { pos: [-0.144, 0.458, 0.018] });
+  Pc.add(box(0.310, 0.066, 0.022), M.wood, { pos: [0, 0.440, -0.114] });
   // 栏杆立柱
-  P.add(cyl(0.013, 0.013, 0.140, 8), M.woodDeep, { pos: [0.152, 0.486, 0.150] });
-  P.add(cyl(0.013, 0.013, 0.140, 8), M.woodDeep, { pos: [-0.152, 0.486, 0.150] });
-  P.add(cyl(0.013, 0.013, 0.110, 8), M.woodDeep, { pos: [0.152, 0.470, -0.116] });
-  P.add(cyl(0.013, 0.013, 0.110, 8), M.woodDeep, { pos: [-0.152, 0.470, -0.116] });
+  Pc.add(cyl(0.012, 0.012, 0.120, 8), M.woodDeep, { pos: [0.138, 0.472, 0.134] });
+  Pc.add(cyl(0.012, 0.012, 0.120, 8), M.woodDeep, { pos: [-0.138, 0.472, 0.134] });
+  Pc.add(cyl(0.012, 0.012, 0.095, 8), M.woodDeep, { pos: [0.138, 0.458, -0.104] });
+  Pc.add(cyl(0.012, 0.012, 0.095, 8), M.woodDeep, { pos: [-0.138, 0.458, -0.104] });
   // 上沿包边
-  P.add(box(0.352, 0.018, 0.018), M.accentDim, { pos: [0, 0.564, 0.166] });
+  Pc.add(box(0.320, 0.016, 0.016), M.accentDim, { pos: [0, 0.544, 0.148] });
 
-  // 车辕 + 衡 + 轭
-  P.strut(M.wood, [0, 0.388, 0.090], [0, 0.470, -0.372], 0.024, 0.018, 8);
-  P.add(cyl(0.015, 0.015, 0.300, 8), M.wood, { pos: [0, 0.472, -0.362], rot: [0, 0, Math.PI / 2] });
-  P.strut(M.woodDeep, [0.086, 0.464, -0.362], [0.114, 0.362, -0.352], 0.012, 0.012, 6);
-  P.strut(M.woodDeep, [-0.086, 0.464, -0.362], [-0.114, 0.362, -0.352], 0.012, 0.012, 6);
-  P.add(sph(0.030, 10, 8), M.accent, { pos: [0, 0.478, -0.382] });
+  // 车辕 + 衡 + 轭（连接马匹方向，朝向 -Z 即前方）
+  Pc.strut(M.wood, [0, 0.378, 0.080], [0, 0.456, -0.340], 0.022, 0.016, 8);
+  Pc.add(cyl(0.013, 0.013, 0.270, 8), M.wood, { pos: [0, 0.458, -0.330], rot: [0, 0, Math.PI / 2] });
+  Pc.strut(M.woodDeep, [0.078, 0.450, -0.330], [0.104, 0.350, -0.320], 0.011, 0.011, 6);
+  Pc.strut(M.woodDeep, [-0.078, 0.450, -0.330], [-0.104, 0.350, -0.320], 0.011, 0.011, 6);
 
   // 车旗
-  P.add(cyl(0.012, 0.014, 0.450, 8), M.woodDeep, { pos: [0.116, 0.632, 0.146] });
-  P.strut(M.accent, [0.116, 0.912, 0.146], [0.116, 0.856, 0.146], 0.000, 0.018, 8);
-  P.add(
-    curvedBanner(0.200, 0.150, 0.030),
+  Pc.add(cyl(0.010, 0.012, 0.400, 8), M.woodDeep, { pos: [0.104, 0.610, 0.130] });
+  Pc.strut(M.accent, [0.104, 0.872, 0.130], [0.104, 0.818, 0.130], 0.000, 0.016, 8);
+  Pc.add(
+    curvedBanner(0.175, 0.130, 0.026, 8),
     getBannerMaterial(PIECE_GLYPH[side].R, side),
-    { pos: [0.116, 0.760, 0.044], rot: [0, Math.PI / 2, 0] }
+    { pos: [0.104, 0.736, 0.038], rot: [0, Math.PI / 2, 0] }
   );
+
+  /* ======== 双马（horses 组，在车前方 -Z 方向）======== */
+  // 左马（略靠后）
+  const hxL = -0.110, hzL = -0.520;
+  buildOneHorse(Ph, M, K, hxL, hzL, 0.95);
+  // 右马（略靠前，形成前后错落）
+  const hxR = 0.110, hzR = -0.480;
+  buildOneHorse(Ph, M, K, hxR, hzR, 0.98);
+
+  /* ======== 御马兵（driver 组，站在车舆内偏前）======== */
+  buildDriver(Pd, M, K, 0.040, 0.420, 0.85);
+
+  /* ======== 持戈兵（spearman 组，站在车舆后方）======== */
+  buildSpearman(Ps, M, K, -0.060, 0.400, 0.88);
+}
+
+/** 单匹战马（复用给车用，缩放版） */
+function buildOneHorse(P, M, K, ox, oz, scl) {
+  const s = scl || 1.0;
+  const hide = M.leather;
+  // 马身
+  P.add(sph(0.108 * s, 12, 8), hide, { pos: [ox, 0.295 * s + 0.086, oz + 0.012 * s], scale: [0.76*s, 0.80*s, 1.36*s] });
+  P.add(sph(0.092 * s, 10, 7), hide, { pos: [ox, 0.308 * s + 0.086, oz - 0.120 * s], scale: [0.84*s, 0.88*s, 0.88*s] });
+  P.add(sph(0.096 * s, 10, 7), hide, { pos: [ox, 0.296 * s + 0.086, oz + 0.134 * s], scale: [0.88*s, 0.92*s, 0.88*s] });
+  // 颈 + 头
+  P.strut(hide, [ox, 0.500 * s + 0.086, oz - 0.200 * s], [ox, 0.345 * s + 0.086, oz - 0.108 * s], 0.040 * s, 0.066 * s, 9);
+  P.add(sph(0.044 * s, 9, 7), hide, { pos: [ox, 0.500 * s + 0.086, oz - 0.234 * s], scale: [0.78*s, 0.92*s, 1.36*s] });
+  P.add(sph(0.028 * s, 7, 5), hide, { pos: [ox, 0.470 * s + 0.086, oz - 0.284 * s], scale: [0.83*s, 0.77*s, 0.96*s] });
+  // 耳
+  P.add(cyl(0.000, 0.014 * s, 0.036 * s, 5), hide, { pos: [ox + 0.022 * s, 0.542 * s + 0.086, oz - 0.202 * s], rot: [-0.2, 0, 0.15] });
+  P.add(cyl(0.000, 0.014 * s, 0.036 * s, 5), hide, { pos: [ox - 0.022 * s, 0.542 * s + 0.086, oz - 0.202 * s], rot: [-0.2, 0, -0.15] });
+  // 鬃毛
+  P.add(box(0.011 * s, 0.048 * s, 0.040 * s), K.hair, { pos: [ox, 0.540 * s + 0.086, oz - 0.192 * s], rot: [0.45, 0, 0] });
+  P.add(box(0.011 * s, 0.052 * s, 0.040 * s), K.hair, { pos: [ox, 0.504 * s + 0.086, oz - 0.156 * s], rot: [0.55, 0, 0] });
+  // 马面帘
+  P.add(box(0.048 * s, 0.060 * s, 0.014 * s), M.armor, { pos: [ox, 0.504 * s + 0.086, oz - 0.284 * s], rot: [0.12, 0, 0] });
+  // 四腿（奔腾姿态：左前右后抬起）
+  P.strut(hide, [ox + 0.062 * s, 0.250 * s + 0.086, oz - 0.116 * s],
+          [ox + 0.088 * s, 0.086, oz - 0.216 * s], 0.024 * s, 0.020 * s, 8);
+  P.strut(hide, [ox - 0.062 * s, 0.250 * s + 0.086, oz - 0.116 * s],
+          [ox - 0.066 * s, 0.086, oz - 0.140 * s], 0.024 * s, 0.020 * s, 8);
+  P.strut(hide, [ox + 0.064 * s, 0.250 * s + 0.086, oz + 0.136 * s],
+          [ox + 0.068 * s, 0.086, oz + 0.172 * s], 0.025 * s, 0.021 * s, 8);
+  P.strut(hide, [ox - 0.064 * s, 0.250 * s + 0.086, oz + 0.136 * s],
+          [ox - 0.090 * s, 0.086, oz + 0.168 * s], 0.025 * s, 0.021 * s, 8);
+  // 尾
+  P.strut(K.hair, [ox, 0.350 * s + 0.086, oz + 0.196 * s],
+          [ox, 0.164 * s + 0.086, oz + 0.272 * s], 0.024 * s, 0.008 * s, 8);
+  // 鞍
+  P.add(cyl(0.080 * s, 0.088 * s, 0.044 * s, 10), M.cloth,
+    { pos: [ox, 0.364 * s + 0.086, oz + 0.016 * s], scale: [1, 1, 1.38*s] });
+}
+
+/** 御马兵（站姿，双手握缰绳状） */
+function buildDriver(P, M, K, ox, oz, s) {
+  const sc = s || 1.0;
+  // 下身（简化为裙甲）
+  P.add(cyl(0.058 * sc, 0.080 * sc, 0.160 * sc, 10), M.clothDeep, { pos: [ox, 0.080 * sc + 0.086, oz] });
+  P.add(tor(0.080 * sc, 0.012 * sc, 4, 12), M.leather, { pos: [ox, 0.156 * sc + 0.086, oz], rot: [Math.PI / 2, 0, 0] });
+  // 躯干
+  P.add(cyl(0.056 * sc, 0.066 * sc, 0.140 * sc, 10), M.armorDeep, { pos: [ox, 0.256 * sc + 0.086, oz] });
+  P.add(cyl(0.068 * sc, 0.072 * sc, 0.018 * sc, 10), M.armor, { pos: [ox, 0.216 * sc + 0.086, oz] });
+  P.add(cyl(0.066 * sc, 0.070 * sc, 0.018 * sc, 10), M.armor, { pos: [ox, 0.264 * sc + 0.086, oz] });
+  // 肩
+  P.add(sph(0.038 * sc, 9, 7), M.armorDeep, { pos: [ox + 0.072 * sc, 0.308 * sc + 0.086, oz] });
+  P.add(sph(0.038 * sc, 9, 7), M.armorDeep, { pos: [ox - 0.072 * sc, 0.308 * sc + 0.086, oz] });
+  // 颈 + 头
+  P.add(cyl(0.026 * sc, 0.028 * sc, 0.024 * sc, 8), M.accentDim, { pos: [ox, 0.350 * sc + 0.086, oz] });
+  P.add(cyl(0.024 * sc, 0.026 * sc, 0.028 * sc, 8), M.skin, { pos: [ox, 0.376 * sc + 0.086, oz] });
+  P.add(sph(0.044 * sc, 10, 8), M.skin, { pos: [ox, 0.416 * sc + 0.086, oz - 0.004 * sc] });
+  // 兜鍪
+  P.add(dome(0.042 * sc, 10, 6, 0.56), M.armor, { pos: [ox, 0.436 * sc + 0.086, oz - 0.004 * sc] });
+  // 双臂前伸（握缰绳姿态）
+  P.strut(M.armorDeep, [ox + 0.068 * sc, 0.304 * sc + 0.086, oz],
+          [ox + 0.128 * sc, 0.248 * sc + 0.086, oz - 0.064 * sc], 0.024 * sc, 0.020 * sc, 8);
+  P.strut(M.armorDeep, [ox - 0.068 * sc, 0.304 * sc + 0.086, oz],
+          [ox - 0.112 * sc, 0.252 * sc + 0.086, oz - 0.056 * sc], 0.024 * sc, 0.020 * sc, 8);
+  P.add(sph(0.026 * sc, 9, 7), M.skin, { pos: [ox + 0.130 * sc, 0.244 * sc + 0.086, oz - 0.066 * sc] });
+  P.add(sph(0.026 * sc, 9, 7), M.skin, { pos: [ox - 0.114 * sc, 0.248 * sc + 0.086, oz - 0.058 * sc] });
+}
+
+/** 持戈兵（站姿，双手持长戈） */
+function buildSpearman(P, M, K, ox, oz, s) {
+  const sc = s || 1.0;
+  // 下身
+  P.add(cyl(0.060 * sc, 0.082 * sc, 0.165 * sc, 10), M.clothDeep, { pos: [ox, 0.082 * sc + 0.086, oz] });
+  P.add(tor(0.082 * sc, 0.012 * sc, 4, 12), M.leather, { pos: [ox, 0.162 * sc + 0.086, oz], rot: [Math.PI / 2, 0, 0] });
+  // 躯干
+  P.add(cyl(0.058 * sc, 0.068 * sc, 0.145 * sc, 10), M.armorDeep, { pos: [ox, 0.258 * sc + 0.086, oz] });
+  P.add(cyl(0.070 * sc, 0.074 * sc, 0.018 * sc, 10), M.armor, { pos: [ox, 0.218 * sc + 0.086, oz] });
+  P.add(cyl(0.068 * sc, 0.072 * sc, 0.018 * sc, 10), M.armor, { pos: [ox, 0.266 * sc + 0.086, oz] });
+  // 肩
+  P.add(sph(0.040 * sc, 9, 7), M.armorDeep, { pos: [ox + 0.074 * sc, 0.310 * sc + 0.086, oz] });
+  P.add(sph(0.040 * sc, 9, 7), M.armorDeep, { pos: [ox - 0.074 * sc, 0.310 * sc + 0.086, oz] });
+  // 颈 + 头
+  P.add(cyl(0.026 * sc, 0.028 * sc, 0.024 * sc, 8), M.accentDim, { pos: [ox, 0.352 * sc + 0.086, oz] });
+  P.add(cyl(0.024 * sc, 0.026 * sc, 0.028 * sc, 8), M.skin, { pos: [ox, 0.378 * sc + 0.086, oz] });
+  P.add(sph(0.044 * sc, 10, 8), M.skin, { pos: [ox, 0.418 * sc + 0.086, oz - 0.004 * sc] });
+  // 兜鍪
+  P.add(dome(0.042 * sc, 10, 6, 0.56), M.armor, { pos: [ox, 0.438 * sc + 0.086, oz - 0.004 * sc] });
+  // 右臂前伸持戈
+  P.strut(M.armorDeep, [ox + 0.070 * sc, 0.306 * sc + 0.086, oz],
+          [ox + 0.124 * sc, 0.272 * sc + 0.086, oz - 0.084 * sc], 0.024 * sc, 0.020 * sc, 8);
+  P.add(sph(0.026 * sc, 9, 7), M.skin, { pos: [ox + 0.126 * sc, 0.268 * sc + 0.086, oz - 0.086 * sc] });
+  // 长戈（斜指右上方）
+  P.add(cyl(0.010 * sc, 0.012 * sc, 0.480 * sc, 8), M.woodDeep,
+    { pos: [ox + 0.122 * sc, 0.340 * sc + 0.086, oz - 0.080 * sc], rot: [-0.55, 0, 0] });
+  P.add(box(0.096 * sc, 0.024 * sc, 0.010 * sc), K.bronze,
+    { pos: [ox + 0.168 * sc, 0.540 * sc + 0.086, oz - 0.106 * sc], rot: [0, 0, -0.10] });
+  P.add(box(0.044 * sc, 0.018 * sc, 0.010 * sc), K.bronze,
+    { pos: [ox + 0.094 * sc, 0.528 * sc + 0.086, oz - 0.106 * sc] });
+  // 左臂垂放
+  P.strut(M.armorDeep, [ox - 0.070 * sc, 0.306 * sc + 0.086, oz],
+          [ox - 0.102 * sc, 0.210 * sc + 0.086, oz - 0.044 * sc], 0.024 * sc, 0.020 * sc, 8);
+  P.add(sph(0.026 * sc, 9, 7), M.skin, { pos: [ox - 0.104 * sc, 0.206 * sc + 0.086, oz - 0.046 * sc] });
 }
 
 /* ============================================================
- * 'C' 炮 —— 抛石车（A 字架 + 斜指天空的抛杆）
+ * 'C' 炮 —— 抛石车（修正朝向：抛杆朝前进方向 -Z）
+ * 分组：trebuchet | soldierL(左兵) | soldierR(右兵)
  * ============================================================ */
 
-function buildCannon(P, M, K, side) {
-  const PIV = 0.500;      // 横轴（支点）高度
-  const ANG = -Math.PI / 6;  // 抛杆与竖直方向夹角（向 -Z 倾）
-  const dirY = Math.cos(Math.PI / 6);   // 0.866
-  const dirZ = -Math.sin(Math.PI / 6);  // -0.5
-  const LONG = 0.560, SHORT = 0.300;
+function buildCannon(mp, M, K, side) {
+  const PB = mp.base;           // 底座等公共零件
+  const Pt = mp.get('trebuchet');// 抛石机本体
+  const PL = mp.get('soldierL'); // 左侧士兵
+  const PR = mp.get('soldierR'); // 右侧士兵
 
-  // 木质基座
-  P.add(box(0.045, 0.045, 0.520), M.wood, { pos: [0.155, FOOT + 0.022, 0] });
-  P.add(box(0.045, 0.045, 0.520), M.wood, { pos: [-0.155, FOOT + 0.022, 0] });
-  P.add(box(0.356, 0.040, 0.045), M.wood, { pos: [0, FOOT + 0.022, 0.200] });
-  P.add(box(0.356, 0.040, 0.045), M.wood, { pos: [0, FOOT + 0.022, -0.200] });
+  const PIV = 0.480;            // 横轴（支点）高度
+  // ★ 修正：抛杆与竖直方向夹角为 -π/6（向 -Z 倾 = 前进方向），
+  //   长端（投掷端）指向 -Z，短端（配重端）留在 +Z 后方。
+  const ANG = -Math.PI / 6;
+  const dirY = Math.cos(ANG);   //  0.866
+  const dirZ = Math.sin(ANG);   // -0.500 （短端/配重端在 +Z）
+  const LONG = 0.540, SHORT = 0.290;
+
+  /* ======== 木质基座（trebuchet 组）======== */
+  Pt.add(box(0.042, 0.042, 0.480), M.wood, { pos: [0.145, FOOT + 0.020, 0] });
+  Pt.add(box(0.042, 0.042, 0.480), M.wood, { pos: [-0.145, FOOT + 0.020, 0] });
+  Pt.add(box(0.334, 0.038, 0.042), M.wood, { pos: [0, FOOT + 0.020, 0.185] });
+  Pt.add(box(0.334, 0.038, 0.042), M.wood, { pos: [0, FOOT + 0.020, -0.185] });
+
   // 铁角
-  P.add(box(0.050, 0.030, 0.050), M.accentDim, { pos: [0.155, FOOT + 0.044, 0.200] });
-  P.add(box(0.050, 0.030, 0.050), M.accentDim, { pos: [-0.155, FOOT + 0.044, 0.200] });
-  P.add(box(0.050, 0.030, 0.050), M.accentDim, { pos: [0.155, FOOT + 0.044, -0.200] });
-  P.add(box(0.050, 0.030, 0.050), M.accentDim, { pos: [-0.155, FOOT + 0.044, -0.200] });
-  // A 字形支架（两侧各一组）
-  P.strut(M.wood, [0.155, 0.125, 0.185], [0.155, PIV, 0], 0.023, 0.019, 8);
-  P.strut(M.wood, [0.155, 0.125, -0.185], [0.155, PIV, 0], 0.023, 0.019, 8);
-  P.strut(M.wood, [-0.155, 0.125, 0.185], [-0.155, PIV, 0], 0.023, 0.019, 8);
-  P.strut(M.wood, [-0.155, 0.125, -0.185], [-0.155, PIV, 0], 0.023, 0.019, 8);
-  // 牵引拉索
-  P.strut(K.rope, [0.155, PIV - 0.030, 0], [0.062, 0.130, 0.200], 0.007, 0.007, 6);
-  P.strut(K.rope, [-0.155, PIV - 0.030, 0], [-0.062, 0.130, 0.200], 0.007, 0.007, 6);
-  // 横轴 + 轴承
-  P.add(cyl(0.021, 0.021, 0.400, 10), K.bronzeDark, { pos: [0, PIV, 0], rot: [0, 0, Math.PI / 2] });
-  P.add(cyl(0.040, 0.040, 0.028, 10), M.accentDim, { pos: [0.155, PIV, 0], rot: [0, 0, Math.PI / 2] });
-  P.add(cyl(0.040, 0.040, 0.028, 10), M.accentDim, { pos: [-0.155, PIV, 0], rot: [0, 0, Math.PI / 2] });
+  Pt.add(box(0.046, 0.028, 0.046), M.accentDim, { pos: [0.145, FOOT + 0.040, 0.185] });
+  Pt.add(box(0.046, 0.028, 0.046), M.accentDim, { pos: [-0.145, FOOT + 0.040, 0.185] });
+  Pt.add(box(0.046, 0.028, 0.046), M.accentDim, { pos: [0.145, FOOT + 0.040, -0.185] });
+  Pt.add(box(0.046, 0.028, 0.046), M.accentDim, { pos: [-0.145, FOOT + 0.040, -0.185] });
 
-  // 抛杆（长端斜指天空）
+  // A 字形支架
+  Pt.strut(M.wood, [0.145, 0.118, 0.170], [0.145, PIV, 0], 0.022, 0.018, 8);
+  Pt.strut(M.wood, [0.145, 0.118, -0.170], [0.145, PIV, 0], 0.022, 0.018, 8);
+  Pt.strut(M.wood, [-0.145, 0.118, 0.170], [-0.145, PIV, 0], 0.022, 0.018, 8);
+  Pt.strut(M.wood, [-0.145, 0.118, -0.170], [-0.145, PIV, 0], 0.022, 0.018, 8);
+
+  // 牵引拉索
+  Pt.strut(K.rope, [0.145, PIV - 0.028, 0], [0.058, 0.122, 0.185], 0.007, 0.007, 6);
+  Pt.strut(K.rope, [-0.145, PIV - 0.028, 0], [-0.058, 0.122, 0.185], 0.007, 0.007, 6);
+
+  // 横轴 + 轴承
+  Pt.add(cyl(0.020, 0.020, 0.380, 10), K.bronzeDark, { pos: [0, PIV, 0], rot: [0, 0, Math.PI / 2] });
+  Pt.add(cyl(0.038, 0.038, 0.026, 10), M.accentDim, { pos: [0.145, PIV, 0], rot: [0, 0, Math.PI / 2] });
+  Pt.add(cyl(0.038, 0.038, 0.026, 10), M.accentDim, { pos: [-0.145, PIV, 0], rot: [0, 0, Math.PI / 2] });
+
+  // 抛杆（★ 修正角度：长端斜指 -Z 方向 = 前进方向）
   const off = (LONG - SHORT) / 2;
-  P.add(cyl(0.017, 0.021, LONG + SHORT, 10), M.wood, {
+  Pt.add(cyl(0.016, 0.020, LONG + SHORT, 10), M.wood, {
     pos: [0, PIV + off * dirY, off * dirZ], rot: [ANG, 0, 0]
   });
-  P.add(cyl(0.026, 0.026, 0.020, 10), M.accentDim, {
-    pos: [0, PIV + 0.180 * dirY, 0.180 * dirZ], rot: [ANG, 0, 0]
+  Pt.add(cyl(0.024, 0.024, 0.018, 10), M.accentDim, {
+    pos: [0, PIV + 0.170 * dirY, 0.170 * dirZ], rot: [ANG, 0, 0]
   });
-  P.add(cyl(0.026, 0.026, 0.020, 10), M.accentDim, {
-    pos: [0, PIV - 0.170 * dirY, -0.170 * dirZ], rot: [ANG, 0, 0]
+  Pt.add(cyl(0.024, 0.024, 0.018, 10), M.accentDim, {
+    pos: [0, PIV - 0.160 * dirY, -0.160 * dirZ], rot: [ANG, 0, 0]
   });
 
-  const tipY = PIV + LONG * dirY;         // ≈ 0.985
-  const tipZ = LONG * dirZ;               // ≈ -0.280
-  const btmY = PIV - SHORT * dirY;        // ≈ 0.240
-  const btmZ = -SHORT * dirZ;             // ≈ +0.150
+  const tipY = PIV + LONG * dirY;         // ≈ 0.948
+  const tipZ = LONG * dirZ;               // ≈ -0.270 （前端！）
+  const btmY = PIV - SHORT * dirY;        // ≈ 0.229
+  const btmZ = -SHORT * dirZ;             // ≈ +0.145 （配重端在后）
 
-  // 皮索 + 抛兜 + 石弹
-  P.strut(K.rope, [0.030, tipY, tipZ], [0.030, 0.892, tipZ - 0.058], 0.006, 0.006, 6);
-  P.strut(K.rope, [-0.030, tipY, tipZ], [-0.030, 0.892, tipZ - 0.058], 0.006, 0.006, 6);
-  P.add(sph(0.048, 10, 8), K.leather, { pos: [0, 0.878, tipZ - 0.056], scale: [1, 0.68, 1.1] });
-  P.add(sph(0.042, 10, 8), K.stone, { pos: [0, 0.906, tipZ - 0.056] });
+  // 皮索 + 抛兜 + 石弹（在长端/前端）
+  Pt.strut(K.rope, [0.028, tipY, tipZ], [0.028, tipY - 0.056, tipZ - 0.054], 0.006, 0.006, 6);
+  Pt.strut(K.rope, [-0.028, tipY, tipZ], [-0.028, tipY - 0.056, tipZ - 0.054], 0.006, 0.006, 6);
+  Pt.add(sph(0.044, 10, 8), K.leather, { pos: [0, tipY - 0.052, tipZ - 0.052], scale: [1, 0.66, 1.08] });
+  Pt.add(sph(0.038, 10, 8), K.stone, { pos: [0, tipY - 0.080, tipZ - 0.052] });
 
-  // 配重箱（悬于短端，箱底 0.133 > 底座顶 0.086，不穿模）
-  const cwY = 0.190, cwZ = btmZ + 0.006;
-  P.strut(K.rope, [0, 0.268, 0.134], [0.052, cwY + 0.052, cwZ + 0.014], 0.007, 0.007, 6);
-  P.strut(K.rope, [0, 0.268, 0.134], [-0.052, cwY + 0.052, cwZ + 0.014], 0.007, 0.007, 6);
-  P.add(box(0.145, 0.115, 0.132), M.woodDeep, { pos: [0, cwY, cwZ] });
-  P.add(box(0.150, 0.013, 0.137), M.accentDim, { pos: [0, cwY + 0.040, cwZ] });
-  P.add(box(0.150, 0.013, 0.137), M.accentDim, { pos: [0, cwY - 0.040, cwZ] });
+  // 配重箱（悬于短端/后端 +Z 侧）
+  const cwY = 0.182, cwZ = btmZ + 0.006;
+  Pt.strut(K.rope, [0, 0.256, 0.128], [0.048, cwY + 0.048, cwZ + 0.012], 0.007, 0.007, 6);
+  Pt.strut(K.rope, [0, 0.256, 0.128], [-0.048, cwY + 0.048, cwZ + 0.012], 0.007, 0.007, 6);
+  Pt.add(box(0.136, 0.106, 0.124), M.woodDeep, { pos: [0, cwY, cwZ] });
+  Pt.add(box(0.140, 0.012, 0.128), M.accentDim, { pos: [0, cwY + 0.038, cwZ] });
+  Pt.add(box(0.140, 0.012, 0.128), M.accentDim, { pos: [0, cwY - 0.038, cwZ] });
 
-  // 侧旗（阵营辨识）
-  P.add(cyl(0.009, 0.010, 0.250, 8), M.woodDeep, { pos: [0.186, 0.250, 0.200] });
-  P.add(
-    curvedBanner(0.130, 0.104, 0.022, 6),
+  // 侧旗
+  Pt.add(cyl(0.008, 0.009, 0.230, 8), M.woodDeep, { pos: [0.174, 0.238, 0.185] });
+  Pt.add(
+    curvedBanner(0.120, 0.096, 0.020, 6),
     getBannerMaterial(PIECE_GLYPH[side].C, side),
-    { pos: [0.186, 0.328, 0.135], rot: [0, Math.PI / 2, 0] }
+    { pos: [0.174, 0.312, 0.126], rot: [0, Math.PI / 2, 0] }
   );
+
+  /* ======== 左侧士兵（soldierL 组）======== */
+  buildCannonSoldier(PL, M, K, -0.195, 0.280, 0.84, 1);
+
+  /* ======== 右侧士兵（soldierR 组）======== */
+  buildCannonSoldier(PR, M, K, 0.195, 0.280, 0.84, -1);
+}
+
+/** 炮兵（推车/操作绞盘姿态，mirrorX=-1 时镜像翻转） */
+function buildCannonSoldier(P, M, K, ox, oy, s, mirrorX) {
+  const sc = s || 0.85;
+  const mx = mirrorX || 1;
+  // 身体微微前倾，面向绞盘方向
+  // 下身（简化裙甲）
+  P.add(cyl(0.052 * sc, 0.072 * sc, 0.140 * sc, 10), M.clothDeep, { pos: [ox, oy + 0.070 * sc, 0] });
+  P.add(tor(0.072 * sc, 0.010 * sc, 4, 10), M.leather, { pos: [ox, oy + 0.138 * sc, 0], rot: [Math.PI / 2, 0, 0] });
+  // 躯干（前倾）
+  P.add(cyl(0.050 * sc, 0.060 * sc, 0.130 * sc, 10), M.armorDeep, { pos: [ox, oy + 0.222 * sc, 0.016 * mx] });
+  P.add(cyl(0.062 * sc, 0.066 * sc, 0.016 * sc, 10), M.armor, { pos: [ox, oy + 0.186 * sc, 0.016 * mx] });
+  P.add(cyl(0.060 * sc, 0.064 * sc, 0.016 * sc, 10), M.armor, { pos: [ox, oy + 0.228 * sc, 0.016 * mx] });
+  // 肩
+  P.add(sph(0.034 * sc, 9, 7), M.armorDeep, { pos: [ox + 0.062 * sc * mx, oy + 0.268 * sc, 0.016 * mx] });
+  P.add(sph(0.034 * sc, 9, 7), M.armorDeep, { pos: [ox - 0.062 * sc * mx, oy + 0.268 * sc, 0.016 * mx] });
+  // 颈 + 头（略微低头看绞盘）
+  P.add(cyl(0.024 * sc, 0.026 * sc, 0.022 * sc, 8), M.accentDim, { pos: [ox, oy + 0.304 * sc, 0.018 * mx] });
+  P.add(cyl(0.022 * sc, 0.024 * sc, 0.026 * sc, 8), M.skin, { pos: [ox, oy + 0.326 * sc, 0.018 * mx] });
+  P.add(sph(0.040 * sc, 10, 8), M.skin, { pos: [ox, oy + 0.362 * sc, 0.014 * mx] });
+  // 介帻帽
+  P.add(cyl(0.056 * sc, 0.060 * sc, 0.010 * sc, 12), M.clothDeep, { pos: [ox, oy + 0.392 * sc, 0.014 * mx] });
+  P.add(tor(0.048 * sc, 0.007 * sc, 4, 12), M.leather, { pos: [ox, oy + 0.398 * sc, 0.014 * mx], rot: [Math.PI / 2, 0, 0] });
+  // 双臂前伸（推车/转绞盘姿态）
+  P.strut(M.armorDeep, [ox + 0.058 * sc * mx, oy + 0.264 * sc, 0.016 * mx],
+          [ox + 0.110 * sc * mx, oy + 0.218 * sc, -0.048 * sc], 0.022 * sc, 0.018 * sc, 8);
+  P.strut(M.armorDeep, [ox - 0.058 * sc * mx, oy + 0.264 * sc, 0.016 * mx],
+          [ox - 0.096 * sc * mx, oy + 0.222 * sc, -0.038 * sc], 0.022 * sc, 0.018 * sc, 8);
+  P.add(sph(0.024 * sc, 9, 7), M.skin, { pos: [ox + 0.112 * sc * mx, oy + 0.214 * sc, -0.050 * sc] });
+  P.add(sph(0.024 * sc, 9, 7), M.skin, { pos: [ox - 0.098 * sc * mx, oy + 0.218 * sc, -0.040 * sc] });
 }
 
 /* ============================================================
- * 'K' 将/帅 —— 主帅（披风 + 鱼鳞甲 + 鹖冠 + 按剑 + 帅旗）
+ * 'K' 将/帅 —— 主帅端坐龙椅
+ * 分组：body(坐姿人物) | throne(龙椅)
  * ============================================================ */
 
-function buildKing(P, M, K, side) {
-  // 战靴
-  P.add(box(0.080, 0.045, 0.115), K.leatherDark, { pos: [0.058, FOOT + 0.022, -0.030] });
-  P.add(box(0.080, 0.045, 0.115), K.leatherDark, { pos: [-0.058, FOOT + 0.022, -0.030] });
-  // 甲裙
-  P.add(cyl(0.140, 0.176, 0.260, 16), M.armorDeep, { pos: [0, FOOT + 0.130, 0] });
-  P.add(cyl(0.160, 0.166, 0.024, 16), M.armor, { pos: [0, 0.186, 0] });
-  P.add(tor(0.142, 0.020, 6, 18), M.accent, { pos: [0, 0.358, 0], rot: [Math.PI / 2, 0, 0] });
-  // 鱼鳞甲躯干 + 五层鳞片
-  P.add(cyl(0.126, 0.144, 0.250, 16), M.armorDeep, { pos: [0, 0.486, 0] });
-  P.add(cyl(0.150, 0.154, 0.022, 16), M.armor, { pos: [0, 0.396, 0] });
-  P.add(cyl(0.148, 0.152, 0.022, 16), M.armor, { pos: [0, 0.450, 0] });
-  P.add(cyl(0.145, 0.149, 0.022, 16), M.armor, { pos: [0, 0.504, 0] });
-  P.add(cyl(0.141, 0.145, 0.022, 16), M.armor, { pos: [0, 0.556, 0] });
-  P.add(cyl(0.136, 0.140, 0.022, 16), M.armor, { pos: [0, 0.602, 0] });
+function buildKing(mp, M, K, side) {
+  const PB = mp.base;       // 底座等公共零件
+  const Pb = mp.get('body');   // 坐姿人物
+  const Pt = mp.get('throne'); // 龙椅
 
-  // 披风（覆盖背面 +Z 的车削壳体，向后下方展开）
+  const SEAT_Y = FOOT + 0.065; // 龙椅座位高度
+  const BODY_BOT = SEAT_Y + 0.020; // 人物臀部坐在椅面上
+
+  /* ======== 龙椅（throne 组）======== */
+  // 底座台阶（三层递减）
+  Pt.add(box(0.340, 0.045, 0.280), M.woodDeep, { pos: [0, FOOT + 0.022, 0] });
+  Pt.add(box(0.300, 0.040, 0.245), M.wood, { pos: [0, FOOT + 0.060, 0] });
+  Pt.add(box(0.260, 0.035, 0.210), M.wood, { pos: [0, FOOT + 0.095, 0] });
+  // 底座鎏金包边
+  Pt.add(box(0.348, 0.010, 0.288), M.accent, { pos: [0, FOOT + 0.044, 0] });
+  Pt.add(box(0.308, 0.008, 0.253), M.accentDim, { pos: [0, FOOT + 0.080, 0] });
+
+  // 椅座（厚垫）
+  Pt.add(box(0.230, 0.048, 0.190), M.clothDeep, { pos: [0, SEAT_Y, 0] });
+  Pt.add(box(0.238, 0.012, 0.198), M.accentDim, { pos: [0, SEAT_Y + 0.028, 0] });
+  Pt.add(box(0.238, 0.012, 0.198), M.accentDim, { pos: [0, SEAT_Y - 0.028, 0] });
+
+  // 椅背（高耸弧形靠背，秦式回纹镂空效果用分层表现）
+  Pt.add(box(0.220, 0.260, 0.028), M.woodDeep, { pos: [0, SEAT_Y + 0.148, -0.098] });
+  Pt.add(box(0.200, 0.230, 0.022), M.wood, { pos: [0, SEAT_Y + 0.138, -0.098] });
+  // 椅背顶部横梁（龙首装饰位）
+  Pt.add(box(0.240, 0.038, 0.036), M.wood, { pos: [0, SEAT_Y + 0.284, -0.098] });
+  Pt.add(box(0.248, 0.014, 0.044), M.accent, { pos: [0, SEAT_Y + 0.306, -0.098] });
+  // 椅背中央竖脊
+  Pt.add(box(0.028, 0.220, 0.018), M.accentDim, { pos: [0, SEAT_Y + 0.158, -0.108] });
+  // 椅背两侧云纹饰板
+  Pt.add(box(0.058, 0.140, 0.012), M.accent, { pos: [0.088, SEAT_Y + 0.128, -0.108] });
+  Pt.add(box(0.058, 0.140, 0.012), M.accent, { pos: [-0.088, SEAT_Y + 0.128, -0.108] });
+
+  // 扶手（左右各一，从椅座前角升起）
+  for (let s = -1; s <= 1; s += 2) {
+    const fx = 0.108 * s;
+    // 扶手支柱
+    Pt.strut(M.woodDeep, [fx, SEAT_Y + 0.024, 0.080], [fx, SEAT_Y + 0.148, 0.040], 0.018, 0.014, 8);
+    // 扶手横杆（圆棍）
+    Pt.add(cyl(0.014, 0.014, 0.155, 10), M.wood, {
+      pos: [fx, SEAT_Y + 0.156, 0.004], rot: [0, 0, s > 0 ? Math.PI / 2 : -Math.PI / 2]
+    });
+    // 扶手头部球饰（龙头简化）
+    Pt.add(sph(0.024, 10, 8), M.accent, { pos: [fx, SEAT_Y + 0.168, -0.068] });
+    // 扶手底部兽爪足
+    Pt.add(box(0.028, 0.028, 0.036), M.accentDim, { pos: [fx, FOOT + 0.012, 0.086] });
+  }
+
+  // 椅座前沿垂帘（暗红丝织）
+  Pt.add(box(0.200, 0.065, 0.014), M.capeCloth, { pos: [0, SEAT_Y - 0.052, 0.100] });
+
+  /* ======== 坐姿人物（body 组）======== */
+  // 臀部+大腿（简化为坐姿椭球，不可见或仅露边缘）
+  Pb.add(sph(0.090, 10, 8), M.clothDeep, { pos: [0, BODY_BOT - 0.010, 0.020], scale: [1.1, 0.55, 0.85] });
+  // 躯干（坐姿挺直，比站立略矮）
+  Pb.add(cyl(0.110, 0.128, 0.200, 14), M.clothDeep, { pos: [0, BODY_BOT + 0.098, 0] });
+  // 鱼鳞甲（四层，坐姿时下两层被椅背遮挡部分仍保留）
+  Pb.add(cyl(0.130, 0.142, 0.020, 14), M.armor, { pos: [0, BODY_BOT + 0.038, 0] });
+  Pb.add(cyl(0.128, 0.140, 0.020, 14), M.armor, { pos: [0, BODY_BOT + 0.076, 0] });
+  Pb.add(cyl(0.124, 0.136, 0.020, 14), M.armor, { pos: [0, BODY_BOT + 0.114, 0] });
+  Pb.add(cyl(0.120, 0.132, 0.020, 14), M.armor, { pos: [0, BODY_BOT + 0.152, 0] });
+  // 甲裙腰带
+  Pb.add(tor(0.118, 0.018, 5, 16), M.accent, { pos: [0, BODY_BOT + 0.018, 0], rot: [Math.PI / 2, 0, 0] });
+
+  // 披风（坐姿时从肩后垂落到椅背外）
   const capePts = [
-    new THREE.Vector2(0.114, 0.628),
-    new THREE.Vector2(0.158, 0.520),
-    new THREE.Vector2(0.198, 0.400),
-    new THREE.Vector2(0.232, 0.262),
-    new THREE.Vector2(0.252, 0.142),
-    new THREE.Vector2(0.246, 0.096)
+    new THREE.Vector2(0.100, BODY_BOT + 0.178),
+    new THREE.Vector2(0.140, BODY_BOT + 0.098),
+    new THREE.Vector2(0.178, BODY_BOT - 0.002),
+    new THREE.Vector2(0.208, BODY_BOT - 0.098),
+    new THREE.Vector2(0.222, BODY_BOT - 0.168)
   ];
-  P.add(
-    new THREE.LatheGeometry(capePts, 20, -Math.PI * 0.56, Math.PI * 1.12),
+  Pb.add(
+    new THREE.LatheGeometry(capePts, 18, -Math.PI * 0.52, Math.PI * 1.04),
     M.capeCloth, {}
   );
-  P.add(cyl(0.108, 0.132, 0.046, 16), M.cloth, { pos: [0, 0.638, 0] });
+  Pb.add(cyl(0.098, 0.120, 0.040, 14), M.cloth, { pos: [0, BODY_BOT + 0.188, 0] });
 
   // 兽面披膊
-  P.add(dome(0.086, 12, 7, 0.62), M.armor, { pos: [0.156, 0.600, 0] });
-  P.add(dome(0.086, 12, 7, 0.62), M.armor, { pos: [-0.156, 0.600, 0] });
-  P.add(box(0.068, 0.050, 0.048), M.accent, { pos: [0.192, 0.600, -0.038] });
-  P.add(box(0.068, 0.050, 0.048), M.accent, { pos: [-0.192, 0.600, -0.038] });
-  // 双臂：右手按剑首，左手垂握
-  P.strut(M.armorDeep, [0.152, 0.588, 0], [0.176, 0.560, -0.024], 0.046, 0.036, 8);
-  P.strut(M.armorDeep, [-0.152, 0.588, 0], [-0.160, 0.418, -0.056], 0.046, 0.034, 8);
-  P.add(sph(0.036, 10, 8), M.skin, { pos: [0.176, 0.556, -0.028] });
-  P.add(sph(0.034, 10, 8), M.skin, { pos: [-0.162, 0.400, -0.060] });
-  // 按剑（右侧佩剑，剑尖近地）
-  P.add(box(0.050, 0.382, 0.024), M.woodDeep, { pos: [0.176, 0.278, -0.020] });
-  P.add(box(0.057, 0.024, 0.030), M.accent, { pos: [0.176, 0.480, -0.020] });
-  P.add(box(0.092, 0.020, 0.030), K.bronze, { pos: [0.176, 0.500, -0.020] });
-  P.add(cyl(0.017, 0.019, 0.074, 10), M.leather, { pos: [0.176, 0.540, -0.020] });
-  P.add(sph(0.026, 10, 8), K.bronze, { pos: [0.176, 0.582, -0.020] });
-  // 颈 + 头 + 髯
-  P.add(cyl(0.032, 0.034, 0.032, 8), M.skin, { pos: [0, 0.654, 0] });
-  P.add(sph(0.058, 12, 10), M.skin, { pos: [0, 0.706, -0.004] });
-  P.strut(K.hair, [0, 0.682, -0.052], [0, 0.586, -0.034], 0.032, 0.008, 8);
-  // 鹖冠（高冠 + 立缨双羽）
-  P.add(cyl(0.066, 0.072, 0.026, 14), M.accent, { pos: [0, 0.752, -0.002] });
-  P.add(cyl(0.030, 0.064, 0.100, 14), M.clothDeep, { pos: [0, 0.816, -0.002] });
-  P.add(sph(0.024, 10, 8), M.accent, { pos: [0, 0.876, -0.002] });
-  P.strut(M.plume, [0.030, 0.868, 0.014], [0.078, 1.042, 0.062], 0.006, 0.019, 6);
-  P.strut(M.plume, [-0.030, 0.868, 0.014], [-0.078, 1.042, 0.062], 0.006, 0.019, 6);
+  Pb.add(dome(0.078, 12, 7, 0.62), M.armor, { pos: [0.142, BODY_BOT + 0.158, 0] });
+  Pb.add(dome(0.078, 12, 7, 0.62), M.armor, { pos: [-0.142, BODY_BOT + 0.158, 0] });
+  Pb.add(box(0.062, 0.046, 0.044), M.accent, { pos: [0.174, BODY_BOT + 0.158, -0.036] });
+  Pb.add(box(0.062, 0.046, 0.044), M.accent, { pos: [-0.174, BODY_BOT + 0.158, -0.036] });
 
-  // 帅旗（旗杆 + 飘扬旗面 + 矛头 + 红缨）
-  P.add(cyl(0.050, 0.062, 0.040, 10), M.accentDim, { pos: [0.246, FOOT + 0.020, 0.136] });
-  P.add(cyl(0.013, 0.015, 0.650, 8), M.woodDeep, { pos: [0.246, 0.430, 0.136] });
-  P.strut(M.accent, [0.246, 0.818, 0.136], [0.246, 0.752, 0.136], 0.000, 0.021, 8);
-  P.add(sph(0.027, 8, 6), M.plume, { pos: [0.246, 0.746, 0.136] });
-  P.add(
-    curvedBanner(0.210, 0.280, 0.036, 8),
+  // 双臂：右手按剑首（坐姿时手位置更低），左手搁扶手上
+  Pb.strut(M.armorDeep, [0.140, BODY_BOT + 0.146, 0], [0.162, BODY_BOT + 0.108, -0.022], 0.042, 0.034, 8);
+  Pb.strut(M.armorDeep, [-0.140, BODY_BOT + 0.146, 0], [-0.168, BODY_BOT + 0.118, 0.056], 0.042, 0.032, 8);
+  Pb.add(sph(0.034, 10, 8), M.skin, { pos: [0.162, BODY_BOT + 0.104, -0.026] });
+  Pb.add(sph(0.032, 10, 8), M.skin, { pos: [-0.168, BODY_BOT + 0.114, 0.058] });
+
+  // 按剑（右侧佩剑，坐姿时更贴近身体）
+  Pb.add(box(0.046, 0.340, 0.022), M.woodDeep, { pos: [0.162, BODY_BOT - 0.018, -0.018] });
+  Pb.add(box(0.052, 0.022, 0.028), M.accent, { pos: [0.162, BODY_BOT + 0.144, -0.018] });
+  Pb.add(box(0.084, 0.018, 0.028), K.bronze, { pos: [0.162, BODY_BOT + 0.162, -0.018] });
+  Pb.add(cyl(0.016, 0.018, 0.068, 10), M.leather, { pos: [0.162, BODY_BOT + 0.204, -0.018] });
+  Pb.add(sph(0.024, 10, 8), K.bronze, { pos: [0.162, BODY_BOT + 0.244, -0.018] });
+
+  // 颈 + 头 + 髯
+  Pb.add(cyl(0.030, 0.032, 0.030, 8), M.skin, { pos: [0, BODY_BOT + 0.218, 0] });
+  Pb.add(sph(0.056, 12, 10), M.skin, { pos: [0, BODY_BOT + 0.268, -0.004] });
+  Pb.strut(K.hair, [0, BODY_BOT + 0.244, -0.048], [0, BODY_BOT + 0.204, -0.032], 0.030, 0.008, 8);
+
+  // 鹖冠（高冠 + 立缨双羽）
+  Pb.add(cyl(0.064, 0.068, 0.024, 14), M.accent, { pos: [0, BODY_BOT + 0.312, -0.002] });
+  Pb.add(cyl(0.028, 0.060, 0.094, 14), M.clothDeep, { pos: [0, BODY_BOT + 0.374, -0.002] });
+  Pb.add(sph(0.022, 10, 8), M.accent, { pos: [0, BODY_BOT + 0.430, -0.002] });
+  Pb.strut(M.plume, [0.028, BODY_BOT + 0.424, 0.014], [0.072, BODY_BOT + 0.588, 0.058], 0.006, 0.018, 6);
+  Pb.strut(M.plume, [-0.028, BODY_BOT + 0.424, 0.014], [-0.072, BODY_BOT + 0.588, 0.058], 0.006, 0.018, 6);
+
+  // 帅旗（旗杆从龙椅右侧伸出）
+  PB.add(cyl(0.046, 0.056, 0.036, 10), M.accentDim, { pos: [0.228, FOOT + 0.018, 0.126] });
+  PB.add(cyl(0.012, 0.014, 0.600, 8), M.woodDeep, { pos: [0.228, 0.400, 0.126] });
+  PB.strut(M.accent, [0.228, 0.756, 0.126], [0.228, 0.694, 0.126], 0.000, 0.020, 8);
+  PB.add(sph(0.024, 8, 6), M.plume, { pos: [0.228, 0.688, 0.126] });
+  PB.add(
+    curvedBanner(0.195, 0.260, 0.034, 8),
     getBannerMaterial(PIECE_GLYPH[side].K, side),
-    { pos: [0.246, 0.600, 0.032], rot: [0, Math.PI / 2, 0] }
+    { pos: [0.228, 0.560, 0.028], rot: [0, Math.PI / 2, 0] }
   );
 }
 
@@ -599,6 +858,9 @@ const BUILDERS = {
   K: buildKing
 };
 
+/** 需要多分组的棋子类型（阶段二/三动画预留） */
+const MULTI_GROUP_TYPES = new Set(['K', 'C', 'R']);
+
 const _templates = new Map();
 
 function buildTemplate(type, side) {
@@ -607,21 +869,82 @@ function buildTemplate(type, side) {
   const K = mats.common;
   const glyph = (PIECE_GLYPH[side] && PIECE_GLYPH[side][type]) || '兵';
 
-  const P = new Parts();
+  const useMulti = MULTI_GROUP_TYPES.has(type);
+  let mp = null;
+  let P = null;
+
+  if (useMulti) {
+    mp = new MultiParts();
+    P = mp.base;
+  } else {
+    P = new Parts();
+  }
+
   const baseMesh = makeBaseMesh(P, side, glyph, M);
   const fn = BUILDERS[type] || BUILDERS.P;
-  fn(P, M, K, side);
 
+  // 多分组构建器接收 MultiParts 作为第四参数
+  if (useMulti) {
+    fn(mp, M, K, side);
+  } else {
+    fn(P, M, K);
+  }
+
+  // ── 多分组路径（K/C/R）──
+  if (mp) {
+    const allGroups = mp.buildAll();
+
+    // orient 包裹层：继承阵营旋转，包含 baseMesh + _base 组合并网格
+    const orient = new THREE.Group();
+    orient.name = 'orient';
+    orient.add(baseMesh);
+    if (allGroups['_base']) {
+      for (const m of allGroups['_base']) orient.add(m);
+    }
+
+    // 阵营朝向：红方朝 -Z（朝黑方）；黑方朝 +Z。
+    // 构建时统一朝 -Z，黑方 orient 整体绕 Y 旋转 180°。
+    if (side === 'b') {
+      orient.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+    }
+
+    // 创建命名子 Group 并挂入 orient
+    const subGroupNames = [];
+    for (const name of Object.keys(allGroups)) {
+      if (name === '_base') continue;
+      const g = new THREE.Group();
+      g.name = name;
+      const meshes = allGroups[name];
+      for (const m of meshes) g.add(m);
+      orient.add(g);
+      subGroupNames.push(name);
+    }
+
+    // 根 Group（单位变换，供外部做动画/定位）
+    const root = new THREE.Group();
+    root.name = 'pieceTemplate_' + type + side;
+    root.add(orient);
+
+    // 收集所有 geometry 引用（用于 dispose 计数）
+    const geoms = [baseMesh.geometry];
+    for (const arr of Object.values(allGroups)) {
+      for (const m of arr) geoms.push(m.geometry);
+    }
+
+    // 暴露子组名列表（post-clone 时解析为 Object3D 引用，避免
+    // Object3D.copy() 对 userData 做 JSON.stringify 时序列化整个场景图）
+    root.userData._subGroupNames = subGroupNames;
+
+    return { root: root, geoms: geoms, count: 0 };
+  }
+
+  // ── 单分组路径（P/N/B/A，原有逻辑不变）──
   const meshes = P.build();
 
   const body = new THREE.Group();
-  body.name = 'body';
+  body.name = 'orient';
   body.add(baseMesh);
   for (const m of meshes) body.add(m);
-  // 红方面朝 -Z（朝黑方）；黑方面朝 +Z。
-  // 构建时统一朝 -Z，黑方内层 body 整体绕 Y 旋转 180°。
-  // ★ 用 quaternion 而非 rotation.y —— 180° 的 Euler 分解有万向锁歧义（会读成 (π,0,π)）。
-  // ★ 外层 root 保持单位变换，engineering-lead 可自由设置 root.rotation/position 做动画，不破坏朝向。
   if (side === 'b') {
     body.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
   }
@@ -658,6 +981,15 @@ export function createPieceMesh(type, side) {
   group.userData.pieceSide = side;
   group.userData.glyph = PIECE_GLYPH[side][type];
   group.userData.topY = PIECE_TOP_Y[type] || 0.9;
+
+  // 解析子组名 → Object3D 引用（clone 后 orient 已重建，需重新查找）
+  if (group.userData._subGroupNames) {
+    const orient = group.getObjectByName('orient');
+    group.userData.subGroups = {};
+    for (const name of group.userData._subGroupNames) {
+      group.userData.subGroups[name] = orient ? orient.getObjectByName(name) : null;
+    }
+  }
 
   group.traverse(function (o) {
     if (o.isMesh) {

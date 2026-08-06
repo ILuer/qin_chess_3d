@@ -374,19 +374,22 @@ export function createEnvironment() {
   return group;
 }
 
-/* ============================================================
- * 给 engineering-lead 的灯光建议（数值，非强制）
- *   见 docs/art-bible.md「环境与光照」一节
- * ============================================================ */
+/**
+ * scene.js is the sole authority for lighting. This preset mirrors scene.js's
+ * shipped values (see src/render/scene.js) for documentation only; scene.js does
+ * NOT consume it. To change the look, edit scene.js or PALETTE in src/core/constants.js.
+ */
 export const LIGHT_PRESET = {
-  ambient:     { color: 0x2b3444, intensity: 0.55 },
-  hemisphere:  { sky: 0x38404f, ground: 0x140f0c, intensity: 0.65 },
-  key:         { color: 0xffe3b8, intensity: 2.1, position: [6.5, 12.0, 7.5], castShadow: true },
-  fill:        { color: 0x6d8cc0, intensity: 0.55, position: [-8.0, 6.0, -6.0] },
-  rim:         { color: 0xff6a3a, intensity: 0.85, position: [0, 3.2, -11.0] },
-  shadow:      { mapSize: 2048, near: 1, far: 34, left: -8, right: 8, top: 9, bottom: -9, bias: -0.0006, normalBias: 0.02 },
-  fog:         { color: 0x0b0a0d, near: 16, far: 38 },
-  toneMapping: 'ACESFilmic',
-  exposure:    1.05,
-  controls:    { minPolarAngle: 0.18, maxPolarAngle: 1.16, minDistance: 8.5, maxDistance: 20.0 }
+  ambient:     { color: 0xffffff, intensity: 0.52 },
+  hemisphere:  { sky: 0x8da0b8, ground: 0x241a11, intensity: 0.98 },
+  key:         { color: 0xfff2dc, intensity: 1.95, position: [6.5, 13.5, 7.5], castShadow: true },
+  fill:        { color: 0x3f6ea8, intensity: 0.95, position: [-8.0, 6.5, -8.0] },
+  rim:         { color: 0xffb45c, intensity: 22, distance: 30, decay: 2, position: [0, 3.2, -8.5] },
+  under:       { color: 0xb0281f, intensity: 12, distance: 22, decay: 2, position: [0, 2.4, 8.5] },
+  shadow:      { mapSize: 2048, near: 1, far: 42, left: -9, right: 9, top: 9, bottom: -9, bias: -0.0006, normalBias: 0.022, radius: 1.6 },
+  fog:         { type: 'exp2', color: 0x232b38, density: 0.009 },
+  background:  0x1a2230,
+  toneMapping: 'Neutral',
+  exposure:    1.14,
+  controls:    { minPolarAngle: 0.15, maxPolarAngle: 1.35, minDistance: 6.5, maxDistance: 26 }
 };

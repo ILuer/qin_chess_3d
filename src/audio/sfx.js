@@ -52,7 +52,23 @@ const LEVEL = {
   undo: 0.26,
   start: 0.42,
   win: 0.50,
-  lose: 0.46
+  lose: 0.46,
+  // —— 阶段三：分兵种移动音效（脚步 / 马蹄 / 绞盘 / 车轮 / 振翅 / 软步 / 踏步）——
+  'move.pawn': 0.42,
+  'move.horse': 0.46,
+  'move.cannon': 0.44,
+  'move.rook': 0.50,
+  'move.elephant': 0.48,
+  'move.advisor': 0.34,
+  'move.king': 0.52,
+  // —— 阶段三：分兵种吃子音效（突刺 / 长矛 / 落石 / 碾击 / 掌击 / 挥剑 / 王剑）——
+  'capture.pawn': 0.70,
+  'capture.horse': 0.74,
+  'capture.cannon': 0.80,
+  'capture.rook': 0.78,
+  'capture.elephant': 0.76,
+  'capture.advisor': 0.72,
+  'capture.king': 0.82
 };
 
 /**
@@ -71,7 +87,23 @@ const WET = {
   start: 0.45,
   win: 0.42,
   lose: 0.55,
-  ambient: 0.50
+  ambient: 0.50,
+  // —— 阶段三：分兵种移动（近场，少混响）——
+  'move.pawn': 0.10,
+  'move.horse': 0.10,
+  'move.cannon': 0.14,
+  'move.rook': 0.12,
+  'move.elephant': 0.16,
+  'move.advisor': 0.10,
+  'move.king': 0.18,
+  // —— 阶段三：分兵种吃子（中混响，撑出战场尺度）——
+  'capture.pawn': 0.34,
+  'capture.horse': 0.38,
+  'capture.cannon': 0.42,
+  'capture.rook': 0.40,
+  'capture.elephant': 0.36,
+  'capture.advisor': 0.34,
+  'capture.king': 0.46
 };
 
 /** 五声音阶（宫商角徵羽），以 C 为宫的一组参考频率（Hz） */
@@ -826,6 +858,245 @@ function sfxLose(t, o) {
   warDrum(bus, t + 0.78, 54 * p, 33 * p, peak * 0.7, 0.5);
 }
 
+/* --------------------------------------------------------------------------
+ * 6b. 阶段三：分兵种音效（差异化，贴合兵种特性）
+ *     兵种 → 音色关键词：
+ *       兵 脚步+衣甲摩擦 | 马 马蹄清脆 | 炮 绞盘木轴吱呀 | 车 车轮轰隆+马嘶
+ *       象 沉重落步+振翅 | 士 软步+丝绸 | 帅 踏步+权威编钟
+ *       吃子：兵 突刺、马 长矛、炮 落石、车 碾击、象 掌击、士 挥剑、士剑、帅 王剑
+ *     统一复用 §5 积木（bronzeBody / warDrum / transient / hornNote），零新依赖。
+ * ------------------------------------------------------------------------ */
+
+/** 兵种类型 → 移动音效名映射（与 main.js 的 PT.* 对齐） */
+const MOVE_SFX = {
+  P: 'move.pawn', N: 'move.horse', B: 'move.elephant',
+  A: 'move.advisor', R: 'move.rook', C: 'move.cannon', K: 'move.king'
+};
+/** 兵种类型 → 吃子音效名映射 */
+const CAP_SFX = {
+  P: 'capture.pawn', N: 'capture.horse', B: 'capture.elephant',
+  A: 'capture.advisor', R: 'capture.rook', C: 'capture.cannon', K: 'capture.king'
+};
+
+/** 兵：持戈冲锋——两步软靴 + 衣甲摩擦 */
+function sfxMovePawn(t, o) {
+  const bus = makeBus(WET['move.pawn'], o.pan, 0.6);
+  const peak = LEVEL['move.pawn'] * o.vol;
+  for (let i = 0; i < 2; i++) {
+    const at = t + i * 0.13;
+    warDrum(bus, at, 110 * o.pit, 70 * o.pit, peak * 0.5, 0.10);
+    transient(bus, at, 900 * o.pit, 1.2, peak * 0.4, 0.03, 1.0);
+  }
+  const n = mkNoise(t, 0.22, 1);
+  const bp = mkFilter('bandpass', 1600 * o.pit, 1.4);
+  const g = ctx.createGain();
+  envAD(g.gain, t, peak * 0.10, 0.01, 0.18);
+  n.connect(bp); bp.connect(g); g.connect(bus);
+}
+
+/** 马：骑兵——三记清脆马蹄 */
+function sfxMoveHorse(t, o) {
+  const bus = makeBus(WET['move.horse'], o.pan, 0.6);
+  const peak = LEVEL['move.horse'] * o.vol;
+  for (let i = 0; i < 3; i++) {
+    const at = t + i * 0.10;
+    transient(bus, at, 1300 * o.pit, 1.6, peak * 0.5, 0.02, 1.1);
+    const s = mkOsc('sine', 90 * o.pit, at, 0.07);
+    s.frequency.exponentialRampToValueAtTime(60 * o.pit, at + 0.05);
+    const g = ctx.createGain();
+    envAD(g.gain, at, peak * 0.4, 0.002, 0.05);
+    s.connect(g); g.connect(bus);
+  }
+}
+
+/** 炮：绞盘木轴——低沉呻吟 + 木头吱呀 */
+function sfxMoveCannon(t, o) {
+  const bus = makeBus(WET['move.cannon'], o.pan, 0.8);
+  const peak = LEVEL['move.cannon'] * o.vol;
+  const o1 = mkOsc('sawtooth', 70 * o.pit, t, 0.5);
+  o1.frequency.linearRampToValueAtTime(58 * o.pit, t + 0.4);
+  const lp = mkFilter('lowpass', 260, 2.4);
+  const g = ctx.createGain();
+  envAD(g.gain, t, peak * 0.5, 0.02, 0.4);
+  o1.connect(lp); lp.connect(g); g.connect(bus);
+  const n = mkNoise(t, 0.4, 0.9);
+  const bp = mkFilter('bandpass', 520 * o.pit, 6);
+  bp.frequency.linearRampToValueAtTime(900 * o.pit, t + 0.36);
+  const ng = ctx.createGain();
+  envAD(ng.gain, t, peak * 0.18, 0.01, 0.34);
+  n.connect(bp); bp.connect(ng); ng.connect(bus);
+}
+
+/** 车：整体冲锋——车轮轰隆 + 木轮骨碌 + 马嘶 */
+function sfxMoveRook(t, o) {
+  const bus = makeBus(WET['move.rook'], o.pan, 0.9);
+  const peak = LEVEL['move.rook'] * o.vol;
+  const n = mkNoise(t, 0.42, 0.8);
+  const lp = mkFilter('lowpass', 220, 1.2);
+  lp.frequency.linearRampToValueAtTime(140 * o.pit, t + 0.36);
+  const ng = ctx.createGain();
+  envAD(ng.gain, t, peak * 0.4, 0.02, 0.36);
+  n.connect(lp); lp.connect(ng); ng.connect(bus);
+  for (let i = 0; i < 2; i++) transient(bus, t + i * 0.12, 1500 * o.pit, 1.8, peak * 0.4, 0.02, 1.1);
+  warDrum(bus, t, 95 * o.pit, 64 * o.pit, peak * 0.4, 0.10);
+}
+
+/** 象：飞身——沉重落步 + 振翅呼扇 */
+function sfxMoveElephant(t, o) {
+  const bus = makeBus(WET['move.elephant'], o.pan, 0.9);
+  const peak = LEVEL['move.elephant'] * o.vol;
+  warDrum(bus, t, 84 * o.pit, 52 * o.pit, peak * 0.6, 0.22);
+  const n = mkNoise(t, 0.34, 1);
+  const bp = mkFilter('bandpass', 700 * o.pit, 0.9);
+  bp.frequency.linearRampToValueAtTime(1500 * o.pit, t + 0.3);
+  bp.frequency.linearRampToValueAtTime(600 * o.pit, t + 0.34);
+  const ng = ctx.createGain();
+  envAD(ng.gain, t, peak * 0.22, 0.02, 0.3);
+  n.connect(bp); bp.connect(ng); ng.connect(bus);
+}
+
+/** 士：稳步——软步 + 丝绸轻响 */
+function sfxMoveAdvisor(t, o) {
+  const bus = makeBus(WET['move.advisor'], o.pan, 0.5);
+  const peak = LEVEL['move.advisor'] * o.vol;
+  warDrum(bus, t, 120 * o.pit, 86 * o.pit, peak * 0.4, 0.08);
+  const n = mkNoise(t, 0.18, 1);
+  const bp = mkFilter('bandpass', 2400 * o.pit, 1.2);
+  const g = ctx.createGain();
+  envAD(g.gain, t, peak * 0.12, 0.01, 0.14);
+  n.connect(bp); bp.connect(g); g.connect(bus);
+}
+
+/** 帅：起身移驾——踏步 + 权威小编钟 */
+function sfxMoveKing(t, o) {
+  const bus = makeBus(WET['move.king'], o.pan, 1.0);
+  const peak = LEVEL['move.king'] * o.vol;
+  warDrum(bus, t, 130 * o.pit, 84 * o.pit, peak * 0.55, 0.14);
+  const cb = makeBus(WET['move.king'] * 0.8, o.pan, 1.0);
+  bronzeBody(cb, t + 0.02, 660 * o.pit, peak * 0.5, 1,
+    [[1.0, 0.6, 0.8], [1.19, 0.3, 0.65]], 0);
+  transient(cb, t + 0.02, 4000 * o.pit, 1.6, peak * 0.25, 0.012, 1.3);
+}
+
+/** 兵吃子：持戈突刺——破空 + 肉感闷击 + 甲裂 */
+function sfxCapturePawn(t, o) {
+  const bus = makeBus(WET['capture.pawn'], o.pan, 1.0);
+  const peak = LEVEL['capture.pawn'] * o.vol;
+  const n = mkNoise(t, 0.16, 1);
+  const bp = mkFilter('bandpass', 900 * o.pit, 1.4);
+  bp.frequency.exponentialRampToValueAtTime(2600 * o.pit, t + 0.1);
+  const ng = ctx.createGain();
+  envAD(ng.gain, t, peak * 0.3, 0.005, 0.12);
+  n.connect(bp); bp.connect(ng); ng.connect(bus);
+  warDrum(bus, t + 0.08, 95 * o.pit, 52 * o.pit, peak * 0.85, 0.18);
+  transient(bus, t + 0.08, 2200 * o.pit, 1.4, peak * 0.4, 0.03, 1.1);
+}
+
+/** 马吃子：长矛突刺——破空 + 青铜交击 + 闷击 */
+function sfxCaptureHorse(t, o) {
+  const bus = makeBus(WET['capture.horse'], o.pan, 1.2);
+  const peak = LEVEL['capture.horse'] * o.vol;
+  const n = mkNoise(t, 0.18, 1);
+  const bp = mkFilter('bandpass', 700 * o.pit, 1.3);
+  bp.frequency.exponentialRampToValueAtTime(2400 * o.pit, t + 0.12);
+  const ng = ctx.createGain();
+  envAD(ng.gain, t, peak * 0.34, 0.005, 0.14);
+  n.connect(bp); bp.connect(ng); ng.connect(bus);
+  warDrum(bus, t + 0.1, 90 * o.pit, 48 * o.pit, peak * 0.9, 0.2);
+  const metal = [1800, 2700, 3700];
+  for (let i = 0; i < metal.length; i++) {
+    const f = metal[i] * o.pit * rand(0.98, 1.02);
+    const m = mkOsc('square', f, t + 0.1, 0.2);
+    const fb = mkFilter('bandpass', f, 6);
+    const mg = ctx.createGain();
+    envAD(mg.gain, t + 0.1 + i * 0.004, peak * (0.10 - i * 0.022), 0.002, 0.16 - i * 0.03);
+    m.connect(fb); fb.connect(mg); mg.connect(bus);
+  }
+}
+
+/** 炮吃子：抛石命中——落石轰隆 + 岩石迸裂 */
+function sfxCaptureCannon(t, o) {
+  const bus = makeBus(WET['capture.cannon'], o.pan, 1.6);
+  const peak = LEVEL['capture.cannon'] * o.vol;
+  warDrum(bus, t, 88 * o.pit, 40 * o.pit, peak * 0.95, 0.28);
+  const n = mkNoise(t, 0.3, rand(0.9, 1.12));
+  const lp = mkFilter('lowpass', 5000, 0.9);
+  lp.frequency.exponentialRampToValueAtTime(600, t + 0.18);
+  const ng = ctx.createGain();
+  envAD(ng.gain, t, peak * 0.6, 0.002, 0.2);
+  n.connect(lp); lp.connect(ng); ng.connect(bus);
+  transient(bus, t + 0.02, 1800 * o.pit, 1.0, peak * 0.4, 0.05, 1.0);
+}
+
+/** 车吃子：碾击——轰隆 + 兵刃格挡青铜 */
+function sfxCaptureRook(t, o) {
+  const bus = makeBus(WET['capture.rook'], o.pan, 1.4);
+  const peak = LEVEL['capture.rook'] * o.vol;
+  warDrum(bus, t, 96 * o.pit, 44 * o.pit, peak * 0.9, 0.24);
+  const n = mkNoise(t, 0.26, 1);
+  const lp = mkFilter('lowpass', 3600, 1.0);
+  lp.frequency.exponentialRampToValueAtTime(700, t + 0.16);
+  const ng = ctx.createGain();
+  envAD(ng.gain, t, peak * 0.55, 0.002, 0.18);
+  n.connect(lp); lp.connect(ng); ng.connect(bus);
+  const metal = [2100, 3100];
+  for (let i = 0; i < metal.length; i++) {
+    const f = metal[i] * o.pit;
+    const m = mkOsc('square', f, t + 0.04, 0.18);
+    const fb = mkFilter('bandpass', f, 6);
+    const mg = ctx.createGain();
+    envAD(mg.gain, t + 0.04, peak * 0.08, 0.002, 0.14);
+    m.connect(fb); fb.connect(mg); mg.connect(bus);
+  }
+}
+
+/** 象吃子：一掌击碎——厚重掌击 + 碎裂 */
+function sfxCaptureElephant(t, o) {
+  const bus = makeBus(WET['capture.elephant'], o.pan, 1.3);
+  const peak = LEVEL['capture.elephant'] * o.vol;
+  const s = mkOsc('sine', 70 * o.pit, t, 0.22);
+  s.frequency.exponentialRampToValueAtTime(40 * o.pit, t + 0.14);
+  const g = ctx.createGain();
+  envAD(g.gain, t, peak * 0.95, 0.004, 0.18);
+  s.connect(g); g.connect(bus);
+  const n = mkNoise(t, 0.18, 1);
+  const lp = mkFilter('lowpass', 3000, 1.0);
+  lp.frequency.exponentialRampToValueAtTime(500, t + 0.12);
+  const ng = ctx.createGain();
+  envAD(ng.gain, t, peak * 0.5, 0.002, 0.14);
+  n.connect(lp); lp.connect(ng); ng.connect(bus);
+}
+
+/** 士吃子：挥剑斩——剑刃破空 + 青铜剑击 */
+function sfxCaptureAdvisor(t, o) {
+  const bus = makeBus(WET['capture.advisor'], o.pan, 1.1);
+  const peak = LEVEL['capture.advisor'] * o.vol;
+  const n = mkNoise(t, 0.18, 1);
+  const bp = mkFilter('bandpass', 1400 * o.pit, 1.2);
+  bp.frequency.exponentialRampToValueAtTime(3400 * o.pit, t + 0.12);
+  const ng = ctx.createGain();
+  envAD(ng.gain, t, peak * 0.4, 0.004, 0.14);
+  n.connect(bp); bp.connect(ng); ng.connect(bus);
+  warDrum(bus, t + 0.1, 100 * o.pit, 56 * o.pit, peak * 0.8, 0.18);
+  bronzeBody(bus, t + 0.1, 420 * o.pit, peak * 0.4, 1,
+    [[1.0, 0.6, 0.8], [1.6, 0.3, 0.6], [2.4, 0.18, 0.4]], 0);
+}
+
+/** 帅吃子：王剑斩——剑刃破空 + 权威青铜 */
+function sfxCaptureKing(t, o) {
+  const bus = makeBus(WET['capture.king'], o.pan, 1.5);
+  const peak = LEVEL['capture.king'] * o.vol;
+  const n = mkNoise(t, 0.2, 1);
+  const bp = mkFilter('bandpass', 1200 * o.pit, 1.1);
+  bp.frequency.exponentialRampToValueAtTime(3200 * o.pit, t + 0.14);
+  const ng = ctx.createGain();
+  envAD(ng.gain, t, peak * 0.42, 0.004, 0.16);
+  n.connect(bp); bp.connect(ng); ng.connect(bus);
+  warDrum(bus, t + 0.1, 104 * o.pit, 56 * o.pit, peak * 0.85, 0.22);
+  bronzeBody(bus, t + 0.1, 500 * o.pit, peak * 0.5, 1.2,
+    [[1.0, 0.6, 0.85], [1.42, 0.34, 0.7], [2.0, 0.22, 0.5]], 0);
+}
+
 /** 音效分发表 */
 const VOICES = {
   select: sfxSelect,
@@ -837,7 +1108,23 @@ const VOICES = {
   undo: sfxUndo,
   start: sfxStart,
   win: sfxWin,
-  lose: sfxLose
+  lose: sfxLose,
+  // —— 阶段三：分兵种移动 ——
+  'move.pawn': sfxMovePawn,
+  'move.horse': sfxMoveHorse,
+  'move.cannon': sfxMoveCannon,
+  'move.rook': sfxMoveRook,
+  'move.elephant': sfxMoveElephant,
+  'move.advisor': sfxMoveAdvisor,
+  'move.king': sfxMoveKing,
+  // —— 阶段三：分兵种吃子 ——
+  'capture.pawn': sfxCapturePawn,
+  'capture.horse': sfxCaptureHorse,
+  'capture.cannon': sfxCaptureCannon,
+  'capture.rook': sfxCaptureRook,
+  'capture.elephant': sfxCaptureElephant,
+  'capture.advisor': sfxCaptureAdvisor,
+  'capture.king': sfxCaptureKing
 };
 
 /* --------------------------------------------------------------------------
@@ -1019,6 +1306,24 @@ export const SFX = {
       // 任何单次合成失败都不允许影响游戏主循环
       return false;
     }
+  },
+
+  /**
+   * 按兵种播放移动音效（阶段三）。
+   * @param {string} type PT.* 之一（'P'|'N'|'B'|'A'|'R'|'C'|'K'）
+   * @param {object} [opts] 同 play()
+   */
+  move(type, opts) {
+    return this.play(MOVE_SFX[type] || 'move', opts);
+  },
+
+  /**
+   * 按兵种播放吃子音效（阶段三）。
+   * @param {string} type PT.* 之一
+   * @param {object} [opts] 同 play()
+   */
+  capture(type, opts) {
+    return this.play(CAP_SFX[type] || 'capture', opts);
   },
 
   /** 静音开关（可在 init 之前调用，会被持久化） */

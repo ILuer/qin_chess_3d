@@ -12,7 +12,7 @@
 
 import * as THREE from 'three';
 import {
-  RED, BLACK, PT, FILES, RANKS, PALETTE, TIMING, toWorld
+  RED, BLACK, PT, FILES, RANKS, BOARD_HALF_W, PALETTE, TIMING, toWorld
 } from './core/constants.js';
 import { GameState } from './core/gameState.js';
 import { createSceneSystem } from './render/scene.js';
@@ -77,6 +77,8 @@ function rebuildPieces() {
     mesh.position.set(w.x, 0, w.z);
     mesh.userData.cell = { file: f, rank: r };
     mesh.userData.__homeY = 0;
+    mesh.userData.idlePhase = ((f * 7 + r * 13) % 1000) / 1000 * Math.PI * 2;
+    mesh.userData._busy = false;
     if (sceneSys) sceneSys.piecesGroup.add(mesh);
     pieceMeshes[f][r] = mesh;
   });
@@ -117,43 +119,81 @@ function applyMove(from, to) {
   input.reset();
   if (hoverMesh) { animator.unhover(hoverMesh); hoverMesh = null; }
 
-  // 音效
-  SFX.play(rec.captured ? 'capture' : 'move');
+  // 兵种与阵营
+  const type = movingMesh ? movingMesh.userData.pieceType : null;
+  const side = movingMesh ? movingMesh.userData.pieceSide : null;
+
+  // 声像：按落点纵线左右定位（file 8 = 右，file 0 = 左），营造空间感
+  const w0 = toWorld(to.file, to.rank);
+  const pan = Math.max(-0.7, Math.min(0.7, (w0.x / (BOARD_HALF_W || 4)) * 0.8));
+
+  // 音效（分兵种差异化；SFX.move / SFX.capture 内部按兵种映射到专属音色）
+  if (type) SFX[rec.captured ? 'capture' : 'move'](type, { pan });
+  else SFX.play(rec.captured ? 'capture' : 'move');
+
+  // 标记移动中：待机微动让位，避免叠加漂移
+  if (movingMesh) movingMesh.userData._busy = true;
 
   // 落点世界坐标
   const w = toWorld(to.file, to.rank);
   const target = new THREE.Vector3(w.x, 0, w.z);
 
   // 马走日：加一个折点，呈现"跳跃"弧线
-  const isHorse = movingMesh && movingMesh.userData.pieceType === PT.HORSE;
+  const isHorse = type === PT.HORSE;
   let waypoints = null;
   if (isHorse) {
     const fw = toWorld(from.file, from.rank);
     waypoints = [new THREE.Vector3((fw.x + w.x) / 2, 0, (fw.z + w.z) / 2)];
   }
 
-  // 主子抛物线移动（lock:true 锁输入，直到落子）
-  animator.arcMove(movingMesh, target, {
-    lift: isHorse ? 0.62 : TIMING.liftHeight,
-    waypoints,
-    onComplete: () => {
-      animator.squashLand(movingMesh);                 // 落子回弹（Juice）
-      if (sceneSys && sceneSys.boardGroup) animator.boardImpact(sceneSys.boardGroup);
-      effects.spawnImpactParticles(
-        target,
-        rec.captured ? PALETTE.chiHong : PALETTE.liuJin,
-        { count: rec.captured ? 60 : 42 }
-      );
-      afterMove(rec, from, to);
-      // AI 由 pumpAI 每帧轮询接管，此处无需再触发
+  // 收尾：落子回弹 + 棋盘受击 + 粒子 + 走子完成（并解除 _busy 让待机微动接管）
+  const finishLand = () => {
+    animator.squashLand(movingMesh);                 // 落子回弹（Juice）
+    if (sceneSys && sceneSys.boardGroup) animator.boardImpact(sceneSys.boardGroup);
+    effects.spawnImpactParticles(
+      target,
+      rec.captured ? PALETTE.chiHong : PALETTE.liuJin,
+      { count: rec.captured ? 60 : 42 }
+    );
+    if (movingMesh) {
+      // 斩杀姿态（非炮）跑约 0.18s，待其结束后待机微动才接管，避免抢拍跳变
+      if (rec.captured && type && type !== PT.CANNON && captureMesh) {
+        animator.captureStrike(movingMesh, type, side);
+      }
+      animator.delay(rec.captured ? 0.22 : 0, () => { movingMesh.userData._busy = false; });
     }
+    afterMove(rec, from, to);
+  };
+
+  // 炮吃子：走「抛石命中 + 原位消失 / 目标位出现 + 警戒复位」分支，不走滑动
+  if (type === PT.CANNON && captureMesh) {
+    const fw = toWorld(from.file, from.rank);
+    const fromVec = new THREE.Vector3(fw.x, 0, fw.z);
+    animator.cannonCapture(movingMesh, captureMesh, fromVec, target, side, {
+      onHit: (v) => {
+        animator.dissolvePiece(v, {
+          delay: 0,
+          onComplete: (m) => { if (sceneSys) sceneSys.piecesGroup.remove(m); }
+        });
+        effects.spawnImpactParticles(target, PALETTE.chiHong, { count: 60 });
+        effects.screenShake(0.06, 0.26);
+      },
+      onLand: () => { movingMesh.userData._busy = false; afterMove(rec, from, to); }
+    });
+    return;
+  }
+
+  // 普通移动（含非炮吃子）
+  animator.movePiece(movingMesh, target, type, side, {
+    waypoints,
+    onLand: finishLand
   });
 
-  // 吃子：被吃子消散 + 轻微震屏
-  if (captureMesh) {
+  // 非炮吃子：被吃子消散 + 轻微震屏（与攻击方斩杀同步）
+  if (captureMesh && type !== PT.CANNON) {
     captureMesh.userData.__homeY = captureMesh.position.y;
     animator.dissolvePiece(captureMesh, {
-      delay: TIMING.moveDuration * 0.5,
+      delay: 0.04,
       onComplete: (m) => { if (sceneSys) sceneSys.piecesGroup.remove(m); }
     });
     effects.screenShake(0.06, 0.26);
@@ -594,6 +634,15 @@ function startLoop() {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     updateTweens(dt);                 // animator.update
+    // 阶段三待机微动：遍历全部棋子施加轻量呼吸 / 摆臂（移动中自动让位）
+    const tIdle = now / 1000;
+    for (let f = 0; f < FILES; f++) {
+      if (!pieceMeshes[f]) continue;
+      for (let r = 0; r < RANKS; r++) {
+        const pm = pieceMeshes[f][r];
+        if (pm) animator.tickIdle(pm, tIdle);
+      }
+    }
     pumpAI(dt);                       // 回合泵：轮到 AI 且动画落定时自动请求走子
     if (input) input.update();        // 悬停射线
     if (effects) effects.update(dt);  // 粒子 / 涟漪 / 标记 / 脉冲

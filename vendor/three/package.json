@@ -1,0 +1,9 @@
+{
+  "name": "three",
+  "type": "module",
+  "exports": {
+    ".": "./three.module.js",
+    "./addons/": "./addons/",
+    "./addons/utils/BufferGeometryUtils.js": "./addons/utils/BufferGeometryUtils.js"
+  }
+}
