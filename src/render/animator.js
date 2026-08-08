@@ -373,20 +373,23 @@ export class Animator {
     if (!group || !group.userData) return;
     const ud = group.userData;
     const orient = group.getObjectByName('orient') || group;
-    // 移动 / 吃子进行中：仅把「根 orient 节点」的待机微动归零，
+    // idleGroup：整枚棋子的微动作用层。绝不写 orient 的 rotation/position，
+    // 否则会触发欧拉→四元数重算，把黑方 Y=180° 的朝向翻成 X=180°（头朝下）。
+    const idleGroup = orient.getObjectByName('idleGroup') || orient;
+    // 移动 / 吃子进行中：仅把「idleGroup 节点」的待机微动归零，
     // 让移动补间（作用于棋子根 Group）干净推进。
     // 注意：此处【绝不】触碰子组（subGroups）——炮的士兵推车、
     // 帅的龙椅 scale 隐现、车的战马奔腾等都由动画补间逐帧驱动，
     // 若在此强制重置会与其打架，导致穿模 / 跳变。
     if (ud._busy) {
-      orient.position.y = 0;
-      orient.rotation.z = 0;
+      idleGroup.position.y = 0;
+      idleGroup.rotation.z = 0;
       return;
     }
     const ph = ud.idlePhase || 0;
     // 全员：极轻的呼吸浮动 + 摇摆，让棋子"活着"
-    orient.position.y = Math.sin(t * 1.15 + ph) * 0.012;
-    orient.rotation.z = Math.sin(t * 0.85 + ph) * 0.014;
+    idleGroup.position.y = Math.sin(t * 1.15 + ph) * 0.012;
+    idleGroup.rotation.z = Math.sin(t * 0.85 + ph) * 0.014;
 
     const sg = ud.subGroups;
     if (!sg) return;
@@ -430,21 +433,23 @@ export class Animator {
   _moveFlourish(mesh, type, t, raw) {
     const ud = mesh.userData;
     const orient = mesh.getObjectByName('orient') || mesh;
+    // 整枚棋子的姿态风味写 idleGroup，保住 orient 的阵营四元数（见 tickIdle 注释）
+    const idleGroup = orient.getObjectByName('idleGroup') || orient;
     const sg = ud.subGroups;
     const k = Math.sin(Math.PI * t);
     switch (type) {
       case PT.PAWN:      // 兵：持戈冲锋前倾
-        orient.rotation.x = -0.12 * k;
+        idleGroup.rotation.x = -0.12 * k;
         break;
       case PT.HORSE:     // 马：跳跃腾空前仰
-        orient.rotation.x = -0.30 * k;
+        idleGroup.rotation.x = -0.30 * k;
         break;
       case PT.ELEPHANT:  // 象：飞身侧倾 + 微前倾
-        orient.rotation.z = 0.06 * k;
-        orient.rotation.x = -0.10 * k;
+        idleGroup.rotation.z = 0.06 * k;
+        idleGroup.rotation.x = -0.10 * k;
         break;
       case PT.ADVISOR:   // 士：稳步，仅极小前倾
-        orient.rotation.x = -0.05 * k;
+        idleGroup.rotation.x = -0.05 * k;
         break;
       case PT.ROOK:      // 车：战马奔腾 + 御马 / 持戈兵前倾
         if (sg) {
@@ -482,14 +487,16 @@ export class Animator {
   captureStrike(piece, type, side, opts = {}) {
     const ud = piece.userData;
     const orient = piece.getObjectByName('orient') || piece;
+    // 点头写 idleGroup，保住 orient 的阵营四元数（见 tickIdle 注释）
+    const idleGroup = orient.getObjectByName('idleGroup') || orient;
     const sg = ud.subGroups;
     const dur = TIMING.strikeRecoil != null ? TIMING.strikeRecoil : 0.18;
     // 全员：快速前倾点头（刺击 / 劈砍的体感）
     const nod = type === PT.ADVISOR ? 0.40 : (type === PT.KING ? 0.22 : 0.28);
     const a = this.add({
       duration: dur, easing: Easing.easeOutQuad,
-      onUpdate: (t) => { orient.rotation.x = -nod * Math.sin(Math.PI * t); },
-      onComplete: () => { orient.rotation.x = 0; }
+      onUpdate: (t) => { idleGroup.rotation.x = -nod * Math.sin(Math.PI * t); },
+      onComplete: () => { idleGroup.rotation.x = 0; }
     });
     // 兵种专属挥击（子组旋转，本地 +Z 为前，物理方向天然正确）
     if (sg) {
