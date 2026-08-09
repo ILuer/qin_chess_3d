@@ -10,6 +10,8 @@
 
 import * as THREE from 'three';
 import { TIMING, PT } from '../core/constants.js';
+import { applyDissolvePose } from './combat/PieceChoreography.js';
+import { IDLE_PIECE } from './combat/CombatConstants.js';
 // getChoreo 已被 CombatDirector/PieceChoreography 替代。
 // 保留本地 stub 接口，供 dissolvePiece/tickIdle/movePiece/captureStrike 回退到通用姿态。
 // 旧的 choreography/ 目录完全弃用，不再 import。
@@ -391,6 +393,9 @@ export class Animator {
         tmp.copy(baseScale).multiplyScalar(Math.max(0.02, 1 - t * 0.92));
         mesh.scale.copy(tmp);
         setTreeOpacity(mesh, Math.max(0, 1 - t * 1.05));
+        // 分兵种崩解姿态（DISSOLVE_POSE）：驱动 idleGroup + 命名子组
+        // （K.crown 冕落 / C.cart 散架 / 各兵种整体倾倒等）。subGroup 缺失时内部安全跳过。
+        try { applyDissolvePose(mesh, mesh.userData.pieceType, t); } catch (e) { /* 安全兜底 */ }
         if (dissolveCh && dissolveCh.capturedFlourish) {
           try { dissolveCh.capturedFlourish(this, mesh, dissolveSub, t, raw); } catch (e) { /* 安全兜底 */ }
         }
@@ -441,6 +446,11 @@ export class Animator {
 
   /**
    * 每帧待机微动。必须在主循环里对每个棋子调用一次。
+   * 三层结构（piece-image-v4 §3.0，数据源 CombatConstants.IDLE_PIECE）：
+   *   L0 呼吸层（idleGroup.position.y / rotation.z，按兵种差异化幅度）
+   *   L1 子组微动层（按兵种正弦摆动）
+   *   L2 偶发脉冲层（确定性门控波形，无随机/无状态）
+   * _busy 时对「待机专属通道」幂等归零（绝不写战斗拥有的通道/节点，见 zeroChannels）。
    * @param {THREE.Object3D} group 棋子根 Group
    * @param {number} t 当前秒（performance.now()/1000）
    */
@@ -451,27 +461,56 @@ export class Animator {
     // idleGroup：整枚棋子的微动作用层。绝不写 orient 的 rotation/position，
     // 否则会触发欧拉→四元数重算，把黑方 Y=180° 的朝向翻成 X=180°（头朝下）。
     const idleGroup = orient.getObjectByName('idleGroup') || orient;
-    // 移动 / 吃子进行中：仅把「idleGroup 节点」的待机微动归零，
-    // 让移动补间（作用于棋子根 Group）干净推进。
+    const cfg = IDLE_PIECE[ud.pieceType] || null;
+    const sg = ud.subGroups;
+
+    // 移动 / 吃子进行中：仅把「idleGroup 节点」的待机微动归零，并按兵种把
+    // 待机专属子组通道幂等归零（每帧执行，无状态）。战斗通道（如 arm.x / sword.z）
+    // 由 windUp/strike/settle 接管，绝不在 busy 时写入，避免互相打架。
     if (ud._busy) {
       idleGroup.position.y = 0;
       idleGroup.rotation.z = 0;
+      if (cfg && cfg.zeroChannels && sg) {
+        for (const ch of cfg.zeroChannels) {
+          const dot = ch.indexOf('.');
+          const sub = sg[ch.slice(0, dot)];
+          if (sub) sub[ch.slice(dot + 1)] = 0;
+        }
+      }
       return;
     }
     const sel = !!selected;
     const amp = sel ? 1.8 : 1;   // 选中放大（Juice 选中强调 / Windex 焦点）
     const ph = ud.idlePhase || 0;
-    // 全员：极轻的呼吸浮动 + 摇摆（选中更明显），让棋子"活着"
-    idleGroup.position.y = Math.sin(t * 1.15 + ph) * 0.012 * amp;
-    idleGroup.rotation.z = Math.sin(t * 0.85 + ph) * 0.014 * amp;
+    const bAmp = (cfg && cfg.breathe) || 0.012;
+    const sAmp = (cfg && cfg.sway) || 0.014;
+    // L0 呼吸层（保留现公式，幅度按兵种差异化；K/A 最稳）
+    idleGroup.position.y = Math.sin(t * 1.15 + ph) * bAmp * amp;
+    idleGroup.rotation.z = Math.sin(t * 0.85 + ph) * sAmp * amp;
 
-    const sg = ud.subGroups;
-    if (!sg) return;
-    // 分兵种待机微动：统一交给编排 idle（只动子组，绝不写 idleGroup/root）。
-    // 主循环每帧调用，编排内部必须无状态、可在任意时刻启停。
-    const ch = _getChoreoStub(ud.pieceType);
-    if (ch && ch.idle) {
-      try { ch.idle(this, group, sg, t, sel); } catch (e) { /* 编排异常不影响主循环 */ }
+    if (!sg || !cfg) return;
+    // L1 子组微动层（个性化主体；无每帧对象分配）
+    if (cfg.l1) {
+      const l1Amp = amp;
+      for (const w of cfg.l1) {
+        const sub = sg[w[0]];
+        if (!sub) continue;
+        sub[w[1]] = w[2] * l1Amp * Math.sin(t * 2 * Math.PI * w[3] + ph + w[4]);
+      }
+    }
+    // L2 偶发脉冲层（确定性门控；选中时脉冲幅度 ×min(amp,1.5) 防超 0.11）
+    if (cfg.l2) {
+      const l2Amp = Math.min(amp, 1.5);
+      for (const p of cfg.l2) {
+        const sub = sg[p[0]];
+        if (!sub) continue;
+        const gate = p[5];
+        if (gate === 'phPlus' && Math.sin(ph) <= 0) continue;
+        if (gate === 'phMinus' && Math.sin(ph) > 0) continue;
+        const u = t / p[3] + ph / (2 * Math.PI);
+        const pulse = Math.pow(Math.sin(Math.PI * (u - Math.floor(u))), 2);
+        sub[p[1]] += p[2] * l2Amp * pulse;
+      }
     }
   }
 

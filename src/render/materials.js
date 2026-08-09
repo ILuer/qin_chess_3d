@@ -10,10 +10,13 @@
  *
  * 附加导出（供 pieceFactory / boardMesh / engineering-lead 复用）：
  *   PALETTE
- *   getBaseTopMaterial(glyph, side)
  *   getBannerMaterial(glyph, side)
  *   createLeiWenTexture / createWoodTexture / createTextTexture
- *   createBaseTopTexture / createBannerTexture
+ *   createBannerTexture
+ *
+ * 无底座（art-bible-v3-pieceless §3.1）：已删除 8 个 base 专属材质
+ * （baseSide/baseBottom/baseRim/pedestal × 红黑）与 createBaseTopTexture()；
+ * 新增 9 个地面接触面材质（bootSole/hoofSole/wheelSole/frameSole × 红黑 + throneSole 共用）。
  *
  * 设计原则：红黑双方**形制完全相同、材质与配色不同**。
  *   红方 = 赤红戎装 + 鎏金/青铜配件 + 暖调
@@ -314,89 +317,6 @@ export function createTextTexture(text, opts = {}) {
 }
 
 /**
- * 棋子底座顶面贴图（汉字标识 + 内凹装饰环）
- *
- * ★ UV 推导（关键）：THREE.CylinderGeometry 顶盖 UV 为
- *      u = z / (2R) + 0.5 ，v = x / (2R) + 0.5
- *   即 canvas 右 = 世界 +Z，canvas 上 = 世界 +X。
- *   俯视时（相机在 +Z 上方）屏幕右 = +X = canvas 上，屏幕上 = -Z = canvas 左。
- *   → 文字需 rotate(-PI/2) 才能被 +Z 侧玩家正读；rotate(+PI/2) 被 -Z 侧玩家正读。
- *   汉字绘制在**外圈环带**（半径 0.55R~0.95R），中心留给人物立柱台，绝不遮挡。
- */
-export function createBaseTopTexture(glyph, side, opts = {}) {
-  const S = opts.size || 512;
-  const warm = side === 'r';
-  const cv = mkCanvas(S, S);
-  const ctx = cv.getContext('2d');
-  const C = S / 2;
-
-  const faceA = warm ? '#3a1c17' : '#1c1c22';
-  const faceB = warm ? '#24110e' : '#101014';
-  const ringC = warm ? PALETTE.gold : PALETTE.silver;
-  const glyphC = warm ? '#ffd98a' : '#dfe6ee';
-
-  // 底盘渐变
-  const g = ctx.createRadialGradient(C, C, S * 0.06, C, C, C);
-  g.addColorStop(0, faceA);
-  g.addColorStop(0.62, faceA);
-  g.addColorStop(1, faceB);
-  ctx.fillStyle = g;
-  ctx.beginPath();
-  ctx.arc(C, C, C, 0, Math.PI * 2);
-  ctx.fill();
-
-  // 内凹装饰环（两道）
-  ctx.strokeStyle = ringC;
-  ctx.globalAlpha = 0.9;
-  ctx.lineWidth = S * 0.014;
-  ctx.beginPath(); ctx.arc(C, C, C * 0.94, 0, Math.PI * 2); ctx.stroke();
-  ctx.globalAlpha = 0.55;
-  ctx.lineWidth = S * 0.008;
-  ctx.beginPath(); ctx.arc(C, C, C * 0.52, 0, Math.PI * 2); ctx.stroke();
-  ctx.globalAlpha = 1;
-
-  // 四方雷纹小点（分隔）
-  ctx.fillStyle = ringC;
-  for (let i = 0; i < 4; i++) {
-    const a = Math.PI / 4 + (i * Math.PI) / 2;
-    ctx.save();
-    ctx.translate(C + Math.cos(a) * C * 0.72, C + Math.sin(a) * C * 0.72);
-    ctx.rotate(a);
-    ctx.globalAlpha = 0.8;
-    ctx.fillRect(-S * 0.035, -S * 0.012, S * 0.07, S * 0.024);
-    ctx.restore();
-  }
-  ctx.globalAlpha = 1;
-
-  // 汉字 ×2（分别面向 +Z / -Z 玩家），落在 0.55R~0.92R 的环带内，不与立台/顶沿冲突
-  const fs = Math.round(S * 0.185);
-  const rr = C * 0.73;
-  const drawGlyph = (px, py, rot) => {
-    ctx.save();
-    ctx.translate(px, py);
-    ctx.rotate(rot);
-    ctx.font = '700 ' + fs + 'px "STKaiti","KaiTi","STSong","SimSun","Songti SC",serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.shadowColor = 'rgba(0,0,0,0.9)';
-    ctx.shadowBlur = fs * 0.16;
-    ctx.fillStyle = glyphC;
-    ctx.fillText(glyph, 0, 0);
-    ctx.shadowBlur = 0;
-    ctx.lineWidth = Math.max(1.5, fs * 0.022);
-    ctx.strokeStyle = warm ? '#8c1c1c' : '#0a0a0d';
-    ctx.globalAlpha = 0.7;
-    ctx.strokeText(glyph, 0, 0);
-    ctx.restore();
-  };
-  // canvas 右 = 世界 +Z ；canvas 左 = 世界 -Z
-  drawGlyph(C + rr, C, -Math.PI / 2);
-  drawGlyph(C - rr, C, Math.PI / 2);
-
-  return toTexture(cv, { wrap: THREE.ClampToEdgeWrapping, aniso: 16 });
-}
-
-/**
  * 旗面贴图：云雷纹边框 + 中央大字
  */
 export function createBannerTexture(glyph, side, opts = {}) {
@@ -476,13 +396,6 @@ function std(color, roughness, metalness, extra) {
  *   鎏金  roughness 0.30  metalness 0.95
  */
 function buildLibrary() {
-  const leiRed = createLeiWenTexture({
-    bg: '#341612', bg2: '#1d0b09', fg: PALETTE.gold, repeat: [4, 1]
-  });
-  const leiBlack = createLeiWenTexture({
-    bg: '#1b1b21', bg2: '#0d0d11', fg: PALETTE.silver, repeat: [4, 1]
-  });
-
   const woodTop = createWoodTexture({
     w: 1024, h: 1024, base: '#4a3527', dark: '#251a12', light: '#634834',
     grains: 54, vignette: 0.5
@@ -516,6 +429,12 @@ function buildLibrary() {
     bone:        std(PALETTE.bone, 0.6, 0.0),
     ink:         std(PALETTE.ink, 0.9, 0.0),
     paper:       std('#cfc3a2', 0.85, 0.0),
+    /**
+     * 蟠螭纹独立双面装饰件（K 靠背中央；用户拍板启用，+2 dc）。
+     * 红黑共用 1 个中性色实例；DoubleSide → Parts.build() 视为独立特殊件（不并入族）。
+     * 不新增材质族（非 familyMatte/familyMetal 合并目标），仅 1 个材质实例。
+     */
+    panChi:      std('#8a7f66', 0.55, 0.30, { side: THREE.DoubleSide }),
     flame:       new THREE.MeshStandardMaterial({
       color: new THREE.Color(PALETTE.flame),
       emissive: new THREE.Color('#ff7a1a'),
@@ -527,6 +446,14 @@ function buildLibrary() {
       depthWrite: false
     })
   };
+
+  /**
+   * 无底座后地面接触面材质（art-bible-v3-pieceless §3.1）：
+   *   鞋底/蹄底/轮底/A架脚/龙椅底座底，均为对应皮革/木色暗化 ~20%。
+   *   红黑各 4 类 + 龙椅底座底共用 1 个 = 9 个材质。
+   * 龙椅底座底（throneSole）两阵营几乎不可见，取中性暗木共用。
+   */
+  const soleThrone = std('#1e1916', 0.80, 0.03);
 
   /* ---- 红方：赤红戎装 + 鎏金/青铜 + 暖调 ---- */
   const r = {
@@ -545,10 +472,12 @@ function buildLibrary() {
     woodDeep:  std(PALETTE.zhuDark, 0.72, 0.05),
     jade:      std('#e3dcc6', 0.25, 0.0),
     skin:      common.skin,
-    baseSide:  std('#7a3428', 0.62, 0.25, { map: leiRed }),
-    baseBottom:std('#1a0f0c', 0.9, 0.05),
-    baseRim:   std(PALETTE.gold, 0.3, 0.95),
-    pedestal:  std('#2e1512', 0.7, 0.15),
+    /* 地面接触面（无底座） */
+    bootSole:  std('#623b20', 0.80, 0.02),   // 兵/士/帅/象/炮兵 鞋底（红皮暗20%）
+    hoofSole:  std('#623b20', 0.85, 0.02),   // 马/车 马蹄底
+    wheelSole: std('#571d12', 0.75, 0.04),   // 车 车轮触地弧（朱漆木暗20%）
+    frameSole: std('#571d12', 0.75, 0.04),   // 炮 A架脚（朱漆木暗20%）
+    throneSole: soleThrone,                  // 帅 龙椅底座底（共用中性暗木）
     plume:     std('#d9432c', 0.8, 0.0)
   };
 
@@ -569,10 +498,12 @@ function buildLibrary() {
     woodDeep:  std('#2a2320', 0.72, 0.05),
     jade:      std(PALETTE.jadeCool, 0.25, 0.0),
     skin:      common.skinCool,
-    baseSide:  std('#2c2c36', 0.62, 0.25, { map: leiBlack }),
-    baseBottom:std('#0b0b0f', 0.9, 0.05),
-    baseRim:   std(PALETTE.silver, 0.3, 0.95),
-    pedestal:  std('#16161d', 0.7, 0.15),
+    /* 地面接触面（无底座） */
+    bootSole:  std('#2f2721', 0.80, 0.02),   // 鞋底（黑皮暗20%）
+    hoofSole:  std('#2f2721', 0.85, 0.02),   // 马蹄底
+    wheelSole: std('#3b312d', 0.75, 0.04),   // 车轮触地弧（暗木暗20%）
+    frameSole: std('#3b312d', 0.75, 0.04),   // A架脚（暗木暗20%）
+    throneSole: soleThrone,                  // 龙椅底座底（共用）
     plume:     std('#7f8896', 0.8, 0.0)
   };
 
@@ -632,19 +563,30 @@ function buildLibrary() {
       color: new THREE.Color('#ff2f1f'), transparent: true, opacity: 0.55,
       side: THREE.DoubleSide, depthWrite: false
     }),
-    /** 底座 emissive 变体：选中时替换 baseRim 用 */
-    baseRimGlowR: std(PALETTE.gold, 0.28, 0.9, {
-      emissive: new THREE.Color('#ffbf3a'), emissiveIntensity: 1.6
-    }),
-    baseRimGlowB: std(PALETTE.silver, 0.28, 0.9, {
-      emissive: new THREE.Color('#7fd8ff'), emissiveIntensity: 1.4
-    }),
     /** 悬停微亮 */
     hoverRing: new THREE.MeshBasicMaterial({
       color: new THREE.Color('#f0e2b0'), transparent: true, opacity: 0.35,
       side: THREE.DoubleSide, depthWrite: false
     })
   };
+
+  /**
+   * 材质族（draw call 优化的共享材质，pieceFactory 按族合并子组内零件）：
+   *   matte —— 布料/皮革/木/皮肤等粗糙度 0.7~0.9、金属度 ~0 的材质族
+   *   metal —— 甲片/青铜/鎏金等粗糙度 0.3~0.45、金属度 0.75~0.95 的材质族
+   * 两者均为白色 + vertexColors，具体颜色在合并时烘焙进顶点色，因此
+   * 「合并为单 mesh」不会丢失零件颜色，只把同族零件的 roughness/metalness
+   * 统一到族代表值（视觉差异极小，换取每子组 draw call 从 N → ≤2）。
+   * 见 pieceFactory.Parts.build() 的族合并逻辑。
+   */
+  const familyMatte = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0xffffff), vertexColors: true,
+    roughness: 0.78, metalness: 0.03
+  });
+  const familyMetal = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0xffffff), vertexColors: true,
+    roughness: 0.37, metalness: 0.85
+  });
 
   return {
     palette: PALETTE,
@@ -653,6 +595,7 @@ function buildLibrary() {
     b,
     board,
     fx,
+    families: { matte: familyMatte, metal: familyMetal },
     /** 便捷：按阵营取材质集 */
     side(id) { return id === 'r' ? this.r : this.b; }
   };
@@ -665,31 +608,6 @@ function buildLibrary() {
 export function getMaterials() {
   if (!_lib) _lib = buildLibrary();
   return _lib;
-}
-
-/**
- * 底座顶面材质（含汉字标识），按 glyph+side 缓存
- */
-export function getBaseTopMaterial(glyph, side) {
-  const key = 'basetop:' + glyph + ':' + side;
-  let m = _extraMats.get(key);
-  if (!m) {
-    const tex = createBaseTopTexture(glyph, side);
-    m = new THREE.MeshStandardMaterial({
-      map: tex,
-      // 字面自发光：底座顶面朝上，在斜俯视角下极易整片落入棋子自身的阴影，
-      // 单靠外部布光无法根治。用同一张贴图兼作 emissiveMap，
-      // 让字形的亮部自带微光——暗处能读、亮处也不会糊成白斑。
-      // 强度压在 0.3 以内：再高会让字面在主光直射下过曝发白。
-      emissiveMap: tex,
-      emissive: new THREE.Color('#ffffff'),
-      emissiveIntensity: 0.28,
-      roughness: 0.5,
-      metalness: 0.2
-    });
-    _extraMats.set(key, m);
-  }
-  return m;
 }
 
 /**

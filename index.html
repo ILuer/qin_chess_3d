@@ -6,12 +6,15 @@
   <meta name="theme-color" content="#0a0b0e" />
   <title>秦风 · 3D 中国象棋</title>
 
-  <!-- 零构建步骤：importmap 映射 Three.js（本地 vendor，零外部依赖）
-       相对路径写法保证子路径部署（如 /qin_chess_3d/）同样成立 -->
+  <!-- importmap 映射 Three.js r185（本地 vendor，零外部依赖）
+       默认路径 (three) = WebGL（650KB，全浏览器兼容）
+       WebGPU 路径 (three/webgpu) = WebGPU+WebGL 双后端（2.1MB，需 Chrome 113+/Edge 113+/Safari 26+）
+       运行时降级逻辑见 src/render/scene.js -->
   <script type="importmap">
   {
     "imports": {
       "three": "./vendor/three/three.module.js",
+      "three/webgpu": "./vendor/three/three.webgpu.js",
       "three/addons/": "./vendor/three/addons/"
     }
   }

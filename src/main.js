@@ -303,6 +303,7 @@ function doReset() {
   aiBusy = false;
   animator.killAll(false);
   if (combatDirector) combatDirector.abort(); // 清理战场演出残留
+  if (sceneSys && sceneSys.clearCombatLight) sceneSys.clearCombatLight(); // 清理战斗灯光脉冲残留（bug-light-blinding 方案 B）
   gs.reset();
   gameOver = false;
   effects.clearAll();

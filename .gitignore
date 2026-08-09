@@ -5,6 +5,13 @@ build/
 *.log
 npm-debug.log*
 
+# ---- Phase 0 测试工具链（P1/P2 用户拍板：package.json 暂不入库；tests/ 绝不入库）----
+tests/
+coverage/
+.nyc_output/
+package.json
+package-lock.json
+
 # ---- 编辑器 / 系统 ----
 .vscode/
 .idea/

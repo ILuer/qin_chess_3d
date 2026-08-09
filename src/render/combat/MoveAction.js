@@ -56,6 +56,9 @@ export function execute(cd, piece, fromCell, toCell, opts = {}) {
     const idleGroup = orient.getObjectByName('idleGroup') || orient;
     const baseScale = piece.userData.__baseScale || piece.scale.clone();
     if (!piece.userData.__baseScale) piece.userData.__baseScale = baseScale.clone();
+    // ★ K 预缩放锁定：以 idleGroup 自身基准（K=1.25，其余=1）做相对缩放扰动，
+    //   绝不写死 1.0 抹掉 K 的整体放大（piece-image-v4 §5 风险 2）。
+    const idleBase = idleGroup.scale.clone();
 
     // ── 位置计算 ──
     const fromW = toWorld(fromCell.file, fromCell.rank);
@@ -91,8 +94,8 @@ export function execute(cd, piece, fromCell, toCell, opts = {}) {
       onStart: () => { sequencer.fire('M0_start'); },
       onUpdate: (t) => {
         idleGroup.rotation.x = leanBack * t;
-        idleGroup.scale.y = 1 - (1 - m0Squash) * t;
-        idleGroup.scale.x = 1 + (1 - m0Squash) * t * 0.4;
+        idleGroup.scale.y = idleBase.y * (1 - (1 - m0Squash) * t);
+        idleGroup.scale.x = idleBase.x * (1 + (1 - m0Squash) * t * 0.4);
       }
     });
 
@@ -103,7 +106,7 @@ export function execute(cd, piece, fromCell, toCell, opts = {}) {
       onStart: () => { sequencer.fire('M1_start'); },
       onUpdate: (t) => {
         idleGroup.rotation.x = leanBack * (1 - t);  // 后仰 → 0
-        idleGroup.scale.set(1, 1, 1);               // 回弹
+        idleGroup.scale.copy(idleBase);             // 回弹（保留 K 预缩放）
       }
     });
 
@@ -143,9 +146,9 @@ export function execute(cd, piece, fromCell, toCell, opts = {}) {
         // 过冲
         const k = 1 - t;
         const osc = Math.sin(Math.PI * k * 2) * k;
-        idleGroup.scale.x = baseScale.x * (1 + (m3Over - 1) * osc);
-        idleGroup.scale.y = baseScale.y * (1 - (m3Over - 1) * 0.5 * osc);
-        idleGroup.scale.z = baseScale.z * (1 + (m3Over - 1) * osc);
+        idleGroup.scale.x = idleBase.x * (1 + (m3Over - 1) * osc);
+        idleGroup.scale.y = idleBase.y * (1 - (m3Over - 1) * 0.5 * osc);
+        idleGroup.scale.z = idleBase.z * (1 + (m3Over - 1) * osc);
         idleGroup.rotation.x = leanVal;
       }
     });
@@ -162,14 +165,14 @@ export function execute(cd, piece, fromCell, toCell, opts = {}) {
         piece.position.y = 0;
         if (t < 0.5) {
           const s = t * 2;
-          idleGroup.scale.y = baseScale.y * (1 - m4Squash * s);
-          idleGroup.scale.x = baseScale.x * (1 + m4Squash * 0.6 * s);
-          idleGroup.scale.z = baseScale.z * (1 + m4Squash * 0.6 * s);
+          idleGroup.scale.y = idleBase.y * (1 - m4Squash * s);
+          idleGroup.scale.x = idleBase.x * (1 + m4Squash * 0.6 * s);
+          idleGroup.scale.z = idleBase.z * (1 + m4Squash * 0.6 * s);
         } else {
           const s = (t - 0.5) * 2;
-          idleGroup.scale.y = baseScale.y * ((1 - m4Squash) + m4Squash * s);
-          idleGroup.scale.x = baseScale.x * ((1 + m4Squash * 0.6) - m4Squash * 0.6 * s);
-          idleGroup.scale.z = baseScale.z * ((1 + m4Squash * 0.6) - m4Squash * 0.6 * s);
+          idleGroup.scale.y = idleBase.y * ((1 - m4Squash) + m4Squash * s);
+          idleGroup.scale.x = idleBase.x * ((1 + m4Squash * 0.6) - m4Squash * 0.6 * s);
+          idleGroup.scale.z = idleBase.z * ((1 + m4Squash * 0.6) - m4Squash * 0.6 * s);
         }
         idleGroup.rotation.x = leanVal * (1 - t);
       }
@@ -184,7 +187,7 @@ export function execute(cd, piece, fromCell, toCell, opts = {}) {
         piece.position.copy(endPos);
         piece.position.y = 0;
         idleGroup.rotation.x = leanVal * (1 - t);
-        idleGroup.scale.copy(baseScale);
+        idleGroup.scale.copy(idleBase);
       },
       onComplete: () => {
         // 释放 busy
@@ -192,7 +195,7 @@ export function execute(cd, piece, fromCell, toCell, opts = {}) {
         piece.position.copy(endPos);
         piece.position.y = 0;
         idleGroup.rotation.x = 0;
-        idleGroup.scale.copy(baseScale);
+        idleGroup.scale.copy(idleBase);
 
         // 清理
         unreg();

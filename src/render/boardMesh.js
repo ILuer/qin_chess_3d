@@ -93,16 +93,26 @@ export function createBoard() {
   const group = new THREE.Group();
   group.name = 'board';
 
-  /* ---- 1. 木质厚板台面（顶面恰好 y = 0） ---- */
-  const topGeo = new THREE.BoxGeometry(TOP_W, TOP_TH, TOP_D);
-  topGeo.translate(0, -TOP_TH / 2, 0);
-  const topMesh = new THREE.Mesh(topGeo, [
-    B.edge, B.edge, B.top, B.edge, B.edge, B.edge
-  ]);
-  topMesh.name = 'boardTop';
-  topMesh.receiveShadow = true;
-  topMesh.castShadow = false;
-  group.add(topMesh);
+  /* ---- 1. 木质厚板台面（顶面恰好 y = 0） ----
+   * 原实现为 6 材质数组 BoxGeometry = 6 个 draw call；改为
+   * 「顶面平面(woodTop) + 侧面盒(woodEdge)」= 2 个 draw call，视觉不变。 */
+  const topPlaneGeo = new THREE.PlaneGeometry(TOP_W, TOP_D);
+  topPlaneGeo.rotateX(-Math.PI / 2);
+  topPlaneGeo.translate(0, 0, 0);
+  const topPlane = new THREE.Mesh(topPlaneGeo, B.top);
+  topPlane.name = 'boardTop';
+  topPlane.receiveShadow = true;
+  topPlane.castShadow = false;
+  group.add(topPlane);
+
+  const sideGeo = new THREE.BoxGeometry(TOP_W, TOP_TH, TOP_D);
+  sideGeo.translate(0, -TOP_TH / 2 - 0.002, 0); // 顶面比顶面平面低 2mm，避免 z-fight
+  // 单材质盒：顶面被 topPlane 盖住、底面不可见，仅 4 侧面参与绘制（1 draw call）
+  const sideMesh = new THREE.Mesh(sideGeo, B.edge);
+  sideMesh.name = 'boardSide';
+  sideMesh.receiveShadow = true;
+  sideMesh.castShadow = false;
+  group.add(sideMesh);
 
   /* ---- 2. 河界暗色嵌板（微浮雕） ---- */
   const riverGeo = new THREE.BoxGeometry(HALF_W * 2 + 0.02, 0.010, RIVER_Z * 2 - 0.03);
@@ -251,30 +261,41 @@ function buildBrazier(mats, bin, flames, x, z) {
   return flame;
 }
 
-function buildBanner(mats, side, x, z) {
+function buildBanner(mats, side, x, z, bins) {
   const M = mats.side(side);
   const g = new THREE.Group();
   g.name = 'qinBanner_' + side;
 
-  const bin = new Bin();
-  bin.push(new THREE.CylinderGeometry(0.34, 0.44, 0.24, 12, 1).translate(0, 0.12, 0));
-  const b0 = new THREE.Mesh(bin.merge(), mats.board.platform);
-  b0.receiveShadow = true;
-  g.add(b0);
+  // 旗面正对棋盘中心：整组位置 + 绕 Y 旋转（在末尾统一烘焙进各零件几何）
+  g.position.set(x, 0, z);
+  g.rotation.y = Math.atan2(-x, -z);
+  g.updateMatrix();
 
-  const poleBin = new Bin();
-  poleBin.push(new THREE.CylinderGeometry(0.042, 0.055, 2.30, 10, 1).translate(0, 1.30, 0));
-  poleBin.push(new THREE.ConeGeometry(0.072, 0.24, 8, 1).translate(0, 2.57, 0));
+  // 零件并入合并收集器（跨 4 面旗帜按材质合并，见 createEnvironment 末尾）
+  const baseBin = bins.base;   // platform 材质（红黑共用）
+  const poleBin = bins.pole[side];   // woodDeep（红/黑分属）
+  const tipBin = bins.tip[side];     // plume（红/黑分属）
+  const flagBin = bins.flag[side];   // banner 材质（红/黑分属）
+  const pushGeom = (bin, geo) => {
+    geo.applyMatrix4(g.matrix);   // 烘焙组变换
+    bin.geoms.push(geo);
+  };
+
+  const b0g = new THREE.CylinderGeometry(0.34, 0.44, 0.24, 12, 1);
+  b0g.translate(0, 0.12, 0);
+  pushGeom(baseBin, b0g);
+
+  const poleBinLocal = new Bin();
+  poleBinLocal.push(new THREE.CylinderGeometry(0.042, 0.055, 2.30, 10, 1).translate(0, 1.30, 0));
+  poleBinLocal.push(new THREE.ConeGeometry(0.072, 0.24, 8, 1).translate(0, 2.57, 0));
   const r1 = new THREE.TorusGeometry(0.058, 0.016, 5, 12); r1.rotateX(Math.PI / 2); r1.translate(0, 0.95, 0);
   const r2 = new THREE.TorusGeometry(0.052, 0.016, 5, 12); r2.rotateX(Math.PI / 2); r2.translate(0, 2.05, 0);
-  poleBin.push(r1); poleBin.push(r2);
-  const pole = new THREE.Mesh(poleBin.merge(), M.woodDeep);
-  pole.castShadow = false;
-  g.add(pole);
+  poleBinLocal.push(r1); poleBinLocal.push(r2);
+  for (const geo of poleBinLocal.geoms) pushGeom(poleBin, geo);
 
-  const tip = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8), M.plume);
-  tip.position.set(0, 2.42, 0);
-  g.add(tip);
+  const tipGeo = new THREE.SphereGeometry(0.075, 10, 8);
+  tipGeo.translate(0, 2.42, 0);
+  pushGeom(tipBin, tipGeo);
 
   // 旗面（云雷纹 + "秦"）
   const pg = new THREE.PlaneGeometry(0.86, 1.26, 10, 3);
@@ -286,13 +307,9 @@ function buildBanner(mats, side, x, z) {
   }
   p.needsUpdate = true;
   pg.computeVertexNormals();
-  const flag = new THREE.Mesh(pg, getBannerMaterial('秦', side));
-  flag.position.set(0.47, 1.72, 0);
-  flag.castShadow = false;
-  g.add(flag);
+  pg.translate(0.47, 1.72, 0);
+  pushGeom(flagBin, pg);
 
-  g.position.set(x, 0, z);
-  g.rotation.y = Math.atan2(-x, -z);   // 旗面正对棋盘中心
   return g;
 }
 
@@ -346,11 +363,38 @@ export function createEnvironment() {
   group.add(braziers);
   for (const f of flames) group.add(f);
 
-  /* ---- 秦军旗帜（红方 +Z / 黑方 -Z，各两面） ---- */
-  group.add(buildBanner(mats, 'r', -6.10, 3.60));
-  group.add(buildBanner(mats, 'r', 6.10, 3.60));
-  group.add(buildBanner(mats, 'b', -6.10, -3.60));
-  group.add(buildBanner(mats, 'b', 6.10, -3.60));
+  /* ---- 秦军旗帜（红方 +Z / 黑方 -Z，各两面） ----
+   * 四面旗帜的静态零件按材质合并：底座×4 → 1、旗杆×4 → 红/黑各 1、
+   * 顶饰×4 → 红/黑各 1、旗面×4 → 红/黑各 1。合计 7 个 draw call（原 16）。 */
+  const bannerBins = {
+    base: new Bin(),
+    pole: { r: new Bin(), b: new Bin() },
+    tip: { r: new Bin(), b: new Bin() },
+    flag: { r: new Bin(), b: new Bin() }
+  };
+  const mkBannerGroup = (side, x, z) => buildBanner(mats, side, x, z, bannerBins);
+  mkBannerGroup('r', -6.10, 3.60);
+  mkBannerGroup('r', 6.10, 3.60);
+  mkBannerGroup('b', -6.10, -3.60);
+  mkBannerGroup('b', 6.10, -3.60);
+
+  const mergedBannerMeshes = [];
+  const mkMerged = (bin, material, receiveShadow) => {
+    const geo = bin.merge();
+    if (!geo) return;
+    const m = new THREE.Mesh(geo, material);
+    m.castShadow = false;
+    m.receiveShadow = !!receiveShadow;
+    mergedBannerMeshes.push(m);
+  };
+  mkMerged(bannerBins.base, mats.board.platform, true);
+  mkMerged(bannerBins.pole.r, mats.r.woodDeep, false);
+  mkMerged(bannerBins.pole.b, mats.b.woodDeep, false);
+  mkMerged(bannerBins.tip.r, mats.r.plume, false);
+  mkMerged(bannerBins.tip.b, mats.b.plume, false);
+  mkMerged(bannerBins.flag.r, getBannerMaterial('秦', 'r'), false);
+  mkMerged(bannerBins.flag.b, getBannerMaterial('秦', 'b'), false);
+  for (const m of mergedBannerMeshes) group.add(m);
 
   /* ---- 动画钩子：火焰呼吸 ---- */
   const base = flames.map((f) => f.scale.y);

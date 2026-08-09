@@ -310,6 +310,122 @@ export const IDLE_WEAPON_BIAS = {
   [PT.KING]:     +0.06
 };
 
+/**
+ * 七兵种个性化待机参数（piece-image-v4 §3.2~3.8，数据唯一真相源；animator.tickIdle 读取）。
+ *
+ * 波形定义：
+ *   正弦  S(freqHz, phOff, amp) = amp * sin(2π·freqHz·t + ph + phOff)
+ *   脉冲  pulse(u) = sin(πu)²,  u = fract(t/T + ph/2π)   —— 确定性门控，每 T 秒一次光滑凸起
+ *
+ * 字段：
+ *   breathe / sway  —— L0 呼吸层幅度（idleGroup.position.y / rotation.z；K/A 最稳）
+ *   l1  [sub, axis, amp, freqHz, phOff]  —— L1 子组微动层（个性化主体）
+ *   l2  [sub, axis, amp, period, phOff, gate?]  —— L2 偶发脉冲层；gate: 'phPlus'(sin(ph)>0)/'phMinus'
+ *   zeroChannels    —— _busy 时幂等归零的通道（= 待机写入 ∩ 战斗未写入；绝不与 windUp/strike/settle 打架）
+ *
+ * 幅度硬边界：待机 rotation 峰值 ≤ 0.06（含脉冲叠加）、position.y ≤ 0.02；选中 amp≤1.8 时 ≤ 0.11。
+ */
+export const IDLE_PIECE = {
+  [PT.PAWN]: {
+    desc: '戈叩盾：缓摆 + 叩击脉冲（P）',
+    breathe: 0.012, sway: 0.014,
+    l1: [
+      ['arm', 'z', 0.030, 0.30, 0],
+      ['arm', 'x', 0.020, 0.30, 0.6],
+      ['body', 'x', 0.020, 0.30, Math.PI]
+    ],
+    l2: [
+      ['arm', 'x', 0.040, 5.0],
+      ['body', 'x', -0.020, 5.0]
+    ],
+    // windUp 写 arm.x → 只归零 arm.z / body.x
+    zeroChannels: ['arm.rotation.z', 'body.rotation.x']
+  },
+  [PT.HORSE]: {
+    desc: '扬前身 + 骑手对位后仰（N）',
+    breathe: 0.012, sway: 0.014,
+    l1: [
+      ['mount', 'x', -0.030, 0.26, 0],
+      ['rider', 'x', 0.018, 0.26, 0],
+      ['rider', 'z', 0.015, 0.26, 1.0]
+    ],
+    l2: [
+      ['mount', 'x', -0.030, 6.5]
+    ],
+    // windUp 写 mount.x / rider.x → 只归零 rider.z
+    zeroChannels: ['rider.rotation.z']
+  },
+  [PT.ELEPHANT]: {
+    desc: '展卷吟诵：简牍微举复落（B）',
+    breathe: 0.012, sway: 0.014,
+    l1: [
+      ['arms', 'z', 0.040, 0.26, 0],
+      ['arms', 'x', 0.020, 0.26, 0.8],
+      ['robe', 'x', 0.018, 0.26, Math.PI]
+    ],
+    l2: [
+      ['arms', 'x', 0.040, 6.0]
+    ],
+    // windUp/strike 写 arms.z / robe.x(/z) → 只归零 arms.x
+    zeroChannels: ['arms.rotation.x']
+  },
+  [PT.ADVISOR]: {
+    desc: '蓄势警戒：全场最静、无脉冲（A）',
+    breathe: 0.008, sway: 0.008,
+    l1: [
+      ['body', 'z', 0.012, 0.40, 0],
+      ['sword', 'z', 0.018, 0.40, 0.5],
+      ['arms', 'x', 0.015, 0.40, Math.PI]
+    ],
+    l2: [],
+    // windUp 写 sword.z → 只归零 body.z / arms.x
+    zeroChannels: ['body.rotation.z', 'arms.rotation.x']
+  },
+  [PT.ROOK]: {
+    desc: '双马刨蹄 + 御者勒缰 + 车舆滞后（R）',
+    breathe: 0.010, sway: 0.012,
+    l1: [
+      ['horses', 'x', 0.028, 0.24, 0],
+      ['body', 'x', 0.012, 0.24, -0.8],
+      ['driver', 'x', 0.020, 0.24, 1.2]
+    ],
+    l2: [
+      ['horses', 'x', 0.032, 7.0]
+    ],
+    // windUp 写 spearman.x / driver.x → 只归零 horses.x / body.x
+    zeroChannels: ['horses.rotation.x', 'body.rotation.x']
+  },
+  [PT.CANNON]: {
+    desc: '双兵左右反相检修 + 脉冲侧向交替（C）',
+    breathe: 0.010, sway: 0.012,
+    l1: [
+      ['soldierL', 'x', 0.030, 0.22, 0],
+      ['soldierR', 'x', 0.030, 0.22, Math.PI],
+      ['trebuchet', 'z', 0.008, 0.22, 0.5]
+    ],
+    l2: [
+      ['soldierL', 'x', 0.030, 6.0, 0, 'phPlus'],
+      ['soldierR', 'x', 0.030, 6.0, 0, 'phMinus']
+    ],
+    // 全部通道均被 windUp/strike 覆盖 → 无需额外归零（settle 会复位）
+    zeroChannels: []
+  },
+  [PT.KING]: {
+    desc: '抚椅：rArm 抚扶手摩挲 + body 微沉肩 + 王座如磐 + 帅旗微扬（K）',
+    breathe: 0.008, sway: 0.008,
+    l1: [
+      ['rArm', 'z', 0.050, 0.18, 0],
+      ['rArm', 'x', 0.025, 0.18, 1.2],
+      ['body', 'x', 0.020, 0.18, 0.6],
+      ['throne', 'x', 0.005, 0.18, 0],
+      ['banner', 'z', 0.022, 0.30, 2.0]
+    ],
+    l2: [],
+    // windUp 写 sword.z / throne.x → 只归零 rArm.z / rArm.x / body.x / banner.z
+    zeroChannels: ['rArm.rotation.z', 'rArm.rotation.x', 'body.rotation.x', 'banner.rotation.z']
+  }
+};
+
 // ═══════════════════════════════════════════════════════════════
 // §9 AI 加速倍率
 // ═══════════════════════════════════════════════════════════════

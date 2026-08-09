@@ -27,6 +27,13 @@ const MAX_POLAR = 1.35;
 const BG_COLOR = 0x1a2230;
 const FOG_COLOR = 0x232b38;
 
+/**
+ * 战斗灯光脉冲强度上限（方案 B 防御性 clamp，任何路径都无法把灯打到离谱值）。
+ * 基线 fill 0.95 / rim 18 / under 12；L5 boost 1.8 → 峰值 fill 1.71 / rim 32.4 / under 21.6，
+ * 上限取「略高于 L5 峰值」的整值，正常演出不触发，仅防未来回归。
+ */
+const COMBAT_LIGHT_CAP = { fill: 2.0, rim: 30, under: 20 };
+
 /** easeInOutCubic */
 function easeInOutCubic(t) {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
@@ -67,7 +74,7 @@ export class SceneSystem {
     renderer.toneMapping = THREE.NeutralToneMapping;
     renderer.toneMappingExposure = 1.14;
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap;  // PCFSoftShadowMap deprecated in r185
     renderer.setClearColor(BG_COLOR, 1);
     renderer.domElement.classList.add('game-canvas');
     container.appendChild(renderer.domElement);
@@ -157,8 +164,9 @@ export class SceneSystem {
     scene.add(key, key.target);
     this.keyLight = key;
 
-    // 半球光：天空冷、地面暖。天空色提亮，让棋子顶面与侧面拉开层次。
-    const hemi = new THREE.HemisphereLight(0x8da0b8, PALETTE.hemiGround, 0.98);
+    // 半球光：天空冷、地面中性（art-bible-v3-pieceless §7.2：
+    // 原暖调地面反射会对红方棋子"红光洗色"，改中性 0x8a7a6a 保剪影）。
+    const hemi = new THREE.HemisphereLight(0x8da0b8, 0x8a7a6a, 0.98);
     hemi.position.set(0, 12, 0);
     scene.add(hemi);
     this.hemiLight = hemi;
@@ -185,8 +193,8 @@ export class SceneSystem {
      *
      * 两点克制：
      *  - 强度只给 0.62，够提亮但不夺主光的造型感；
-     *  - 位置在相机基础上抬高 3.5，避免与视线完全重合——
-     *    正面平打会消掉所有明暗交界，画面会变得像贴纸一样扁。
+     *  - 位置在相机基础上抬高 2.8（去基座后降 0.7，避免与视线完全重合——
+     *    正面平打会消掉所有明暗交界，画面会变得像贴纸一样扁）。
      */
     const head = new THREE.DirectionalLight(0xfff4e2, 0.62);
     head.position.set(0, 10, 14);
@@ -194,17 +202,27 @@ export class SceneSystem {
     this.headLight = head;
     this._headDir = new THREE.Vector3();
 
-    // 暖色轮廓光，营造秦式青铜氛围
-    const rim = new THREE.PointLight(PALETTE.rimLight, 22, 30, 2);
-    rim.position.set(0, 3.2, -8.5);
+    // 暖色轮廓光，营造秦式青铜氛围（去基座后降高降强，更好包裹矮棋子）
+    const rim = new THREE.PointLight(PALETTE.rimLight, 18, 30, 2);
+    rim.position.set(0, 2.2, -8.5);
     scene.add(rim);
     this.rimLight = rim;
 
-    // 红方侧微弱地灯
+    // 红方侧微弱地灯（降高，从更平的角度打亮棋子脚部）
     const under = new THREE.PointLight(PALETTE.chiHong, 12, 22, 2);
-    under.position.set(0, 2.4, 8.5);
+    under.position.set(0, 1.8, 8.5);
     scene.add(under);
     this.underLight = under;
+
+    // 底部微补光 ×2（art-bible §7.3 可选）：低矮棋子脚部轮廓补光，红暖 / 黑冷
+    const bottomR = new THREE.PointLight(0xffe4d0, 4, 10, 2);
+    bottomR.position.set(0, 0.5, 7.0);
+    scene.add(bottomR);
+    this.bottomLightR = bottomR;
+    const bottomB = new THREE.PointLight(0xd0d8e4, 4, 10, 2);
+    bottomB.position.set(0, 0.5, -7.0);
+    scene.add(bottomB);
+    this.bottomLightB = bottomB;
 
     this._updateHeadLight();
   }
@@ -218,7 +236,7 @@ export class SceneSystem {
     if (this._headDir.lengthSq() < 1e-6) return;
     this._headDir.normalize();
     head.position.copy(t).addScaledVector(this._headDir, 15);
-    head.position.y += 3.5;
+    head.position.y += 2.8;   // 去基座后降 0.7，更平角度照亮棋子正面
     head.target.position.copy(t);
     head.target.updateMatrixWorld();
   }
@@ -354,33 +372,54 @@ export class SceneSystem {
   /**
    * 战斗灯光脉冲：短暂增强 rimLight / fillLight
    * @param {string} level  'L2'|'L3'|'L4'|'L5'
+   *
+   * ⚠ Bug 修复（docs/bug-light-blinding.md，方案 A + B）：
+   *   1) 脉冲开始时捕获基线（fillBase/rimBase/underBase），绝不拿「当前已抬高的
+   *      intensity」当基线 —— 根治连续吃子的复利放大；
+   *   2) 每帧按衰减系数写**绝对值** intensity = base·(1+(boost-1)·decay)，
+   *      不叠加、不依赖帧数 —— 帧率无关、hitstop（dt=0）免疫；
+   *   3) 结束时显式复位到基线；并加 clamp 上限（方案 B）+ clearCombatLight()
+   *      （reset/abort 清理，防未来复发）。
    */
   pulseCombatLight(level = 'L3') {
     const boost = { L2: 1.15, L3: 1.35, L4: 1.55, L5: 1.8 }[level] || 1.35;
     this._combatLight = {
-      t: 0, dur: 0.3,
-      fillBoost: (this.fillLight ? this.fillLight.intensity : 0) * (boost - 1),
-      rimBoost:  (this.rimLight  ? this.rimLight.intensity  : 0) * (boost - 1),
-      underBoost:(this.underLight? this.underLight.intensity : 0) * (boost - 1)
+      t: 0, dur: 0.3, boost,
+      fillBase: this.fillLight ? this.fillLight.intensity : 0,
+      rimBase:  this.rimLight  ? this.rimLight.intensity  : 0,
+      underBase:this.underLight? this.underLight.intensity : 0
     };
   }
 
   _updateCombatLight(dt) {
     const cl = this._combatLight;
     if (!cl) return;
-    cl.t += dt;
+    cl.t += dt;                       // hitstop 时 dt=0 → 不前进；写的是绝对值，不会漂移
     const k = Math.min(1, cl.t / cl.dur);
     const decay = Math.max(0, 1 - k * k);
-    if (this.fillLight)  this.fillLight.intensity  = this.fillLight.intensity  - cl.fillBoost  * (1 - decay) + cl.fillBoost  * decay;
-    if (this.rimLight)   this.rimLight.intensity   = this.rimLight.intensity   - cl.rimBoost   * (1 - decay) + cl.rimBoost   * decay;
-    if (this.underLight) this.underLight.intensity = this.underLight.intensity - cl.underBoost * (1 - decay) + cl.underBoost * decay;
+    const mul = 1 + (cl.boost - 1) * decay;
+    if (this.fillLight)  this.fillLight.intensity  = Math.min(cl.fillBase  * mul, COMBAT_LIGHT_CAP.fill);
+    if (this.rimLight)   this.rimLight.intensity   = Math.min(cl.rimBase   * mul, COMBAT_LIGHT_CAP.rim);
+    if (this.underLight) this.underLight.intensity = Math.min(cl.underBase * mul, COMBAT_LIGHT_CAP.under);
     if (k >= 1) {
-      // 复位：减去残留 boost
-      if (this.fillLight)  this.fillLight.intensity  -= cl.fillBoost  * (1 - decay);
-      if (this.rimLight)   this.rimLight.intensity   -= cl.rimBoost   * (1 - decay);
-      if (this.underLight) this.underLight.intensity -= cl.underBoost * (1 - decay);
+      // 显式复位基线（不依赖衰减趋零）
+      if (this.fillLight)  this.fillLight.intensity  = cl.fillBase;
+      if (this.rimLight)   this.rimLight.intensity   = cl.rimBase;
+      if (this.underLight) this.underLight.intensity = cl.underBase;
       this._combatLight = null;
     }
+  }
+
+  /**
+   * 强制清理灯光脉冲（重开局 / abort 时调用，防「脉冲中途重开 → 灯光停在非基线」）。
+   */
+  clearCombatLight() {
+    const cl = this._combatLight;
+    if (!cl) return;
+    if (this.fillLight)  this.fillLight.intensity  = cl.fillBase;
+    if (this.rimLight)   this.rimLight.intensity   = cl.rimBase;
+    if (this.underLight) this.underLight.intensity = cl.underBase;
+    this._combatLight = null;
   }
 
   // -------------------------------------------------------------------------

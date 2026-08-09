@@ -187,7 +187,14 @@ export function applyDissolvePose(victim, victimType, t) {
   }
   if (pose.scaleY && t > 0.5) {
     const s = (t - 0.5) * 2; // 后半段
-    idleGroup.scale.y = 1 - (1 - pose.scaleY) * s;
+    // ★ K 预缩放锁定：相对 idleGroup 自身基准（K=1.25）做压缩，绝不写回 1.0。
+    if (idleGroup.userData.__dissolveBase == null) {
+      idleGroup.userData.__dissolveBase = { x: idleGroup.scale.x, y: idleGroup.scale.y, z: idleGroup.scale.z };
+    }
+    const base = idleGroup.userData.__dissolveBase;
+    idleGroup.scale.y = base.y * (1 - (1 - pose.scaleY) * s);
+    idleGroup.scale.x = base.x;
+    idleGroup.scale.z = base.z;
   }
 
   // 子组姿态
@@ -207,8 +214,23 @@ export function applyDissolvePose(victim, victimType, t) {
         const dir = action.dir === 'match' ? _pieceRandomDir(victim) : 1;
         sg.rotation.z = action.rotZ * dir * t;
       }
-      if (action.translateY) {
-        sg.position.y = action.translateY * t;
+      if (action.translateY !== undefined) {
+        if (action.then && action.then.translateY !== undefined) {
+          // 两段式位移：先线性上抛到 t0，再「重力」加速下落至 t1（easeInQuad）。
+          // 用于 K.crown 冕落：crown { translateY: +0.25, then: { translateY: -0.35, mode: 'gravity' } }
+          const SPLIT = 0.30;                 // 上抛段占比
+          const t0 = action.translateY;
+          const t1 = action.then.translateY;
+          if (t < SPLIT) {
+            sg.position.y = t0 * (t / SPLIT);
+          } else {
+            const rel = (t - SPLIT) / (1 - SPLIT);
+            const ease = action.then.mode === 'gravity' ? (u) => u * u : (u) => u;
+            sg.position.y = t0 + (t1 - t0) * ease(rel);
+          }
+        } else {
+          sg.position.y = action.translateY * t;
+        }
       }
     }
   }

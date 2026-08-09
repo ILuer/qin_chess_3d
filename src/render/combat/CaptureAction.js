@@ -71,6 +71,8 @@ export function execute(cd, attacker, victim, fromCell, toCell, opts = {}) {
     const aIdle = aOrient.getObjectByName('idleGroup') || aOrient;
     const baseScale = attacker.userData.__baseScale || attacker.scale.clone();
     if (!attacker.userData.__baseScale) attacker.userData.__baseScale = baseScale.clone();
+    // ★ K 预缩放锁定：以 idleGroup 自身基准（K=1.25，其余=1）做相对缩放扰动。
+    const aIdleBase = aIdle.scale.clone();
 
     // ── 位置 ──
     const fromW = toWorld(fromCell.file, fromCell.rank);
@@ -169,8 +171,8 @@ export function execute(cd, attacker, victim, fromCell, toCell, opts = {}) {
             aIdle.rotation.x = leanVal * Math.sin(Math.PI * totalT);
           } else if (isLast) {
             const totalT = (i + t) / 4;
-            aIdle.scale.x = baseScale.x * (1 + 0.04 * (1 - t) * Math.sin(Math.PI * t));
-            aIdle.scale.y = baseScale.y * (1 - 0.02 * (1 - t) * Math.sin(Math.PI * t));
+            aIdle.scale.x = aIdleBase.x * (1 + 0.04 * (1 - t) * Math.sin(Math.PI * t));
+            aIdle.scale.y = aIdleBase.y * (1 - 0.02 * (1 - t) * Math.sin(Math.PI * t));
             aIdle.rotation.x = leanVal;
           }
         }
@@ -237,7 +239,7 @@ export function execute(cd, attacker, victim, fromCell, toCell, opts = {}) {
         attacker.position.copy(endPos);
         attacker.position.y = 0;
         aIdle.rotation.x = leanForwardA2 * (1 - t);
-        aIdle.scale.copy(baseScale);
+        aIdle.scale.copy(aIdleBase);
         settle(attacker, aType, t);
       },
       onComplete: () => {
@@ -245,7 +247,7 @@ export function execute(cd, attacker, victim, fromCell, toCell, opts = {}) {
         attacker.position.copy(endPos);
         attacker.position.y = 0;
         aIdle.rotation.x = 0;
-        aIdle.scale.copy(baseScale);
+        aIdle.scale.copy(aIdleBase);
 
         // 清理
         unreg();

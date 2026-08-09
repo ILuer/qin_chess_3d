@@ -219,6 +219,8 @@ export class CombatDirector {
     this.hitstop.abort();
     this.sequencer.clear();
     this.animator.killAll(false);
+    // 清理战斗灯光脉冲残留（bug-light-blinding 方案 B：脉冲中途重开 → 强制回基线）
+    if (this.sceneSys && this.sceneSys.clearCombatLight) this.sceneSys.clearCombatLight();
     this._state = 'IDLE';
   }
 
