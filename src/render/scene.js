@@ -320,6 +320,69 @@ export class SceneSystem {
     );
   }
 
+  /**
+   * 镜头微推：沿 controls.target 方向短暂推近
+   * @param {number} strength  强度 0.6–1.2（M2 微推 / A2 冲击）
+   * @param {number} duration  秒
+   */
+  cameraPush(strength = 0.6, duration = 0.3) {
+    const dir = new THREE.Vector3();
+    dir.subVectors(this.controls.target, this.camera.position).normalize();
+    if (dir.lengthSq() < 1e-6) return;
+
+    this._cameraPush = {
+      t: 0,
+      dur: duration,
+      strength,
+      startPos: this.camera.position.clone(),
+      pushPos: this.camera.position.clone().add(dir.multiplyScalar(strength))
+    };
+  }
+
+  _updateCameraPush(dt) {
+    const p = this._cameraPush;
+    if (!p || p.t >= p.dur) { this._cameraPush = null; return; }
+    p.t += dt;
+    const k = Math.min(1, p.t / p.dur);
+    // easeOutQuad：推过去 → 回稳
+    const ease = k < 0.5
+      ? 2 * k * k
+      : 1 - Math.pow(-2 * k + 2, 2) / 2;
+    this.camera.position.lerpVectors(p.pushPos, p.startPos, ease);
+  }
+
+  /**
+   * 战斗灯光脉冲：短暂增强 rimLight / fillLight
+   * @param {string} level  'L2'|'L3'|'L4'|'L5'
+   */
+  pulseCombatLight(level = 'L3') {
+    const boost = { L2: 1.15, L3: 1.35, L4: 1.55, L5: 1.8 }[level] || 1.35;
+    this._combatLight = {
+      t: 0, dur: 0.3,
+      fillBoost: (this.fillLight ? this.fillLight.intensity : 0) * (boost - 1),
+      rimBoost:  (this.rimLight  ? this.rimLight.intensity  : 0) * (boost - 1),
+      underBoost:(this.underLight? this.underLight.intensity : 0) * (boost - 1)
+    };
+  }
+
+  _updateCombatLight(dt) {
+    const cl = this._combatLight;
+    if (!cl) return;
+    cl.t += dt;
+    const k = Math.min(1, cl.t / cl.dur);
+    const decay = Math.max(0, 1 - k * k);
+    if (this.fillLight)  this.fillLight.intensity  = this.fillLight.intensity  - cl.fillBoost  * (1 - decay) + cl.fillBoost  * decay;
+    if (this.rimLight)   this.rimLight.intensity   = this.rimLight.intensity   - cl.rimBoost   * (1 - decay) + cl.rimBoost   * decay;
+    if (this.underLight) this.underLight.intensity = this.underLight.intensity - cl.underBoost * (1 - decay) + cl.underBoost * decay;
+    if (k >= 1) {
+      // 复位：减去残留 boost
+      if (this.fillLight)  this.fillLight.intensity  -= cl.fillBoost  * (1 - decay);
+      if (this.rimLight)   this.rimLight.intensity   -= cl.rimBoost   * (1 - decay);
+      if (this.underLight) this.underLight.intensity -= cl.underBoost * (1 - decay);
+      this._combatLight = null;
+    }
+  }
+
   // -------------------------------------------------------------------------
   // 主循环
   // -------------------------------------------------------------------------
@@ -347,6 +410,8 @@ export class SceneSystem {
 
     this._updateHeadLight();   // 补光跟随相机，保证当前视角的受光面始终可读
     this._updateShake(dt);
+    this._updateCameraPush(dt);
+    this._updateCombatLight(dt);
     this._trackFps(dt);
   }
 

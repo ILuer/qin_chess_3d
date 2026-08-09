@@ -305,3 +305,49 @@ export const TIMING = {
 export const DRAW_HALFMOVE_HINT = 120;
 /** 自动判和阈值（半回合数） */
 export const DRAW_HALFMOVE_LIMIT = 240;
+
+// ---------------------------------------------------------------------------
+// 10. 战场演出节拍参数（来源：design/action-system.md §2.2 / §3.2 / §5.4）
+// ---------------------------------------------------------------------------
+
+/** 移动节拍固定拍长（秒） */
+export const MOVE_BEAT = {
+  M0: { default: 0.09, R: 0.12, B: 0.10 },
+  M1: { default: 0.05 },
+  M3: { default: 0.05, R: 0.07, C: 0.06 },
+  M4: { default: 0.15, A: 0.13 },
+  M5: { default: 0.10, A: 0.08 }
+};
+
+/** M2 巡航时长（秒），按兵种 PT 键 */
+export const MOVE_CRUISE = {
+  P: 0.14, N: 0.08, B: 0.16, A: 0.08,
+  R: 0.22, C: 0.18, K: 0.12
+};
+
+/** 吃子节拍参数（秒），按兵种 PT 键 */
+export const CAPTURE_BEAT = {
+  P: { A0_clamp: [0.10, 0.14], A1: 0.13, A2: 0.09, A3: 0.09, A5: 0.24 },
+  N: { A0_clamp: [0.08, 0.08], A1: 0.15, A2: 0.09, A3: 0.10, A5: 0.28 },
+  B: { A0_clamp: [0.10, 0.16], A1: 0.18, A2: 0.09, A3: 0.11, A5: 0.32 },
+  A: { A0_clamp: [0.08, 0.08], A1: 0.13, A2: 0.08, A3: 0.09, A5: 0.26 },
+  R: { A0_clamp: [0.10, 0.22], A1: 0.16, A2: 0.09, A3: 0.11, A5: 0.30 },
+  C: { A0_clamp: [0.10, 0.18], A1: 0.22, A2: 0.07, A3: 0.09, A5: 0.36 },
+  K: { A0_clamp: [0.10, 0.12], A1: 0.17, A2: 0.08, A3: 0.12, A5: 0.30 }
+};
+
+/** Hitstop 时长（秒），按冲击级 */
+export const HITSTOP = {
+  L2: 0,       // 普通走子
+  L3: 0.09,    // 吃普通子
+  L4: 0.14,    // 吃大子+将军
+  L5: 0.22     // 将死
+};
+
+/** 张力 timeScale 基调 */
+export const TENSION_TIMESCALE = {
+  opening:              1.00,
+  midgame:              0.96,
+  'endgame-balanced':   0.90,
+  'endgame-one-sided':  0.95
+};

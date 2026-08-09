@@ -146,9 +146,13 @@ export class Effects {
     this.checkGroup = new THREE.Group(); this.checkGroup.name = 'fx-check';
     this.particleGroup = new THREE.Group(); this.particleGroup.name = 'fx-particles';
     this.rippleGroup = new THREE.Group(); this.rippleGroup.name = 'fx-ripples';
+    this.dustGroup = new THREE.Group(); this.dustGroup.name = 'fx-dust';
+    this.afterimageGroup = new THREE.Group(); this.afterimageGroup.name = 'fx-afterimage';
+    this.weaponTrailGroup = new THREE.Group(); this.weaponTrailGroup.name = 'fx-weapontrail';
     this.root.add(
       this.markerGroup, this.hintGroup, this.blockedGroup,
-      this.selectionGroup, this.checkGroup, this.particleGroup, this.rippleGroup
+      this.selectionGroup, this.checkGroup, this.particleGroup, this.rippleGroup,
+      this.dustGroup, this.afterimageGroup, this.weaponTrailGroup
     );
 
     /** @type {ParticleBurst[]} */
@@ -622,6 +626,166 @@ export class Effects {
         this._flashEl.style.opacity = String(this._flashStrength * pulse);
       }
     }
+
+    // 尘土拖尾衰减
+    for (let i = this.dustGroup.children.length - 1; i >= 0; i--) {
+      const c = this.dustGroup.children[i];
+      const ud = c.userData;
+      ud.t += dt;
+      const k = ud.t / ud.life;
+      if (k >= 1) {
+        this.dustGroup.remove(c);
+        if (c.material) c.material.dispose();
+        if (c.geometry) c.geometry.dispose();
+      } else {
+        c.position.x += ud.velX * dt;
+        c.position.y += ud.velY * dt;
+        c.position.z += ud.velZ * dt;
+        ud.velY -= 1.2 * dt;
+        c.material.opacity = Math.max(0, (1 - k) * 0.5);
+        c.scale.setScalar(1 + k * 1.5);
+      }
+    }
+
+    // 残影淡出
+    for (let i = this.afterimageGroup.children.length - 1; i >= 0; i--) {
+      const c = this.afterimageGroup.children[i];
+      const ud = c.userData;
+      ud.t += dt;
+      const k = ud.t / ud.life;
+      if (k >= 1) {
+        this.afterimageGroup.remove(c);
+        if (c.material) c.material.dispose();
+        if (c.geometry) c.geometry.dispose();
+      } else {
+        c.material.opacity = 0.22 * (1 - k);
+        c.position.y += 0.3 * dt;
+      }
+    }
+
+    // 武器拖痕淡出
+    for (let i = this.weaponTrailGroup.children.length - 1; i >= 0; i--) {
+      const c = this.weaponTrailGroup.children[i];
+      const ud = c.userData;
+      ud.t += dt;
+      const k = ud.t / ud.life;
+      if (k >= 1) {
+        this.weaponTrailGroup.remove(c);
+        if (c.material) c.material.dispose();
+        if (c.geometry) c.geometry.dispose();
+      } else {
+        c.material.opacity = Math.max(0, (1 - k) * 0.7);
+        c.scale.y += 0.5 * dt;
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 尘土拖尾 / 残影 / 武器拖痕（战斗演出层 VFX）
+  // -------------------------------------------------------------------------
+
+  /**
+   * 尘土拖尾 puff：M2 巡航期间每 0.04s 生成
+   * @param {THREE.Vector3|{x:number,y:number,z:number}} position
+   * @param {string} side  'r'|'b'
+   * @param {string} pieceType  PT 值
+   */
+  spawnDustTrail(position, side, pieceType) {
+    const count = 3 + Math.floor(Math.random() * 3); // 3-5
+    const colors = [
+      new THREE.Color(0x8b7d6b), // 干土色
+      new THREE.Color(0xa0907a),
+      new THREE.Color(0x756b5a)
+    ];
+    for (let i = 0; i < count; i++) {
+      const size = 0.025 + Math.random() * 0.04;
+      const geo = new THREE.SphereGeometry(size, 4, 4);
+      const mat = new THREE.MeshBasicMaterial({
+        color: colors[Math.floor(Math.random() * colors.length)],
+        transparent: true,
+        opacity: 0.5 + Math.random() * 0.3,
+        depthWrite: false,
+        blending: THREE.NormalBlending
+      });
+      const puff = new THREE.Mesh(geo, mat);
+      puff.position.set(
+        position.x + (Math.random() - 0.5) * 0.25,
+        position.y + 0.02 + Math.random() * 0.06,
+        position.z + (Math.random() - 0.5) * 0.25
+      );
+      puff.userData = {
+        life: 0.22 + Math.random() * 0.08,
+        t: 0,
+        velX: (Math.random() - 0.5) * 0.4,
+        velY: 0.1 + Math.random() * 0.3,
+        velZ: (Math.random() - 0.5) * 0.4
+      };
+      puff.renderOrder = 2;
+      this.dustGroup.add(puff);
+    }
+  }
+
+  /**
+   * 残影 billboard：M2 巡航期间每 0.05s 在棋子当前位置生成
+   * @param {THREE.Object3D} mesh  棋子根 Group
+   */
+  spawnAfterimage(mesh) {
+    if (!mesh) return;
+    // 限制同时 6 个残影
+    if (this.afterimageGroup.children.length >= 6) {
+      const oldest = this.afterimageGroup.children[0];
+      this.afterimageGroup.remove(oldest);
+      oldest.traverse(o => { if (o.material) o.material.dispose(); if (o.geometry) o.geometry.dispose(); });
+    }
+
+    const geo = new THREE.PlaneGeometry(0.9, 0.9);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.22,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.NormalBlending
+    });
+    const billboard = new THREE.Mesh(geo, mat);
+    billboard.position.copy(mesh.position);
+    billboard.position.y += 0.1;
+    billboard.renderOrder = 8;
+    // 面朝相机（简化：锁死水平朝向）
+    billboard.userData = { life: 0.35, t: 0 };
+    this.afterimageGroup.add(billboard);
+  }
+
+  /**
+   * 武器拖痕：A2 命中帧生成短线/弧线拖痕
+   * @param {THREE.Object3D} mesh  棋子根 Group
+   * @param {string} type  PT 值
+   */
+  spawnWeaponTrail(mesh, type) {
+    if (!mesh) return;
+    const count = 3;
+    const color = 0xff3322; // 赤红拖痕
+    for (let i = 0; i < count; i++) {
+      const geo = new THREE.PlaneGeometry(0.12, 0.35 - i * 0.08);
+      const mat = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.7 - i * 0.2,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending
+      });
+      const trail = new THREE.Mesh(geo, mat);
+      trail.position.copy(mesh.position);
+      trail.position.y += 0.3 + i * 0.15;
+      trail.position.x += (Math.random() - 0.5) * 0.4;
+      trail.position.z += (Math.random() - 0.5) * 0.4;
+      trail.rotation.z = (Math.random() - 0.5) * 1.2;
+      trail.rotation.y = (Math.random() - 0.5) * 1.2;
+      trail.renderOrder = 9;
+      trail.userData = { life: 0.28 + Math.random() * 0.06, t: 0 };
+      this.weaponTrailGroup.add(trail);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -638,6 +802,10 @@ export class Effects {
     for (const r of this.ripples) { this.rippleGroup.remove(r.mesh); r.mat.dispose(); }
     this.ripples.length = 0;
     if (this._flashEl) { this._flashEl.style.opacity = '0'; this._flashDur = 0; }
+    // 清理尘土/残影/武器拖痕
+    disposeChildren(this.dustGroup, true);
+    disposeChildren(this.afterimageGroup, true);
+    disposeChildren(this.weaponTrailGroup, true);
   }
 
   dispose() {

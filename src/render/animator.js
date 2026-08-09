@@ -10,6 +10,25 @@
 
 import * as THREE from 'three';
 import { TIMING, PT } from '../core/constants.js';
+// getChoreo 已被 CombatDirector/PieceChoreography 替代。
+// 保留本地 stub 接口，供 dissolvePiece/tickIdle/movePiece/captureStrike 回退到通用姿态。
+// 旧的 choreography/ 目录完全弃用，不再 import。
+function _getChoreoStub(type) {
+  // 所有兵种姿态现在由 PieceChoreography.js 驱动；
+  // animator 的 dissolvePiece / captureStrike / tickIdle / movePiece
+  // 在 choreography 缺失时走 pure-generic 回退路径（见各方法内部）。
+  return null;
+}
+
+/**
+ * 朝向：棋子绕 Y 轴转向移动方向（本地 +Z/-Z 为前，由阵营决定）。
+ *   red 本地前向 = -Z，black 本地前向 = +Z（orient 已 180°）。
+ * 返回应施加到 root.rotation.y 的偏航角；配合 arcMove 的 spin 平滑转向。
+ */
+export function headingYaw(side, dx, dz) {
+  if (side === 'b') return Math.atan2(dx, dz);
+  return Math.atan2(-dx, -dz);
+}
 
 // ---------------------------------------------------------------------------
 // 缓动函数
@@ -44,15 +63,30 @@ export const Easing = {
 // ---------------------------------------------------------------------------
 // 阶段三分兵种移动风味（lift = 相对基准抛物线高度的倍率）
 // ---------------------------------------------------------------------------
-const MOVE_FLAVOR_DEFAULT = { liftMul: 1.0 };
+// 用户体验准则（2026-08-08 用户硬性约束）：所有棋子不得离地跳太高。
+// liftHeight 基准 0.85，以下倍率将其压到 0.03~0.17 世界单位（贴地/极低弧）。
+const MOVE_FLAVOR_DEFAULT = { liftMul: 0.12 };
 const MOVE_FLAVOR = {
-  [PT.PAWN]:     { liftMul: 0.92 },   // 兵：持戈冲锋，低伏前压
-  [PT.HORSE]:    { liftMul: 1.45 },   // 马：骑兵腾跃
-  [PT.ELEPHANT]: { liftMul: 1.35 },   // 象：飞身滑翔
-  [PT.ADVISOR]:  { liftMul: 0.96 },   // 士：稳步
-  [PT.ROOK]:     { liftMul: 1.05 },   // 车：整体冲锋
-  [PT.CANNON]:   { liftMul: 1.0 },    // 炮：平移（吃子走抛石瞬移）
-  [PT.KING]:     { liftMul: 1.0 }     // 帅：起身移动（龙椅隐现）
+  [PT.PAWN]:     { liftMul: 0.18 },   // 兵：低伏前冲，贴地
+  [PT.HORSE]:    { liftMul: 0.20 },   // 马：单段贴地冲刺（已删两跃，绝不腾空）
+  [PT.ELEPHANT]: { liftMul: 0.20 },   // 象：低弧滑翔；clamp 0.20（峰值 0.17，严守贴地约束）
+  [PT.ADVISOR]:  { liftMul: 0.15 },   // 士：稳步，几乎不离地
+  [PT.ROOK]:     { liftMul: 0.07 },   // 车：轮行，车体基本不抬
+  [PT.CANNON]:   { liftMul: 0.05 },   // 炮：推车拖行，绝腾空
+  [PT.KING]:     { liftMul: 0.12 }    // 帅：起身移驾，龙椅隐现
+};
+
+// 移动时整枚棋子的"前压"幅度（仅作用于 idleGroup.rotation.x，由 _moveFlourish 施加；
+// 子组随动交给编排 moveFlourish，二者写不同节点，互不冲突）。
+// MOVE_LEAN 值已按 action-system §6 上调（2026-08-09 用户评审通过）
+const MOVE_LEAN = {
+  [PT.PAWN]: -0.18,
+  [PT.HORSE]: -0.30,   // 骑兵单段冲刺，最强前压
+  [PT.ELEPHANT]: -0.16,
+  [PT.ADVISOR]: -0.10,
+  [PT.ROOK]: -0.08,
+  [PT.CANNON]: -0.06,
+  [PT.KING]: -0.12
 };
 
 // ---------------------------------------------------------------------------
@@ -117,6 +151,8 @@ export class Animator {
     this.tweens = [];
     this._lockCount = 0;
     this.timeScale = 1;
+    /** 暴露缓动表，供编排模块调用（避免循环 import） */
+    this.EASE = Easing;
   }
 
   /** 是否有锁输入的动画在跑 */
@@ -159,6 +195,39 @@ export class Animator {
   /** 纯延时回调 */
   delay(seconds, cb, lock = false) {
     return this.add({ duration: Math.max(0.0001, seconds), lock, onComplete: cb });
+  }
+
+  /**
+   * 轻量编排器（满足 Wave A「sequencer」地基）：把若干阶段按顺序串成一条时间线。
+   * steps: [{ delay?, duration, easing?, onStart?, onUpdate?, onComplete?, lock? }]
+   * 各阶段时间默认首尾相接；可显式给 delay 制造留白；返回最后一个句柄。
+   * 用法见 choreography/*.js 的 attack()。
+   */
+  seq(steps, opts = {}) {
+    let cursor = 0;
+    let last = null;
+    for (const s of steps) {
+      const dur = Math.max(0.0001, s.duration != null ? s.duration : 0.0001);
+      const delay = s.delay != null ? s.delay : cursor;
+      const tw = this.add({
+        duration: dur, delay, easing: s.easing,
+        lock: !!s.lock, onStart: s.onStart, onUpdate: s.onUpdate, onComplete: s.onComplete
+      });
+      last = tw;
+      cursor = delay + dur + (s.gap || 0);
+    }
+    if (opts.onComplete && last) {
+      const prev = last.onComplete;
+      last.onComplete = () => { if (prev) prev(); opts.onComplete(); };
+    }
+    return last;
+  }
+
+  /** 立即结束全部补间（Oil：演出可跳过；跳到终态而非瞬移消失） */
+  finishAll() {
+    for (const tw of this.tweens.slice()) {
+      if (!tw.dead) this.finish(tw);
+    }
   }
 
   /**
@@ -247,7 +316,7 @@ export class Animator {
       onComplete: () => {
         mesh.position.copy(target);
         mesh.rotation.x = 0;
-        if (spin) mesh.rotation.y = baseRotY;
+        if (spin) mesh.rotation.y = baseRotY + spin; // 保留最终朝向（不再回正）
         if (opts.onComplete) opts.onComplete();
       }
     });
@@ -306,19 +375,25 @@ export class Animator {
     const startY = mesh.position.y;
     const startRotY = mesh.rotation.y;
     const tmp = new THREE.Vector3();
+    // 被吃方专属附加（BK-14 等）：分兵种消散风味，由编排提供
+    const dissolveCh = _getChoreoStub(mesh.userData.pieceType);
+    const dissolveSub = mesh.userData.subGroups || {};
 
     return this.add({
       duration,
       delay: opts.delay || 0,
       easing: Easing.easeInQuad,
       lock: opts.lock !== false,
-      onUpdate: t => {
+      onUpdate: (t, raw) => {
         mesh.position.y = startY - t * 0.75;
         mesh.rotation.y = startRotY + t * Math.PI * 1.35;
         mesh.rotation.z = t * 0.55;
         tmp.copy(baseScale).multiplyScalar(Math.max(0.02, 1 - t * 0.92));
         mesh.scale.copy(tmp);
         setTreeOpacity(mesh, Math.max(0, 1 - t * 1.05));
+        if (dissolveCh && dissolveCh.capturedFlourish) {
+          try { dissolveCh.capturedFlourish(this, mesh, dissolveSub, t, raw); } catch (e) { /* 安全兜底 */ }
+        }
       },
       onComplete: () => { if (opts.onComplete) opts.onComplete(mesh, backup); }
     });
@@ -369,7 +444,7 @@ export class Animator {
    * @param {THREE.Object3D} group 棋子根 Group
    * @param {number} t 当前秒（performance.now()/1000）
    */
-  tickIdle(group, t) {
+  tickIdle(group, t, selected) {
     if (!group || !group.userData) return;
     const ud = group.userData;
     const orient = group.getObjectByName('orient') || group;
@@ -378,34 +453,26 @@ export class Animator {
     const idleGroup = orient.getObjectByName('idleGroup') || orient;
     // 移动 / 吃子进行中：仅把「idleGroup 节点」的待机微动归零，
     // 让移动补间（作用于棋子根 Group）干净推进。
-    // 注意：此处【绝不】触碰子组（subGroups）——炮的士兵推车、
-    // 帅的龙椅 scale 隐现、车的战马奔腾等都由动画补间逐帧驱动，
-    // 若在此强制重置会与其打架，导致穿模 / 跳变。
     if (ud._busy) {
       idleGroup.position.y = 0;
       idleGroup.rotation.z = 0;
       return;
     }
+    const sel = !!selected;
+    const amp = sel ? 1.8 : 1;   // 选中放大（Juice 选中强调 / Windex 焦点）
     const ph = ud.idlePhase || 0;
-    // 全员：极轻的呼吸浮动 + 摇摆，让棋子"活着"
-    idleGroup.position.y = Math.sin(t * 1.15 + ph) * 0.012;
-    idleGroup.rotation.z = Math.sin(t * 0.85 + ph) * 0.014;
+    // 全员：极轻的呼吸浮动 + 摇摆（选中更明显），让棋子"活着"
+    idleGroup.position.y = Math.sin(t * 1.15 + ph) * 0.012 * amp;
+    idleGroup.rotation.z = Math.sin(t * 0.85 + ph) * 0.014 * amp;
 
     const sg = ud.subGroups;
     if (!sg) return;
-    // 炮：两侧士兵推车（前后摆动）+ 抛石机轻微咯吱
-    if (sg.soldierL && sg.soldierR) {
-      const push = Math.sin(t * 2.1 + ph) * 0.12;
-      sg.soldierL.rotation.x = push;
-      sg.soldierR.rotation.x = push;
+    // 分兵种待机微动：统一交给编排 idle（只动子组，绝不写 idleGroup/root）。
+    // 主循环每帧调用，编排内部必须无状态、可在任意时刻启停。
+    const ch = _getChoreoStub(ud.pieceType);
+    if (ch && ch.idle) {
+      try { ch.idle(this, group, sg, t, sel); } catch (e) { /* 编排异常不影响主循环 */ }
     }
-    if (sg.trebuchet) sg.trebuchet.rotation.z = Math.sin(t * 0.7 + ph) * 0.02;
-    // 车：战马奔腾微跳 + 御马 / 持戈兵轻微晃动
-    if (sg.horses) sg.horses.position.y = Math.abs(Math.sin(t * 3.0 + ph)) * 0.03;
-    if (sg.driver) sg.driver.rotation.z = Math.sin(t * 1.1 + ph) * 0.05;
-    if (sg.spearman) sg.spearman.rotation.z = Math.sin(t * 1.1 + ph + 1.3) * 0.05;
-    // 帅：坐姿人物呼吸
-    if (sg.body && ud.pieceType === PT.KING) sg.body.position.y = Math.sin(t * 1.0 + ph) * 0.012;
   }
 
   /**
@@ -419,64 +486,35 @@ export class Animator {
   movePiece(piece, target, type, side, opts = {}) {
     const flavor = MOVE_FLAVOR[type] || MOVE_FLAVOR_DEFAULT;
     const lift = TIMING.liftHeight * (flavor.liftMul != null ? flavor.liftMul : 1);
+    // 朝向：平滑转向移动方向（绕 Y，配合 orient 的 180° 阵营基调）
+    const dx = target.x - piece.position.x;
+    const dz = target.z - piece.position.z;
+    const spin = headingYaw(side, dx, dz) - piece.rotation.y;
+    const ch = _getChoreoStub(type);
+    const sub = piece.userData.subGroups || {};
     return this.arcMove(piece, target, {
       duration: opts.duration,
       lift,
       waypoints: opts.waypoints,
+      spin,
       easing: opts.easing,
-      onFlourish: (t, raw, mesh) => this._moveFlourish(mesh, type, t, raw),
+      onFlourish: (t, raw, mesh) => {
+        try { this._moveFlourish(mesh, type, t, raw); } catch (e) { /* 安全兜底 */ }
+        if (ch && ch.moveFlourish) {
+          try { ch.moveFlourish(this, mesh, sub, t, raw); } catch (e) { /* 编排异常不影响移动 */ }
+        }
+      },
       onComplete: () => { if (opts.onLand) opts.onLand(); }
     });
   }
 
-  /** 移动过程中的兵种风味（在 onFlourish 钩子里逐帧调用） */
+  /** 移动过程中的整体前压（仅作用于 idleGroup；子组随动交给编排 moveFlourish） */
   _moveFlourish(mesh, type, t, raw) {
-    const ud = mesh.userData;
     const orient = mesh.getObjectByName('orient') || mesh;
-    // 整枚棋子的姿态风味写 idleGroup，保住 orient 的阵营四元数（见 tickIdle 注释）
     const idleGroup = orient.getObjectByName('idleGroup') || orient;
-    const sg = ud.subGroups;
     const k = Math.sin(Math.PI * t);
-    switch (type) {
-      case PT.PAWN:      // 兵：持戈冲锋前倾
-        idleGroup.rotation.x = -0.12 * k;
-        break;
-      case PT.HORSE:     // 马：跳跃腾空前仰
-        idleGroup.rotation.x = -0.30 * k;
-        break;
-      case PT.ELEPHANT:  // 象：飞身侧倾 + 微前倾
-        idleGroup.rotation.z = 0.06 * k;
-        idleGroup.rotation.x = -0.10 * k;
-        break;
-      case PT.ADVISOR:   // 士：稳步，仅极小前倾
-        idleGroup.rotation.x = -0.05 * k;
-        break;
-      case PT.ROOK:      // 车：战马奔腾 + 御马 / 持戈兵前倾
-        if (sg) {
-          if (sg.horses) sg.horses.position.y = Math.abs(Math.sin(Math.PI * t * 2)) * 0.07;
-          if (sg.spearman) sg.spearman.rotation.x = -0.12 * k;
-          if (sg.driver) sg.driver.rotation.x = -0.10 * k;
-        }
-        break;
-      case PT.CANNON:    // 炮：两侧士兵推车 + 抛石机随动
-        if (sg) {
-          if (sg.soldierL && sg.soldierR) {
-            const push = Math.sin(Math.PI * t) * 0.30;
-            sg.soldierL.rotation.x = push;
-            sg.soldierR.rotation.x = push;
-          }
-          if (sg.trebuchet) sg.trebuchet.rotation.z = 0.06 * k;
-        }
-        break;
-      case PT.KING:      // 帅：龙椅隐现（移动中消失，落定再现）
-        if (sg && sg.throne) {
-          const s = Math.abs(Math.cos(Math.PI * t));
-          sg.throne.scale.setScalar(Math.max(0.001, s));
-        }
-        break;
-      default:
-        break;
-    }
+    const lean = MOVE_LEAN[type] || 0;
+    idleGroup.rotation.x = lean * k;
   }
 
   /**
@@ -485,31 +523,25 @@ export class Animator {
    * @returns {Object} 主补间句柄
    */
   captureStrike(piece, type, side, opts = {}) {
+    const ch = _getChoreoStub(type);
+    const sub = piece.userData.subGroups || {};
+    // 分兵种编排优先：attack() 返回主句柄，由调用方接 _busy 释放
+    if (ch && ch.attack) return ch.attack(this, piece, sub, side, opts);
+    // —— 回退：通用点头 + 有可动子组则挥击 ——
     const ud = piece.userData;
     const orient = piece.getObjectByName('orient') || piece;
-    // 点头写 idleGroup，保住 orient 的阵营四元数（见 tickIdle 注释）
     const idleGroup = orient.getObjectByName('idleGroup') || orient;
-    const sg = ud.subGroups;
     const dur = TIMING.strikeRecoil != null ? TIMING.strikeRecoil : 0.18;
-    // 全员：快速前倾点头（刺击 / 劈砍的体感）
     const nod = type === PT.ADVISOR ? 0.40 : (type === PT.KING ? 0.22 : 0.28);
     const a = this.add({
       duration: dur, easing: Easing.easeOutQuad,
       onUpdate: (t) => { idleGroup.rotation.x = -nod * Math.sin(Math.PI * t); },
       onComplete: () => { idleGroup.rotation.x = 0; }
     });
-    // 兵种专属挥击（子组旋转，本地 +Z 为前，物理方向天然正确）
-    if (sg) {
-      if (sg.spearman) {
-        this.add({ duration: dur, easing: Easing.easeOutCubic,
-          onUpdate: (t) => { sg.spearman.rotation.x = -0.6 * Math.sin(Math.PI * t); },
-          onComplete: () => { sg.spearman.rotation.x = 0; } });
-      }
-      if (sg.body && type === PT.KING) {
-        this.add({ duration: dur, easing: Easing.easeOutCubic,
-          onUpdate: (t) => { sg.body.rotation.y = 0.5 * Math.sin(Math.PI * t); },
-          onComplete: () => { sg.body.rotation.y = 0; } });
-      }
+    if (sub && sub.spearman) {
+      this.add({ duration: dur, easing: Easing.easeOutCubic,
+        onUpdate: (t) => { sub.spearman.rotation.x = -0.6 * Math.sin(Math.PI * t); },
+        onComplete: () => { sub.spearman.rotation.x = 0; } });
     }
     return a;
   }
@@ -537,8 +569,10 @@ export class Animator {
     // ① 抛石机甩臂 + 士兵推车
     const throwDur = 0.34;
     if (sg && sg.trebuchet) {
+      // 幅度 0.48：子组已锚定到机身中枢（SUBGROUP_JOINTS.C.trebuchet），
+      // 旋转是绕机器自身而非绕棋子原点，原先的 0.9 会变成整机翻倒。
       this.add({ duration: throwDur, easing: Easing.easeOutCubic,
-        onUpdate: (t) => { sg.trebuchet.rotation.z = -0.9 * Math.sin(Math.PI * Math.min(1, t * 1.4)); },
+        onUpdate: (t) => { sg.trebuchet.rotation.z = -0.48 * Math.sin(Math.PI * Math.min(1, t * 1.4)); },
         onComplete: () => { if (sg.trebuchet) sg.trebuchet.rotation.z = 0; } });
     }
     if (sg && sg.soldierL && sg.soldierR) {
@@ -585,7 +619,7 @@ export class Animator {
                 this.add({ duration: 0.3, easing: Easing.easeOutCubic,
                   onUpdate: (t) => {
                     const k = Math.sin(Math.PI * t);
-                    if (sg.trebuchet) sg.trebuchet.rotation.z = 0.30 * k;
+                    if (sg.trebuchet) sg.trebuchet.rotation.z = 0.18 * k;
                     if (sg.soldierL) sg.soldierL.rotation.x = -0.20 * k;
                     if (sg.soldierR) sg.soldierR.rotation.x = -0.20 * k;
                   },
