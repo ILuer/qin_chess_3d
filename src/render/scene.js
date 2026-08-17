@@ -103,6 +103,19 @@ const FPS_RISE_THRESHOLD = 55;   // ≥55 → 升一档（40~55 迟滞区间防�
 const QUALITY_COOLDOWN = 4;      // 档位切换后冷却秒数，防来回抖动
 
 // ---------------------------------------------------------------------------
+// L4a · 距离阴影节流（相机距离 → 棋子 castShadow；L4b 几何 LOD 联动读 farView）
+// ---------------------------------------------------------------------------
+// 节流 0.25s；≤ SHADOW_DIST_ON 近景开阴影、> SHADOW_DIST_OFF 远景关阴影，
+// ON~OFF 之间为迟滞带（保持现状，防推拉相机时来回抖）。
+// ⚠ 阈值勘误：优化方案 §4.1 原稿 ON=6.0，但 OrbitControls.minDistance=6.5
+// （fixed 视图最近缩放），6.0 在现相机区间**永不可达** → 近景阴影永远无法开启。
+// 取 7.0：近景可触发，且与 minDistance 6.5 保留 0.5 单位迟滞余量。
+// 两阈值均导出，便于真机/美术调参（QA 口径：远视角阴影带宽省 50%~75%）。
+export const SHADOW_DIST_ON = 7.0;        // ≤7m：棋子投射阴影（近景）
+export const SHADOW_DIST_OFF = 12.0;      // >12m：棋子不投射阴影（远景，省阴影带宽）
+export const SHADOW_DIST_INTERVAL = 0.25; // update 节流周期（秒）
+
+// ---------------------------------------------------------------------------
 // L5 · 异步渲染器工厂（动态 import 双后端）
 // ---------------------------------------------------------------------------
 
@@ -251,6 +264,13 @@ export class SceneSystem {
     this.currentView = 'red';
     this.viewSide = RED;
     this.isTopView = false;
+
+    // —— L4a 距离阴影节流状态 ——
+    this._shadowDistTimer = 0;
+    this._pieceShadowsOn = null;   // 当前棋子 castShadow 状态（null=未评估）
+    this._farView = null;          // 节流评估出的「远景」状态（L4b 几何 LOD 消费；null=未评估）
+    this._shadowDistEnabled = true;
+    this._interactionBusy = false; // busy/selected 时置 true（main.js 每帧推送）
 
     // —— resize ——
     this._onResize = this.resize.bind(this);
@@ -623,6 +643,7 @@ export class SceneSystem {
     this._updateShake(dt);
     this._updateCameraPush(dt);
     this._updateCombatLight(dt);
+    this._updateDistanceLod(dt);   // L4a：节流 0.25s 评估相机距离 → 棋子 castShadow / farView
     this._trackFps(dt);
   }
 
@@ -704,7 +725,68 @@ export class SceneSystem {
     this.renderer.shadowMap.enabled = !!on;
     this.keyLight.castShadow = !!on;
     this.scene.traverse(o => { if (o.isMesh && o.material) o.material.needsUpdate = true; });
+    // L4a：阴影恢复（H5 升档 / 初始开）时立即按当前距离同步棋子 castShadow，
+    // 防止「阴影关闭期间 _pieceShadowsOn 已更新但未落到 mesh」造成的状态漂移。
+    if (on) {
+      this._evaluateDistanceLod();
+      this._applyPieceShadows(this._pieceShadowsOn == null ? true : this._pieceShadowsOn);
+    }
   }
+
+  // -------------------------------------------------------------------------
+  // L4a · 距离阴影节流
+  // -------------------------------------------------------------------------
+
+  /** 每帧累计节流计时；到点评估一次相机距离（busy/selected 时冻结） */
+  _updateDistanceLod(dt) {
+    if (!this._shadowDistEnabled || this._interactionBusy) return;
+    this._shadowDistTimer += dt;
+    if (this._shadowDistTimer < SHADOW_DIST_INTERVAL) return;
+    this._shadowDistTimer = 0;
+    this._evaluateDistanceLod();
+  }
+
+  /**
+   * 按相机→target 距离评估：
+   *   ≤ SHADOW_DIST_ON → 近景：棋子 castShadow=true、farView=false（高模）
+   *   > SHADOW_DIST_OFF → 远景：棋子 castShadow=false、farView=true（低模）
+   *   ON~OFF 迟滞带 → 保持现状（防推拉抖动）。
+   * 全局阴影关闭（H5 降档/弱机）时只维护 farView 供 L4b 几何 LOD 消费，
+   * 不写 castShadow（全局关着写了也无意义）。
+   */
+  _evaluateDistanceLod() {
+    const dist = this.camera.position.distanceTo(this.controls.target);
+    let on = this._pieceShadowsOn;
+    if (dist <= SHADOW_DIST_ON) on = true;
+    else if (dist > SHADOW_DIST_OFF) on = false;
+    if (on == null) on = true;   // 迟滞带首次评估兜底：近景开
+    this._farView = !on;
+    if (on !== this._pieceShadowsOn) {
+      this._pieceShadowsOn = on;
+      if (this.renderer.shadowMap.enabled) this._applyPieceShadows(on);
+    }
+  }
+
+  /** 全量同步棋子 castShadow（swap 引用一致性：递归覆盖全部子组，不留旧值） */
+  _applyPieceShadows(on) {
+    this.piecesGroup.traverse(o => { if (o.isMesh) o.castShadow = !!on; });
+  }
+
+  /** 距离阴影控制总开关（默认开；QA/未来降档可关） */
+  setShadowDistanceControl(enabled) {
+    this._shadowDistEnabled = !!enabled;
+    if (enabled) this._evaluateDistanceLod();
+  }
+
+  /** busy/selected 状态推送（main.js 每帧调用）：忙碌时冻结评估，解除瞬间补一次 */
+  setInteractionBusy(busy) {
+    const wasBusy = this._interactionBusy;
+    this._interactionBusy = !!busy;
+    if (wasBusy && !this._interactionBusy) this._evaluateDistanceLod();
+  }
+
+  /** 节流评估出的「远景」状态（null=尚未评估；L4b 几何 LOD 主循环消费） */
+  get farView() { return this._farView; }
 
   get qualityDegraded() { return this._qualityLevel < 3; }
   get qualityLevel() { return this._qualityLevel; }

@@ -25,7 +25,7 @@ import { createInputSystem } from './ui/input.js';
 import { createHUD } from './ui/hud.js';
 import { createControls } from './ui/controls.js';
 import { createAIEngine } from './ai/engine.js';
-import { createPieceMesh, disposePieceFactory } from './render/pieceFactory.js';
+import { createPieceMesh, disposePieceFactory, setPieceLod } from './render/pieceFactory.js';
 import { createBoard, createEnvironment } from './render/boardMesh.js';
 import { getMaterials, disposeMaterials } from './render/materials.js';
 import { SFX } from './audio/sfx.js';
@@ -60,6 +60,9 @@ let hoverMesh = null;     // 当前悬停浮起的棋子
 let started = false;
 let combatDirector = null; // CombatDirector 战场演出总调度
 
+// L4b · 当前应用中的几何 LOD 档位（null=尚未评估；true=低模/远景）
+let currentLodFar = null;
+
 // L2 · REVIEW 复盘状态（design/gameplay/review-export-design.md §5）
 let reviewCtrl = null;        // ReviewController（纯逻辑状态机，boot 中创建）
 let reviewGs = null;          // scratch 局面：从 gs.startFen 重放 history[0..cursor)
@@ -91,6 +94,9 @@ function rebuildPieces() {
   pieceMeshes = [];
   for (let f = 0; f < FILES; f++) pieceMeshes[f] = new Array(RANKS).fill(null);
 
+  // L4b：重建后棋子默认高模（lod0）；下一帧 applyLodByDistance 按当前距离收敛
+  currentLodFar = null;
+
   src.board.forEach((p, f, r) => {
     const mesh = createPieceMesh(p.type, p.side);
     const w = toWorld(f, r);
@@ -102,6 +108,39 @@ function rebuildPieces() {
     if (sceneSys) sceneSys.piecesGroup.add(mesh);
     pieceMeshes[f][r] = mesh;
   });
+}
+
+// ---------------------------------------------------------------------------
+// L4b · 距离驱动的几何 LOD 切换（联动 L4a farView + H5 lowMesh）
+// ---------------------------------------------------------------------------
+
+/**
+ * 按 sceneSys 节流评估出的远景状态，把棋子几何切到高模/低模。
+ * 保护：动画中（animator.isBusy）/ 选中态（input.getSelection()）跳过；
+ * 复盘期间由 setInteractionBusy 冻结 sceneSys 的 farView 评估，本函数自然收敛。
+ * H5 联动：降档到 L0 时 lowMesh=true → 强制低模（即使近景）。
+ */
+function applyLodByDistance() {
+  if (!sceneSys || sceneSys.disposed) return;
+  const far = sceneSys.farView;
+  if (far == null) return;                       // 距离尚未评估（节流首拍前）
+  if (animator.isBusy) return;                   // 动画中跳过（开启动画/移动/吃子/震屏）
+  const sel = input ? input.getSelection() : null;
+  if (sel) return;                               // 选中态跳过（避免特写时抖动）
+  const target = (!!sceneSys.lowMesh) || far;    // H5 L0 强制低模
+  if (target === currentLodFar) return;
+  currentLodFar = target;
+
+  let changed = 0;
+  for (let f = 0; f < FILES; f++) {
+    const col = pieceMeshes[f];
+    if (!col) continue;
+    for (let r = 0; r < RANKS; r++) {
+      const m = col[r];
+      if (m && setPieceLod(m, target ? 1 : 0)) changed++;
+    }
+  }
+  if (changed > 0) trackEvent('lod_switch', { far: target, changed });   // H1 埋点
 }
 
 // ---------------------------------------------------------------------------
@@ -1028,7 +1067,13 @@ function startLoop() {
     tickFps(effectiveDt);             // H1：fps_bucket 探针（与 scene 帧率状态机同口径）
     if (input) input.update();        // 悬停射线（rawDt）
     if (effects) effects.update(effectiveDt);  // 粒子 / 涟漪 / 尘土 / 残影（effectiveDt）
-    if (sceneSys) { sceneSys.update(effectiveDt); }
+    if (sceneSys) {
+      // L4a/L4b：busy/selected/复盘期间冻结距离评估与 LOD 切换（防动画中抖动）
+      sceneSys.setInteractionBusy(!!selMesh || animator.isBusy || reviewActive);
+      sceneSys.update(effectiveDt);
+    }
+    // L4b：按节流后的远景状态切换棋子几何档位（内部再查 busy/selected）
+    applyLodByDistance();
     // 跟随相机：scene.update 之后（拿到 controls.update 后的真实相机位）、render 之前
     if (followCam && sceneSys) followCam.update(effectiveDt, sceneSys.camera, sceneSys.controls);
     if (sceneSys) sceneSys.render();

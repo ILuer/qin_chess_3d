@@ -28,12 +28,14 @@
  *   子 Group 通过 root.userData.subGroups 或 orient.getObjectByName(name) 访问。
  *
  * 契约导出：
- *   createPieceMesh(type, side) -> THREE.Group
+ *   createPieceMesh(type, side, opts?) -> THREE.Group
  *     - 局部原点在地面接触点 (y=0)，整体沿 +Y 生长
  *     - group.userData.pieceType / pieceSide 已设置
  *     - 所有子 mesh castShadow = true
  *     - group.userData.dispose() 可安全释放（内部引用计数，共享几何体）
  *     - userData.baseMesh = null（无底座，兼容旧读取方）
+ *     - opts.lodLevel = 0（默认，完整）/ 1（低模，仅 R/C/K 生效，lod-spec §2）——
+ *       工程侧 LOD 切换用 lodLevel=1 建低模模板，与 lod0 模板独立缓存
  *
  * 性能说明（对契约的一处**优化性偏离**，见 docs/art-bible.md）：
  *   每枚棋子由 28~45 个几何"零件"塑形，但在构建期按材质
@@ -74,6 +76,13 @@ export const PIECE_GLYPH = {
 export const PIECE_TOP_Y = { P: 0.70, N: 0.86, B: 0.79, A: 0.79, R: 0.99, C: 0.93, K: 1.15 };
 
 /**
+ * L4b：支持低模 LOD 的兵种（lod-spec §2.2）——R/C/K 三型。
+ * 工程侧 LOD 切换据此为这些兵种额外建 lodLevel=1 模板；
+ * P/N/B/A 本期不降段，lodLevel=1 会被 buildTemplate 忽略（退化为完整几何）。
+ */
+export const LOD_TYPES = ['R', 'C', 'K'];
+
+/**
  * K 整体等比预缩放（用户拍板：路径 B，idleGroup.scale=1.25；crown 零加长）。
  * 顶高 1.0332 → 1.0332×1.25 ≈ 1.29，体量 ≈ ×1.95。
  * ⚠ 预缩放锁定：K 的 idleGroup.scale 恒定 1.25，任何动画/崩解不得把它写成 1.0。
@@ -85,12 +94,41 @@ export const K_IDLE_SCALE = 1.25;
  * 几何体简写
  * ============================================================ */
 
-const cyl = (rt, rb, h, seg = 12) => new THREE.CylinderGeometry(rt, rb, h, seg, 1);
+/* ---- L4b 低模 LOD（美术侧模板，lod-spec.md §2，2026-08 落地）----
+ * 构建期同步读取 _lodLevel（0=完整 / 1=低模）。buildTemplate 全程同步执行，
+ * 每次入口重新赋值，无跨模板污染/并发风险。
+ * 降段仅作用于 R/C/K 三型（lod-spec §2.2；P/N/B/A 体量小、辨识风险高，本期不降段）。
+ * 关键剪影件（R 车轮 / K 鹖冠 / K 王座 / C A 架，lod-spec §3 红线）
+ * 一律走 *Keep 变体，任何 LOD 级别都保持现状段数。 */
+let _lodLevel = 0;
+
+/** 低模段数映射表（lod-spec §2.1 最终参数；键=现状段数，值=低模段数）。
+ *  表内缺省值在低模下保持不变（_lod 原样返回）。 */
+const _lodSeg = {
+  cyl:   { 14: 8, 12: 8, 10: 6, 8: 6, 6: 6 },      // 12/14→8；显式 10→6（自 §2.1「列待确认」升级为落地参数）
+  sphW:  { 12: 6, 10: 8, 9: 7, 8: 6, 7: 5, 6: 6 }, // 12→6（§2.1）；其余按比例降一档
+  sphH:  { 10: 6, 8: 6, 7: 5, 6: 5, 5: 4, 4: 4 },
+  domeW: { 12: 6, 10: 6, 8: 6, 6: 6 },
+  domeH: { 7: 4, 6: 4, 4: 4 },
+  torTS: { 18: 12, 16: 12, 14: 12, 12: 12, 10: 10, 8: 8 }, // rs 保持（§2.1「rs 6 保持」）；ts 地板 12
+  strut: { 10: 6, 9: 6, 8: 6, 6: 6, 5: 5 }          // 8→6；显式 10→6
+};
+const _lod = (table, v) => (_lodLevel >= 1 && table[v] !== undefined) ? table[v] : v;
+
+const cyl = (rt, rb, h, seg = 12) => new THREE.CylinderGeometry(rt, rb, h, _lod(_lodSeg.cyl, seg), 1);
 const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
-const sph = (r, w = 12, h = 10) => new THREE.SphereGeometry(r, w, h);
+const sph = (r, w = 12, h = 10) => new THREE.SphereGeometry(r, _lod(_lodSeg.sphW, w), _lod(_lodSeg.sphH, h));
 const dome = (r, w = 12, h = 7, frac = 0.6) =>
+  new THREE.SphereGeometry(r, _lod(_lodSeg.domeW, w), _lod(_lodSeg.domeH, h), 0, Math.PI * 2, 0, Math.PI * frac);
+const tor = (R, t, rs = 6, ts = 18) => new THREE.TorusGeometry(R, t, rs, _lod(_lodSeg.torTS, ts));
+
+/* 关键剪影件「不降段」变体（lod-spec §3 红线）——任何 LOD 级别保持现状段数。
+ * 对应 R 车轮（tor/cyl/sph）、K 鹖冠（cyl/sph/strut）、K 王座（cyl/sph/strut）、C A 架（strut）。 */
+const cylKeep = (rt, rb, h, seg = 12) => new THREE.CylinderGeometry(rt, rb, h, seg, 1);
+const sphKeep = (r, w = 12, h = 10) => new THREE.SphereGeometry(r, w, h);
+const domeKeep = (r, w = 12, h = 7, frac = 0.6) =>
   new THREE.SphereGeometry(r, w, h, 0, Math.PI * 2, 0, Math.PI * frac);
-const tor = (R, t, rs = 6, ts = 18) => new THREE.TorusGeometry(R, t, rs, ts);
+const torKeep = (R, t, rs = 6, ts = 18) => new THREE.TorusGeometry(R, t, rs, ts);
 
 /** 轻微弯曲的旗面（PlaneGeometry + 顶点位移，仍为 indexed 几何体） */
 function curvedBanner(w, h, bend, segs = 8) {
@@ -158,6 +196,15 @@ class Parts {
 
   /** 从 A 点到 B 点的圆柱（腿、臂、杆、索、支架）；Y 同减 FOOT */
   strut(mat, a, b, rTop, rBot, seg) {
+    return this._strutImpl(mat, a, b, rTop, rBot, seg, true);
+  }
+
+  /** 关键剪影件「不降段」变体（lod-spec §3 红线）：R 车轮辐条/K 鹖冠立缨/C A 架斜梁等保持现状段数 */
+  strutKeep(mat, a, b, rTop, rBot, seg) {
+    return this._strutImpl(mat, a, b, rTop, rBot, seg, false);
+  }
+
+  _strutImpl(mat, a, b, rTop, rBot, seg, applyLod) {
     _v3a.set(a[0], a[1] - FOOT, a[2]);
     _v3b.set(b[0], b[1] - FOOT, b[2]);
     const dir = _v3b.clone().sub(_v3a);
@@ -165,8 +212,9 @@ class Parts {
     if (len < 1e-6) return this;
     dir.normalize();
     const mid = _v3a.clone().add(_v3b).multiplyScalar(0.5);
+    const s = applyLod ? _lod(_lodSeg.strut, seg || 8) : (seg || 8);
     const g = new THREE.CylinderGeometry(
-      rTop, (rBot === undefined ? rTop : rBot), len, seg || 8, 1
+      rTop, (rBot === undefined ? rTop : rBot), len, s, 1
     );
     const q = new THREE.Quaternion().setFromUnitVectors(_up, dir.clone().negate());
     g.applyMatrix4(new THREE.Matrix4().compose(mid, q, new THREE.Vector3(1, 1, 1)));
@@ -636,13 +684,15 @@ function buildChariot(mp, M, K, side) {
 
   for (let s = -1; s <= 1; s += 2) {
     const x = WX * s;
-    PB.add(tor(WR, TUBE, 8, 18), M.wood, { pos: [x, HUB, 0], rot: [0, Math.PI / 2, 0] });
-    PB.add(tor(WR - 0.024, 0.010, 5, 16), M.woodDeep, { pos: [x, HUB, 0], rot: [0, Math.PI / 2, 0] });
+    // ★ L4b 关键剪影件「不降段」（lod-spec §3）：车轮双环 + 辐条 + 轮毂任何 LOD 保段——
+    //   「棋盘上唯一圆环轮廓」是 R 的第一辨识线索（辐条为 box 无段数，天然不受 LOD 影响）。
+    PB.add(torKeep(WR, TUBE, 8, 18), M.wood, { pos: [x, HUB, 0], rot: [0, Math.PI / 2, 0] });
+    PB.add(torKeep(WR - 0.024, 0.010, 5, 16), M.woodDeep, { pos: [x, HUB, 0], rot: [0, Math.PI / 2, 0] });
     for (let k = 0; k < 4; k++) {
       PB.add(box(0.018, WR * 1.88, 0.018), M.wood, { pos: [x, HUB, 0], rot: [(k * Math.PI) / 4, 0, 0] });
     }
-    PB.add(cyl(0.044, 0.044, 0.068, 12), M.woodDeep, { pos: [x, HUB, 0], rot: [0, 0, Math.PI / 2] });
-    PB.add(sph(0.032, 10, 8), M.accentDim, { pos: [x * 1.12, HUB, 0] });
+    PB.add(cylKeep(0.044, 0.044, 0.068, 12), M.woodDeep, { pos: [x, HUB, 0], rot: [0, 0, Math.PI / 2] });
+    PB.add(sphKeep(0.032, 10, 8), M.accentDim, { pos: [x * 1.12, HUB, 0] });
   }
   PB.add(cyl(0.024, 0.024, 0.540, 10), M.wood, { pos: [0, HUB, 0], rot: [0, 0, Math.PI / 2] });
 
@@ -876,11 +926,12 @@ function buildCannon(mp, M, K, side) {
   Pcart.add(box(0.046, 0.028, 0.046), M.accentDim, { pos: [0.145, FOOT + 0.040, -0.185] });
   Pcart.add(box(0.046, 0.028, 0.046), M.accentDim, { pos: [-0.145, FOOT + 0.040, -0.185] });
 
-  // A 字形支架
-  Pt.strut(M.wood, [0.145, 0.118, 0.170], [0.145, PIV, 0], 0.022, 0.018, 8);
-  Pt.strut(M.wood, [0.145, 0.118, -0.170], [0.145, PIV, 0], 0.022, 0.018, 8);
-  Pt.strut(M.wood, [-0.145, 0.118, 0.170], [-0.145, PIV, 0], 0.022, 0.018, 8);
-  Pt.strut(M.wood, [-0.145, 0.118, -0.170], [-0.145, PIV, 0], 0.022, 0.018, 8);
+  // A 字形支架 —— ★ L4b 关键剪影件「不降段」（lod-spec §3）：A 字三角轮廓是 C 的
+  //   独特外轮廓，降段会折角失圆、破坏机械感，任何 LOD 保段。
+  Pt.strutKeep(M.wood, [0.145, 0.118, 0.170], [0.145, PIV, 0], 0.022, 0.018, 8);
+  Pt.strutKeep(M.wood, [0.145, 0.118, -0.170], [0.145, PIV, 0], 0.022, 0.018, 8);
+  Pt.strutKeep(M.wood, [-0.145, 0.118, 0.170], [-0.145, PIV, 0], 0.022, 0.018, 8);
+  Pt.strutKeep(M.wood, [-0.145, 0.118, -0.170], [-0.145, PIV, 0], 0.022, 0.018, 8);
 
   // A 架四脚青铜包铁节点
   for (let sx = -1; sx <= 1; sx += 2) {
@@ -1074,10 +1125,11 @@ function buildKing(mp, M, K, side) {
   //   尺寸与高度不变，仅 z 符号翻转，保持 piece-check maxY≈1.15 / throne 顶≥0.95 ——）
   Pt.add(box(0.300, 0.600, 0.060), M.woodDeep,  { pos: [0, FOOT + 0.560, +0.220] }); // 背板
   Pt.add(box(0.270, 0.540, 0.042), M.wood,      { pos: [0, FOOT + 0.550, +0.216] }); // 内衬分层
-  // 顶部夔龙纹横梁
+  // 顶部夔龙纹横梁 —— ★ L4b 关键剪影件「不降段」（lod-spec §3）：王座整组（t01~t07）
+  //   为 K 剪影主体（高背 + 坐姿），任何 LOD 保段，仅 box 零件天然不受段数影响。
   Pt.add(box(0.340, 0.070, 0.080), M.accent,    { pos: [0, FOOT + 0.880, +0.220] });
-  Pt.add(sph(0.030, 10, 8), M.accent,           { pos: [+0.170, FOOT + 0.885, +0.220] });
-  Pt.add(sph(0.030, 10, 8), M.accent,           { pos: [-0.170, FOOT + 0.885, +0.220] });
+  Pt.add(sphKeep(0.030, 10, 8), M.accent,       { pos: [+0.170, FOOT + 0.885, +0.220] });
+  Pt.add(sphKeep(0.030, 10, 8), M.accent,       { pos: [-0.170, FOOT + 0.885, +0.220] });
   Pt.add(box(0.030, 0.520, 0.030), M.accentDim, { pos: [0, FOOT + 0.600, +0.232] });
   Pt.add(box(0.060, 0.380, 0.020), M.accent,    { pos: [+0.092, FOOT + 0.500, +0.230] });
   Pt.add(box(0.060, 0.380, 0.020), M.accent,    { pos: [-0.092, FOOT + 0.500, +0.230] });
@@ -1086,16 +1138,16 @@ function buildKing(mp, M, K, side) {
   // —— t04 扶手 + 龙首（fx=±0.16，与人物手臂对位；端头鎏金兽首）——
   for (let s = -1; s <= 1; s += 2) {
     const fx = 0.160 * s;
-    // 前支柱（座身前角升起）
-    Pt.strut(M.woodDeep, [fx, 0.140, -0.050], [fx, 0.200, -0.050], 0.018, 0.014, 8);
+    // 前支柱（座身前角升起）—— throne 整组不降段（见 t03 注释）
+    Pt.strutKeep(M.woodDeep, [fx, 0.140, -0.050], [fx, 0.200, -0.050], 0.018, 0.014, 8);
     // 后支柱
-    Pt.strut(M.woodDeep, [fx, 0.140, 0.090], [fx, 0.200, 0.090], 0.018, 0.014, 8);
+    Pt.strutKeep(M.woodDeep, [fx, 0.140, 0.090], [fx, 0.200, 0.090], 0.018, 0.014, 8);
     // 扶手横杆（圆棍，前龙首 → 后座）
-    Pt.add(cyl(0.014, 0.014, 0.160, 10), M.wood, {
+    Pt.add(cylKeep(0.014, 0.014, 0.160, 10), M.wood, {
       pos: [fx, FOOT + 0.200, 0.020], rot: [0, 0, s > 0 ? Math.PI / 2 : -Math.PI / 2]
     });
     // 端头龙首（简化兽首衔环，鎏金高光）
-    Pt.add(sph(0.028, 10, 8), M.accent, { pos: [fx, FOOT + 0.206, -0.070] });
+    Pt.add(sphKeep(0.028, 10, 8), M.accent, { pos: [fx, FOOT + 0.206, -0.070] });
     // 兽爪足（接地）
     Pt.add(box(0.030, 0.026, 0.040), M.accentDim, { pos: [fx, FOOT + 0.013, -0.050] });
   }
@@ -1237,15 +1289,17 @@ function buildKingArm(P, M, K) {
  *   仍远低于 throne 背板顶 0.946 本地 / 1.18 世界（背板为剪影主体）。
  */
 function buildKingCrown(P, M, K, BODY_BOT) {
+  // ★ L4b 关键剪影件「不降段」（lod-spec §3）：鹖冠 + 立缨双羽是 K 的「唯一双羽」
+  //   辨识线索（俯视/远视第一线索），整组任何 LOD 保段。
   // 冠箍（鎏金窄环，坐于头顶 piece-y≈0.60）
-  P.add(cyl(0.066, 0.070, 0.024, 14), M.accent, { pos: [0, BODY_BOT + 0.514, -0.002] });
+  P.add(cylKeep(0.066, 0.070, 0.024, 14), M.accent, { pos: [0, BODY_BOT + 0.514, -0.002] });
   // 冠身（h=0.060，piece-y 0.60→0.66）
-  P.add(cyl(0.060, 0.064, 0.060, 14), M.clothDeep, { pos: [0, BODY_BOT + 0.544, -0.002] });
+  P.add(cylKeep(0.060, 0.064, 0.060, 14), M.clothDeep, { pos: [0, BODY_BOT + 0.544, -0.002] });
   // 冠顶圆珠（鎏金小珠封顶，piece-y≈0.66）
-  P.add(sph(0.018, 10, 8), M.accent, { pos: [0, BODY_BOT + 0.574, -0.002] });
+  P.add(sphKeep(0.018, 10, 8), M.accent, { pos: [0, BODY_BOT + 0.574, -0.002] });
   // 立缨双羽（plume 顶端 piece-y≈0.70 / world 0.875，略高于 head top 0.80）
-  P.strut(M.plume, [0.026, BODY_BOT + 0.600, +0.012], [0.066, BODY_BOT + 0.700, +0.056], 0.005, 0.014, 6);
-  P.strut(M.plume, [-0.026, BODY_BOT + 0.600, +0.012], [-0.066, BODY_BOT + 0.700, +0.056], 0.005, 0.014, 6);
+  P.strutKeep(M.plume, [0.026, BODY_BOT + 0.600, +0.012], [0.066, BODY_BOT + 0.700, +0.056], 0.005, 0.014, 6);
+  P.strutKeep(M.plume, [-0.026, BODY_BOT + 0.600, +0.012], [-0.066, BODY_BOT + 0.700, +0.056], 0.005, 0.014, 6);
 }
 
 /** 佩剑（右侧按剑）—— 归入 sword 子组，windUp/strike/settle 挥斩用。
@@ -1306,7 +1360,11 @@ const SUBGROUP_JOINTS = {
 
 const _templates = new Map();
 
-function buildTemplate(type, side) {
+function buildTemplate(type, side, lodLevel) {
+  // L4b：LOD 段数开关。降段仅作用于 R/C/K 三型（lod-spec §2.2）；
+  // P/N/B/A 本期不降段（体量小、辨识风险高），_lodLevel 恒 0，几何与现状逐字节一致。
+  _lodLevel = (lodLevel >= 1 && (type === 'R' || type === 'C' || type === 'K')) ? 1 : 0;
+
   const mats = getMaterials();
   const M = mats.side(side);
   const K = mats.common;
@@ -1430,15 +1488,15 @@ function buildTemplate(type, side) {
  * 创建一枚棋子。
  * @param {'K'|'A'|'B'|'N'|'R'|'C'|'P'} type
  * @param {'r'|'b'} side
+ * @param {{lodLevel?: 0|1}} [opts] L4b：lodLevel=1 建低模模板（仅 R/C/K 生效，§2.2）；
+ *   工程侧（LOD 切换）按距离/档位用 lodLevel=0/1 各建一套模板，`THREE.LOD` 或距离切换显示。
  * @returns {THREE.Group}
  */
-export function createPieceMesh(type, side) {
-  const key = type + side;
-  let tpl = _templates.get(key);
-  if (!tpl) {
-    tpl = buildTemplate(type, side);
-    _templates.set(key, tpl);
-  }
+export function createPieceMesh(type, side, opts) {
+  // L4b：低模模板独立缓存桶（lod0 沿用旧 key，向后兼容）
+  const lodLevel = (opts && opts.lodLevel >= 1) ? 1 : 0;
+  const key = lodLevel > 0 ? type + side + ':lod1' : type + side;
+  const tpl = _getTemplate(type, side, lodLevel);
 
   const group = tpl.root.clone(true);
   tpl.count++;
@@ -1446,6 +1504,8 @@ export function createPieceMesh(type, side) {
   group.name = 'piece_' + key;
   group.userData.pieceType = type;
   group.userData.pieceSide = side;
+  group.userData.lodLevel = lodLevel;   // L4b：实例携带模板档位，供工程切换逻辑判读
+  group.userData._tpl = tpl;            // L4b：当前模板引用（setPieceLod 切换后迁移，供 dispose 计数）
   group.userData.glyph = PIECE_GLYPH[side][type];
   group.userData.topY = PIECE_TOP_Y[type] || 0.9;
 
@@ -1481,10 +1541,93 @@ export function createPieceMesh(type, side) {
     // H3（关键修正）：只做引用计数释放，绝不在此处释放模板几何。
     // 模板几何统一收口到 disposePieceFactory()（卸载期一次性释放）——
     // 否则悔棋/重开 count 归零会销毁模板、紧接着重建 7×2 套几何造成卡顿。
-    if (tpl.count > 0) tpl.count--;
+    // L4b：走 _tpl 引用（setPieceLod 切换档位后计到当前模板，而非创建时模板）。
+    const t = group.userData._tpl || tpl;
+    if (t.count > 0) t.count--;
   };
 
   return group;
+}
+
+/**
+ * L4b · 运行时切换棋子几何档位（高模 lod0 ↔ 低模 lod1）。
+ *
+ * 原理：lod0/lod1 模板的子组结构完全一致（同一份 BUILDERS + 同一套关节平移 +
+ * 同一材质族合并决策），仅几何段数不同 → 按「子组名 + mesh 索引」一一替换
+ * 实例 mesh 的 geometry 即可完成切换，零重建、零 pop（几何在同一局部坐标系）。
+ *
+ * swap 保护（由调用方 main.js 负责）：busy/selected 状态下不调用本函数；
+ * 本函数只做结构一致性防御。
+ *
+ * @param {THREE.Group} group 棋子实例（createPieceMesh 返回）
+ * @param {0|1} lodLevel 目标档位：0=高模（近景），1=低模（远景，仅 R/C/K 生效）
+ * @returns {boolean} 是否发生了切换（供调用方统计 / H1 埋点）
+ */
+export function setPieceLod(group, lodLevel) {
+  if (!group || !group.userData || !group.userData.pieceType) return false;
+  const target = lodLevel >= 1 ? 1 : 0;
+  const type = group.userData.pieceType;
+  const side = group.userData.pieceSide;
+  if (group.userData.lodLevel === target) return false;   // 已是目标档位
+  // P/N/B/A 不在 LOD 范围（lod-spec §2.2）：buildTemplate 恒建完整几何，无低模模板可切
+  if (target === 1 && (type !== 'R' && type !== 'C' && type !== 'K')) return false;
+
+  const tpl = _getTemplate(type, side, target);
+  const from = _collectSubgroupMeshes(group);
+  const to = _collectSubgroupMeshes(tpl.root);
+  let swapped = 0;
+  for (const [name, fromMeshes] of from) {
+    const toMeshes = to.get(name) || [];
+    // 结构一致性防御：同一子组高低模 mesh 数必须一致（理论保证：仅段数不同，
+    // 材质族分类/合并决策相同）。不一致则跳过该子组，不中断其余子组切换。
+    if (fromMeshes.length !== toMeshes.length) continue;
+    for (let i = 0; i < fromMeshes.length; i++) {
+      fromMeshes[i].geometry = toMeshes[i].geometry;
+    }
+    swapped += fromMeshes.length;
+  }
+  if (swapped === 0) return false;   // 无一子组可切换（防御：结构异常时不改状态）
+
+  // 引用计数迁移（H3：模板几何由 disposePieceFactory 统一释放，此处仅计数）
+  const oldTpl = group.userData._tpl;
+  if (oldTpl && oldTpl !== tpl && oldTpl.count > 0) oldTpl.count--;
+  tpl.count++;
+  group.userData._tpl = tpl;
+  group.userData.lodLevel = target;
+  return true;
+}
+
+/**
+ * 收集 Group 下按「_base 直接子 mesh + 命名子组」划分的 mesh 数组。
+ * 用于高低模模板/实例间的一一对应（结构由 buildTemplate 保证同构）。
+ * @returns {Map<string, THREE.Mesh[]>}
+ */
+function _collectSubgroupMeshes(root) {
+  const idle = root.getObjectByName('idleGroup') || root;
+  const map = new Map();
+  const base = [];
+  const subgroups = [];
+  for (const c of idle.children) {
+    if (c.isMesh) base.push(c); else subgroups.push(c);
+  }
+  map.set('_base', base);
+  for (const g of subgroups) {
+    const arr = [];
+    g.traverse(o => { if (o.isMesh) arr.push(o); });
+    map.set(g.name, arr);
+  }
+  return map;
+}
+
+/** L4b：按档位取模板（lod0 沿用旧 key，向后兼容；无则构建） */
+function _getTemplate(type, side, lodLevel) {
+  const key = lodLevel >= 1 ? type + side + ':lod1' : type + side;
+  let tpl = _templates.get(key);
+  if (!tpl) {
+    tpl = buildTemplate(type, side, lodLevel);
+    _templates.set(key, tpl);
+  }
+  return tpl;
 }
 
 /**
