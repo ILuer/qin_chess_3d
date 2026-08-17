@@ -52,25 +52,131 @@ function lerpAngle(a, b, t) {
   return a + d * t;
 }
 
+// ---------------------------------------------------------------------------
+// H5 · 能力探测与分级帧率状态机
+// ---------------------------------------------------------------------------
+
+/** 移动端判定：UA 移动标识，或触屏 + 小屏（<768 短边） */
+function detectMobile() {
+  try {
+    const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
+    const uaMobile = /Android|iPhone|iPad|iPod|Mobile|Windows Phone|webOS/i.test(ua);
+    const touch = typeof window !== 'undefined' && (
+      'ontouchstart' in window ||
+      (typeof navigator !== 'undefined' && navigator.maxTouchPoints && navigator.maxTouchPoints > 0)
+    );
+    const small = typeof window !== 'undefined' &&
+      Math.min(window.innerWidth || 0, window.innerHeight || 0) < 768;
+    return uaMobile || (touch && small);
+  } catch (e) { return false; }
+}
+
+/** 弱机判定：CPU 核数 < 6（移动端降档口径） */
+function detectWeak() {
+  try {
+    const cores = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 8;
+    return cores > 0 && cores < 6;
+  } catch (e) { return false; }
+}
+
+/** ?quality=high 手动覆盖：锁定初始档位，不做自动降档 */
+function qualityOverride() {
+  try {
+    const q = new URLSearchParams(window.location.search).get('quality');
+    return q === 'high' ? 'high' : null;
+  } catch (e) { return null; }
+}
+
+/**
+ * 质量档位（H5 分级状态机）：
+ *   3（初始）→ 2（降 PR 至 1.5）→ 1（关阴影，PR=1）→ 0（关装饰灯 + 强制低模）。
+ * null 表示「用 _initial 初始值」；lowMesh 供 L4 LOD 落地后消费（当前仅标记）。
+ */
+const QUALITY_LEVELS = [
+  { pixelRatio: 1,   shadows: false, deco: false, lowMesh: true  },  // 0 最低
+  { pixelRatio: 1,   shadows: false, deco: true,  lowMesh: false },  // 1
+  { pixelRatio: 1.5, shadows: true,  deco: true,  lowMesh: false },  // 2
+  { pixelRatio: null, shadows: null, deco: true,  lowMesh: false }   // 3 初始
+];
+const FPS_DROP_THRESHOLD = 40;   // 90 帧窗口均值 <40 → 降一档
+const FPS_RISE_THRESHOLD = 55;   // ≥55 → 升一档（40~55 迟滞区间防抖）
+const QUALITY_COOLDOWN = 4;      // 档位切换后冷却秒数，防来回抖动
+
+// ---------------------------------------------------------------------------
+// L5 · 异步渲染器工厂（动态 import 双后端）
+// ---------------------------------------------------------------------------
+
+/** WebGPU 是否可用（navigator.gpu + requestAdapter 成功） */
+async function webgpuAvailable() {
+  try {
+    if (typeof navigator === 'undefined' || !navigator.gpu ||
+        typeof navigator.gpu.requestAdapter !== 'function') return false;
+    const adapter = await navigator.gpu.requestAdapter();
+    return !!adapter;
+  } catch (e) { return false; }
+}
+
+/**
+ * 创建渲染器：WebGPU 可用 → await import('three/webgpu') 用 WebGPURenderer（r185 双后端，
+ * 标准材质/阴影/色调映射与本项目使用面完全兼容）；否则 WebGLRenderer（主 bundle 内联）。
+ * WebGL 浏览器不下载 webgpu chunk（动态 import 按需加载）。
+ */
+async function createRenderer() {
+  if (await webgpuAvailable()) {
+    try {
+      const mod = await import('three/webgpu');
+      if (mod && mod.WebGPURenderer) {
+        const renderer = new mod.WebGPURenderer({ antialias: true, alpha: false, stencil: false });
+        if (typeof renderer.init === 'function') await renderer.init();
+        return { renderer, backend: 'webgpu' };
+      }
+    } catch (e) {
+      console.warn('[renderer] WebGPU 初始化失败，回退 WebGL：', e && e.message);
+    }
+  }
+  return {
+    renderer: new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: false,
+      powerPreference: 'high-performance',
+      stencil: false
+    }),
+    backend: 'webgl'
+  };
+}
+
 export class SceneSystem {
   /**
    * @param {HTMLElement} container
-   * @param {{onQualityDrop?:Function}} [opts]
+   * @param {{onQualityDrop?:Function, renderer?:Object, backend?:string, isMobile?:boolean, isWeak?:boolean}} [opts]
    */
   constructor(container, opts = {}) {
     this.container = container;
     this.opts = opts;
     this.disposed = false;
+    this.backend = opts.backend || 'webgl';
 
-    // —— 渲染器 ——
-    const renderer = new THREE.WebGLRenderer({
+    // —— H5 能力探测（支持外部注入，便于测试/真机覆盖）——
+    this.isMobile = opts.isMobile != null ? opts.isMobile : detectMobile();
+    this.isWeak = opts.isWeak != null ? opts.isWeak : detectWeak();
+    this.qualityOverride = qualityOverride();
+    const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+    // 初始像素比：弱机 1；移动端上限 1.5；桌面 min(dpr, 2)
+    const initialPR = this.isWeak ? 1 : (this.isMobile ? Math.min(dpr, 1.5) : Math.min(dpr, 2));
+    // 初始阴影：弱机（cores<6）关；移动端 1024²；桌面 2048²
+    const initialShadows = !this.isWeak;
+    const shadowSize = this.isMobile ? 1024 : 2048;
+    this._initial = { pixelRatio: initialPR, shadows: initialShadows, shadowSize };
+    this.basePixelRatio = initialPR;   // 保留旧字段名（外部可能读取）
+
+    // —— 渲染器（L5：createSceneSystem 异步工厂注入；直接 new 时回退 WebGL）——
+    const renderer = opts.renderer || new THREE.WebGLRenderer({
       antialias: true,
       alpha: false,
       powerPreference: 'high-performance',
       stencil: false
     });
-    this.basePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-    renderer.setPixelRatio(this.basePixelRatio);
+    renderer.setPixelRatio(initialPR);
     renderer.setSize(container.clientWidth || window.innerWidth, container.clientHeight || window.innerHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     // ACESFilmic 会明显压暗中间调并去饱和，棋子字面与甲胄细节正好落在这一段，
@@ -78,7 +184,7 @@ export class SceneSystem {
     // 既提得起亮度又不会把鎏金/字面推成一片死白。
     renderer.toneMapping = THREE.NeutralToneMapping;
     renderer.toneMappingExposure = 1.14;
-    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.enabled = initialShadows;
     renderer.shadowMap.type = THREE.PCFShadowMap;  // PCFSoftShadowMap deprecated in r185
     renderer.setClearColor(BG_COLOR, 1);
     renderer.domElement.classList.add('game-canvas');
@@ -135,9 +241,13 @@ export class SceneSystem {
     this._shake = { t: 0, dur: 0, intensity: 0 };
     this._shakeOffset = new THREE.Vector3();
 
-    // —— 帧率自适应 ——
+    // —— 帧率自适应（H5 分级状态机）——
     this._fpsWindow = [];
-    this._degraded = false;
+    this._qualityLevel = 3;
+    this._lastQualityLevel = 3;
+    this._qualityCooldown = 0;
+    this._qualityLocked = this.qualityOverride === 'high';   // ?quality=high 手动锁定
+    this.lowMesh = false;    // L0 置 true；L4 LOD 落地后由渲染层消费
     this.currentView = 'red';
     this.viewSide = RED;
     this.isTopView = false;
@@ -160,8 +270,8 @@ export class SceneSystem {
     // 主光若不退让，鎏金与甲片高光会直接打爆。
     const key = new THREE.DirectionalLight(PALETTE.keyLight, 1.95);
     key.position.set(6.5, 13.5, 7.5);
-    key.castShadow = true;
-    key.shadow.mapSize.set(2048, 2048);
+    key.castShadow = this._initial.shadows;   // H5：弱机初始关阴影
+    key.shadow.mapSize.set(this._initial.shadowSize, this._initial.shadowSize);   // 移动 1024² / 桌面 2048²
     const cam = key.shadow.camera;
     cam.left = -9; cam.right = 9; cam.top = 9; cam.bottom = -9;   // 完整包住 8×9 的棋盘
     cam.near = 1; cam.far = 42;
@@ -223,14 +333,20 @@ export class SceneSystem {
     this.underLight = under;
 
     // 底部微补光 ×2（art-bible §7.3 可选）：低矮棋子脚部轮廓补光，红暖 / 黑冷
-    const bottomR = new THREE.PointLight(0xffe4d0, 4, 10, 2);
-    bottomR.position.set(0, 0.5, 7.0);
-    scene.add(bottomR);
-    this.bottomLightR = bottomR;
-    const bottomB = new THREE.PointLight(0xd0d8e4, 4, 10, 2);
-    bottomB.position.set(0, 0.5, -7.0);
-    scene.add(bottomB);
-    this.bottomLightB = bottomB;
+    // H5：移动端不挂这两盏装饰点光（省片元开销），桌面保留
+    if (!this.isMobile) {
+      const bottomR = new THREE.PointLight(0xffe4d0, 4, 10, 2);
+      bottomR.position.set(0, 0.5, 7.0);
+      scene.add(bottomR);
+      this.bottomLightR = bottomR;
+      const bottomB = new THREE.PointLight(0xd0d8e4, 4, 10, 2);
+      bottomB.position.set(0, 0.5, -7.0);
+      scene.add(bottomB);
+      this.bottomLightB = bottomB;
+    } else {
+      this.bottomLightR = null;
+      this.bottomLightB = null;
+    }
 
     this._updateHeadLight();
   }
@@ -527,7 +643,9 @@ export class SceneSystem {
   // -------------------------------------------------------------------------
 
   _trackFps(dt) {
-    if (this._degraded || dt <= 0) return;
+    if (this._qualityLocked || dt <= 0) return;
+    // 档位切换冷却期：不采样不判定（防来回抖动）
+    if (this._qualityCooldown > 0) { this._qualityCooldown -= dt; return; }
     const w = this._fpsWindow;
     w.push(1 / dt);
     if (w.length < 90) return;
@@ -535,18 +653,50 @@ export class SceneSystem {
     for (let i = 0; i < w.length; i++) sum += w[i];
     const avg = sum / w.length;
     w.length = 0;
-    if (avg < 40) this.degradeQuality(avg);
+    if (avg < FPS_DROP_THRESHOLD && this._qualityLevel > 0) {
+      this._setQualityLevel(this._qualityLevel - 1, avg);
+    } else if (avg >= FPS_RISE_THRESHOLD && this._qualityLevel < 3) {
+      this._setQualityLevel(this._qualityLevel + 1, avg);
+    }
   }
 
-  /** 降档：像素比降到 1 并关闭阴影 */
-  degradeQuality(avgFps = 0) {
-    if (this._degraded) return;
-    this._degraded = true;
-    this.renderer.setPixelRatio(1);
-    this.setShadowsEnabled(false);
+  /**
+   * 切换质量档位（H5 分级状态机：3→2 降 PR / 2→1 关阴影 / 1→0 关灯+强制低模）。
+   * @param {number} level 0..3
+   * @param {number} [avgFps]
+   */
+  _setQualityLevel(level, avgFps = 0) {
+    if (this._qualityLocked) return;
+    const clamped = Math.max(0, Math.min(3, level));
+    if (clamped === this._qualityLevel) return;
+    const dropping = clamped < this._qualityLevel;
+    this._qualityLevel = clamped;
+    this._qualityCooldown = QUALITY_COOLDOWN;
+    this._applyQualityLevel();
+    if (dropping && typeof this.opts.onQualityDrop === 'function') {
+      this.opts.onQualityDrop(Math.round(avgFps), clamped);
+    }
+  }
+
+  /** 应用当前档位（像素比 / 阴影 / 装饰灯；lowMesh 供 L4 LOD 消费） */
+  _applyQualityLevel() {
+    const L = QUALITY_LEVELS[this._qualityLevel];
+    let pr = L.pixelRatio == null ? this._initial.pixelRatio : L.pixelRatio;
+    pr = Math.min(pr, this._initial.pixelRatio);   // 不高于初始档（弱机初始 1 不会更低）
+    this.renderer.setPixelRatio(pr);
+    let shadows = L.shadows == null ? this._initial.shadows : L.shadows;
+    shadows = shadows && this._initial.shadows;    // 初始关阴影的弱机不会再开
+    this.setShadowsEnabled(shadows);
+    this._setDecorativeLights(L.deco !== false);
+    this.lowMesh = !!L.lowMesh;
     this.resize();
-    if (typeof this.opts.onQualityDrop === 'function') {
-      this.opts.onQualityDrop(Math.round(avgFps));
+  }
+
+  /** 装饰点灯开关（rim/under/bottomR/bottomB；L0 关灯） */
+  _setDecorativeLights(on) {
+    for (const k of ['rimLight', 'underLight', 'bottomLightR', 'bottomLightB']) {
+      const l = this[k];
+      if (l) l.visible = !!on;
     }
   }
 
@@ -556,7 +706,8 @@ export class SceneSystem {
     this.scene.traverse(o => { if (o.isMesh && o.material) o.material.needsUpdate = true; });
   }
 
-  get qualityDegraded() { return this._degraded; }
+  get qualityDegraded() { return this._qualityLevel < 3; }
+  get qualityLevel() { return this._qualityLevel; }
 
   // -------------------------------------------------------------------------
   // 尺寸与销毁
@@ -611,13 +762,14 @@ export class SceneSystem {
 }
 
 /**
- * 工厂函数
+ * 工厂函数（L5：异步渲染器工厂 —— WebGPU 可用则 WebGPURenderer，否则 WebGLRenderer）。
  * @param {HTMLElement} container
  * @param {Object} [opts]
- * @returns {SceneSystem}
+ * @returns {Promise<SceneSystem>}
  */
-export function createSceneSystem(container, opts) {
-  return new SceneSystem(container, opts);
+export async function createSceneSystem(container, opts) {
+  const { renderer, backend } = await createRenderer();
+  return new SceneSystem(container, Object.assign({}, opts, { renderer, backend }));
 }
 
 export default SceneSystem;

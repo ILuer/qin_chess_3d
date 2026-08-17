@@ -93,7 +93,7 @@ function toTexture(canvas, opts = {}) {
   const {
     repeat = [1, 1],
     srgb = true,
-    aniso = 8,
+    aniso = 1,
     wrap = THREE.RepeatWrapping
   } = opts;
   const t = new THREE.CanvasTexture(canvas);
@@ -214,7 +214,8 @@ export function createWoodTexture(opts = {}) {
     grains = 46,
     vertical = false,
     vignette = 0.45,
-    repeat = [1, 1]
+    repeat = [1, 1],
+    aniso = 1
   } = opts;
   const cv = mkCanvas(w, h);
   const ctx = cv.getContext('2d');
@@ -265,7 +266,7 @@ export function createWoodTexture(opts = {}) {
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, h);
   }
-  return toTexture(cv, { repeat });
+  return toTexture(cv, { repeat, aniso });
 }
 
 /**
@@ -273,8 +274,8 @@ export function createWoodTexture(opts = {}) {
  */
 export function createTextTexture(text, opts = {}) {
   const {
-    w = 1024,
-    h = 512,
+    w = 512,
+    h = 256,
     color = PALETTE.bone,
     shadow = 'rgba(0,0,0,0.85)',
     fontSize = null,
@@ -303,6 +304,13 @@ export function createTextTexture(text, opts = {}) {
     ctx.fillStyle = color;
     ctx.fillText(ch, x, h / 2);
     ctx.restore();
+    // M1：2px 同色内描边 —— 降分辨率后补偿字形边缘 antialias，防发虚
+    ctx.save();
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = color;
+    ctx.strokeText(ch, x, h / 2);
+    ctx.restore();
     if (glow) {
       ctx.save();
       ctx.lineWidth = Math.max(2, fs * 0.028);
@@ -320,8 +328,8 @@ export function createTextTexture(text, opts = {}) {
  * 旗面贴图：云雷纹边框 + 中央大字
  */
 export function createBannerTexture(glyph, side, opts = {}) {
-  const w = opts.w || 384;
-  const h = opts.h || 512;
+  const w = opts.w || 192;
+  const h = opts.h || 256;
   const warm = side === 'r';
   const cv = mkCanvas(w, h);
   const ctx = cv.getContext('2d');
@@ -370,7 +378,7 @@ export function createBannerTexture(glyph, side, opts = {}) {
   }
   ctx.putImageData(img, 0, 0);
 
-  return toTexture(cv, { wrap: THREE.ClampToEdgeWrapping, aniso: 8 });
+  return toTexture(cv, { wrap: THREE.ClampToEdgeWrapping }); // M1：aniso 回落默认 1
 }
 
 /* ============================================================
@@ -398,7 +406,7 @@ function std(color, roughness, metalness, extra) {
 function buildLibrary() {
   const woodTop = createWoodTexture({
     w: 1024, h: 1024, base: '#4a3527', dark: '#251a12', light: '#634834',
-    grains: 54, vignette: 0.5
+    grains: 54, vignette: 0.5, aniso: 4   // M1：木纹台面保留 1024² + 显式 aniso=4
   });
   const woodEdge = createWoodTexture({
     w: 512, h: 256, base: '#3b2a1e', dark: '#1d140e', light: '#523b2b',

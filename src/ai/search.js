@@ -407,7 +407,10 @@ export async function searchBestMoveSliced(board, side, opts = {}) {
 export const DIFFICULTY = {
   1: { name: '入门', depth: 2, timeLimit: 400, randomness: 26 },
   2: { name: '进阶', depth: 3, timeLimit: 900, randomness: 8 },
-  3: { name: '高手', depth: 4, timeLimit: 1800, randomness: 0 }
+  3: { name: '高手', depth: 4, timeLimit: 1800, randomness: 0 },
+  // M5：大师档。迭代加深 + 3s deadline 自动搜到尽可能深（engine 硬超时 = timeLimit + 3000 = 6s 兜底）。
+  // D10 拍板：大师档仅 worker 模式开放（主线程时间切片会卡页面），UI/engine 层已做门禁。
+  4: { name: '大师', depth: 6, timeLimit: 3000, randomness: 0 }
 };
 
 export { isInCheck };

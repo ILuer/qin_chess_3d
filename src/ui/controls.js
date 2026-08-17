@@ -209,6 +209,19 @@ export class Controls {
     }
   }
 
+  /**
+   * D10：大师档（value=4）仅 AI worker 模式开放。
+   * 主线程时间切片模式下禁用该选项（灰显不可选），避免选中后卡死页面。
+   * @param {boolean} available worker 模式可用
+   */
+  setMasterAvailable(available) {
+    if (!this.selDifficulty) return;
+    const opt = this.selDifficulty.querySelector('option[value="4"]');
+    if (!opt) return;
+    opt.disabled = !available;
+    opt.classList.toggle('is-gated', !available);
+  }
+
   setTopViewState(on) {
     if (!this.btnTop) return;
     this.btnTop.classList.toggle('is-on', !!on);

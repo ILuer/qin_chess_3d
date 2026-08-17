@@ -17,6 +17,9 @@ import { fromWorld, toWorld } from '../core/constants.js';
 /** 判定为"拖拽转视角"的像素阈值 */
 const DRAG_THRESHOLD = 5;
 
+/** M3：粗筛包围球基础半径（世界单位，覆盖全部兵种轮廓） */
+const PICK_COARSE_RADIUS = 0.7;
+
 /**
  * game 适配器需要实现的接口（由 main.js 提供）
  * @typedef {Object} InputGameAdapter
@@ -54,6 +57,9 @@ export class InputSystem {
     this._ndc = new THREE.Vector2();
     this._hoverNdc = new THREE.Vector2();
     this._hit = new THREE.Vector3();
+    // M3：粗筛复用预分配临时对象（热路径零分配）
+    this._sphere = new THREE.Sphere();
+    this._tmpVec = new THREE.Vector3();
 
     /** @type {{file:number, rank:number, moves:Array, mesh:Object}|null} */
     this.selected = null;
@@ -95,22 +101,52 @@ export class InputSystem {
   }
 
   /**
-   * 命中棋子：对 piecesGroup 递归 raycast，向上找带 userData.pieceType 的根 Group
+   * 命中棋子：两段式拾取（M3，热路径成本 -85%~95%）。
+   *  Phase 1 粗筛：对 piecesGroup 的直接子级（32 枚棋子根 Group）做包围球求交
+   *    （球心取棋子视觉中点、半径按 topY 自适应，基础 0.7），命中候选通常 ≤2-3 枚；
+   *  Phase 2 细测：仅对候选根递归 raycast，向上找带 userData.pieceType 的根 Group。
    * @returns {{mesh:THREE.Object3D, cell:{file:number,rank:number}}|null}
    */
   pickPiece(ndc) {
     this.raycaster.setFromCamera(ndc, this.camera);
-    const hits = this.raycaster.intersectObjects(this.piecesGroup.children, true);
-    for (let i = 0; i < hits.length; i++) {
-      let o = hits[i].object;
-      while (o && o !== this.piecesGroup) {
-        if (o.userData && o.userData.pieceType) {
-          const cell = o.userData.cell
-            || fromWorld(o.position.x, o.position.z);
-          if (cell) return { mesh: o, cell };
-          break;
+    const roots = this.piecesGroup.children;
+    // 保证世界矩阵新鲜（动画/待机微动每帧改变棋子位置）
+    this.piecesGroup.updateMatrixWorld(true);
+    const ray = this.raycaster.ray;
+
+    // Phase 1：包围球粗筛（32 球求交，非 150+ mesh 递归）
+    const candidates = [];
+    for (let i = 0; i < roots.length; i++) {
+      const root = roots[i];
+      if (!root || !root.userData || !root.userData.pieceType) continue;
+      // 根 Group 是 piecesGroup 直接子级（piecesGroup 位于原点、单位缩放），
+      // position 即世界坐标；根缩放通常为 1（squash 动画会短暂改变，随半径自适应）。
+      const s = root.scale.x || 1;
+      const topY = root.userData.topY || 0.9;
+      this._sphere.center.set(
+        root.position.x,
+        root.position.y + topY * 0.5,
+        root.position.z
+      );
+      // 半径：基础 0.7；高棋子（帅/车等）按高度自适应，保证顶部不被漏拾
+      this._sphere.radius = Math.max(PICK_COARSE_RADIUS, topY * 0.62) * s;
+      if (ray.intersectSphere(this._sphere, this._tmpVec)) candidates.push(root);
+    }
+
+    // Phase 2：候选递归细测（通常 ≤2-3 枚）
+    for (let i = 0; i < candidates.length; i++) {
+      const hits = this.raycaster.intersectObjects([candidates[i]], true);
+      for (let j = 0; j < hits.length; j++) {
+        let o = hits[j].object;
+        while (o && o !== this.piecesGroup) {
+          if (o.userData && o.userData.pieceType) {
+            const cell = o.userData.cell
+              || fromWorld(o.position.x, o.position.z);
+            if (cell) return { mesh: o, cell };
+            break;
+          }
+          o = o.parent;
         }
-        o = o.parent;
       }
     }
     return null;

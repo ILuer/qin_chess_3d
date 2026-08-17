@@ -6,7 +6,7 @@
 import {
   RED, BLACK, PT, opposite,
   PIECE_NAMES, SIDE_NAMES, FILE_NAMES_RED, FILE_NAMES_BLACK,
-  CN_NUM, AR_NUM, MOVE_VERB,
+  CN_NUM, AR_NUM, MOVE_VERB, INITIAL_FEN,
   DRAW_HALFMOVE_HINT, DRAW_HALFMOVE_LIMIT
 } from './constants.js';
 import { Board, createInitialBoard, boardFromList, boardFromFen } from './board.js';
@@ -97,6 +97,8 @@ export class GameState {
   constructor(board, sideToMove) {
     this.board = board || createInitialBoard();
     this.sideToMove = sideToMove || RED;
+    /** 起始局面 FEN（完整 FEN）：M4 存档重放 / L2 复盘导出的重放起点 */
+    this.startFen = `${this.board.toFen()} ${this.sideToMove === BLACK ? 'b' : 'w'} - - 0 1`;
     /** @type {Array<Object>} 历史栈 */
     this.history = [];
     /** 无吃子半回合计数 */
@@ -123,7 +125,10 @@ export class GameState {
   static fromFen(fen, sideToMove) {
     const parts = String(fen).trim().split(/\s+/);
     const side = sideToMove || (parts[1] === 'b' ? BLACK : RED);
-    return new GameState(boardFromFen(parts[0]), side);
+    const g = new GameState(boardFromFen(parts[0]), side);
+    // 记录起始 FEN（完整或仅棋子部分均可），供 M4 存档重放 / L2 复盘
+    g.startFen = String(fen).trim();
+    return g;
   }
 
   // —— 极简事件总线 ——
@@ -279,6 +284,7 @@ export class GameState {
   reset(board, sideToMove = RED) {
     this.board = board || createInitialBoard();
     this.sideToMove = sideToMove;
+    this.startFen = `${this.board.toFen()} ${sideToMove === BLACK ? 'b' : 'w'} - - 0 1`;
     this.history.length = 0;
     this.halfMoveClock = 0;
     this._drawHinted = false;
@@ -378,6 +384,42 @@ export class GameState {
   /** 导出 FEN */
   toFen() {
     return `${this.board.toFen()} ${this.sideToMove === RED ? 'w' : 'b'} - - ${this.halfMoveClock} ${this.moveNumber}`;
+  }
+
+  /**
+   * L2：UCCI 坐标转换。ucciFile = 'a' + file（file 0 → a），ucciRank = 9 - rank（rank 9 红方底线 → 0）。
+   * 红黑视角极易写反，由单测锁死（G-034：炮二平五 = h2e2、马八进七 = b0c2、黑车 a9/i9）。
+   * @param {number} file 0..8
+   * @param {number} rank 0..9
+   * @returns {string} 如 'h2'
+   */
+  static toUcci(file, rank) {
+    return String.fromCharCode(97 + file) + (9 - rank);
+  }
+
+  /** 导出 UCCI 棋谱：包含起始局面 FEN + 按序着法（可直喂 UCCI 引擎 / 复盘工具） */
+  exportUcci() {
+    if (!this.history.length) return '';
+    const start = this.startFen || INITIAL_FEN;
+    return `ucci\nposition fen ${start}\nmoves ${this.exportUcciMoves()}`;
+  }
+
+  /** 仅导出 UCCI 着法串（空格分隔），UI 复制 / 预览用 */
+  exportUcciMoves() {
+    return this.history.map(r =>
+      GameState.toUcci(r.from.file, r.from.rank) + GameState.toUcci(r.to.file, r.to.rank)
+    ).join(' ');
+  }
+
+  /** 导出中文纵线记谱（按回合编号换行，含已生成的中文记谱） */
+  exportChinese() {
+    const rows = [];
+    for (let i = 0; i < this.history.length; i += 2) {
+      const red = this.history[i] ? this.history[i].notation : '';
+      const black = this.history[i + 1] ? this.history[i + 1].notation : '';
+      rows.push(`${i / 2 + 1}. ${red}${black ? '  ' + black : ''}`);
+    }
+    return rows.join('\n');
   }
 
   /** 轻量快照（传给 Worker） */

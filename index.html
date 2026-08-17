@@ -4,18 +4,33 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <meta name="theme-color" content="#0a0b0e" />
+  <meta name="description" content="秦风·3D 中国象棋 · 纯前端 3D 象棋，可离线可添加到主屏。" />
+
+  <!-- L1 PWA（release-ops-lead） -->
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
+  <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="秦风象棋" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="mobile-web-app-capable" content="yes" />
+
   <title>秦风 · 3D 中国象棋</title>
 
   <!-- importmap 映射 Three.js r185（本地 vendor，零外部依赖）
-       默认路径 (three) = WebGL（650KB，全浏览器兼容）
-       WebGPU 路径 (three/webgpu) = WebGPU+WebGL 双后端（2.1MB，需 Chrome 113+/Edge 113+/Safari 26+）
-       运行时降级逻辑见 src/render/scene.js -->
+       A2：vendor 目录已版本化 vendor/three → vendor/three-r185
+       L5 方案一（动态 import 双后端）：
+         - 生产构建（dist/main.js）由 esbuild 打包，'three' 已内联进 bundle；
+           three/webgpu 由 esbuild 拆为独立 chunk，仅 WebGPU 可用时 await import() 加载。
+         - 下方 importmap 仅在「直接以 src/main.js 运行（调试/冒烟）」时生效。
+       runtime 双后端工厂见 src/render/scene.js createRenderer() -->
   <script type="importmap">
   {
     "imports": {
-      "three": "./vendor/three/three.module.js",
-      "three/webgpu": "./vendor/three/three.webgpu.js",
-      "three/addons/": "./vendor/three/addons/"
+      "three": "./vendor/three-r185/three.module.js",
+      "three/webgpu": "./vendor/three-r185/three.webgpu.js",
+      "three/addons/": "./vendor/three-r185/addons/"
     }
   }
   </script>
@@ -210,6 +225,7 @@
           <option value="1">入门</option>
           <option value="2" selected>进阶</option>
           <option value="3">高手</option>
+          <option value="4">大师</option>
         </select>
       </div>
       <button id="btn-ai" class="btn" type="button">人机 开</button>
@@ -243,7 +259,7 @@
     <div class="noscript-warn">本游戏需要启用 JavaScript，并使用支持 WebGL 的现代浏览器（Chrome / Edge / Firefox / Safari）才能运行。</div>
   </noscript>
 
-  <!-- 入口（ES Module，无构建步骤） -->
-  <script type="module" src="src/main.js"></script>
+  <!-- 入口（H4：esbuild 构建产物；npm run build 后生成。直接调试 src/ 需改回 src/main.js） -->
+  <script type="module" src="dist/main.js"></script>
 </body>
 </html>

@@ -5,12 +5,13 @@ build/
 *.log
 npm-debug.log*
 
-# ---- Phase 0 测试工具链（P1/P2 用户拍板：package.json 暂不入库；tests/ 绝不入库）----
+# ---- 测试工具链 ----
+# 2026-08-17 用户拍板变更（部署模式 B：CF Pages 构建命令 npm ci && npm run build）：
+# package.json / package-lock.json 由「暂不入库」改为「必须入库」——
+# CF 构建环境靠它们安装 esbuild 并执行构建；tests/ 仍不入库（保持）。
 tests/
 coverage/
 .nyc_output/
-package.json
-package-lock.json
 
 # ---- 编辑器 / 系统 ----
 .vscode/
@@ -38,3 +39,6 @@ _qa/p3out/constants.mjs
 _qa/p3out/pieceFactory.mjs
 _qa/p3out/err.txt
 .cache/
+
+# ---- QA 冒烟产物（cdp-smoke / build / check-vendor 输出，2026-08-17 起整目录不入库）----
+_qa/

@@ -14,12 +14,30 @@
 /
   Cache-Control: no-cache
 
+# L1 PWA（release-ops-lead）：
+# - sw.js / manifest.webmanifest 必须 no-cache：sw.js 是版本切换入口，缓存旧版会导致「改了代码还是旧版」；
+#   manifest 变化需立刻被浏览器拾取以更新名称/图标/主题色。
+# - /icons/* 走 immutable：与 /vendor/* 同一纪律，icon 内容变更必须改文件名 + 同步 sw.js CACHE_NAME。
+/sw.js
+  Cache-Control: no-cache
+
+/manifest.webmanifest
+  Cache-Control: no-cache
+
+/icons/*
+  Cache-Control: public, max-age=31536000, immutable
+
 # 源码与样式没有内容哈希文件名，不能用 immutable 长缓存
 # 用 must-revalidate + ETag：浏览器每次发条件请求，未变更命中 304（几乎零开销）
 /src/*
   Cache-Control: public, max-age=0, must-revalidate
 
 /styles/*
+  Cache-Control: public, max-age=0, must-revalidate
+
+# H4 构建产物：main.js / worker.js 为固定文件名（非内容哈希），必须 must-revalidate；
+# chunks/* 带内容哈希理论上可 immutable，但统一走 must-revalidate 更稳妥（ETag 304 已足够便宜）。
+/dist/*
   Cache-Control: public, max-age=0, must-revalidate
 
 # vendor 是版本锁定的第三方库（three@0.185.0 / r185），内容永不变更。

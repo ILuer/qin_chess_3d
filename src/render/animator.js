@@ -457,10 +457,12 @@ export class Animator {
   tickIdle(group, t, selected) {
     if (!group || !group.userData) return;
     const ud = group.userData;
-    const orient = group.getObjectByName('orient') || group;
+    // H2：优先读 createPieceMesh 缓存的引用（热路径每帧 0 次 getObjectByName）；
+    // 回退路径仅为未走 createPieceMesh 的旧实例/测试桩保留。
+    const orient = ud._orient || group.getObjectByName('orient') || group;
     // idleGroup：整枚棋子的微动作用层。绝不写 orient 的 rotation/position，
     // 否则会触发欧拉→四元数重算，把黑方 Y=180° 的朝向翻成 X=180°（头朝下）。
-    const idleGroup = orient.getObjectByName('idleGroup') || orient;
+    const idleGroup = ud._idleGroup || orient.getObjectByName('idleGroup') || orient;
     const cfg = IDLE_PIECE[ud.pieceType] || null;
     const sg = ud.subGroups;
 
@@ -558,8 +560,10 @@ export class Animator {
 
   /** 移动过程中的整体前压（仅作用于 idleGroup；子组随动交给编排 moveFlourish） */
   _moveFlourish(mesh, type, t, raw) {
-    const orient = mesh.getObjectByName('orient') || mesh;
-    const idleGroup = orient.getObjectByName('idleGroup') || orient;
+    // H2：读缓存引用（热路径），回退为旧查找
+    const ud = mesh.userData || {};
+    const orient = ud._orient || mesh.getObjectByName('orient') || mesh;
+    const idleGroup = ud._idleGroup || orient.getObjectByName('idleGroup') || orient;
     const k = Math.sin(Math.PI * t);
     const lean = MOVE_LEAN[type] || 0;
     idleGroup.rotation.x = lean * k;
@@ -577,8 +581,9 @@ export class Animator {
     if (ch && ch.attack) return ch.attack(this, piece, sub, side, opts);
     // —— 回退：通用点头 + 有可动子组则挥击 ——
     const ud = piece.userData;
-    const orient = piece.getObjectByName('orient') || piece;
-    const idleGroup = orient.getObjectByName('idleGroup') || orient;
+    // H2：读缓存引用（热路径），回退为旧查找
+    const orient = ud._orient || piece.getObjectByName('orient') || piece;
+    const idleGroup = ud._idleGroup || orient.getObjectByName('idleGroup') || orient;
     const dur = TIMING.strikeRecoil != null ? TIMING.strikeRecoil : 0.18;
     const nod = type === PT.ADVISOR ? 0.40 : (type === PT.KING ? 0.22 : 0.28);
     const a = this.add({

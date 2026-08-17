@@ -39,8 +39,9 @@ export class AIEngine {
   _initWorker() {
     if (typeof Worker === 'undefined') { this._useSliced('浏览器不支持 Web Worker'); return; }
     try {
-      const url = new URL('./worker.js', import.meta.url);
-      const w = new Worker(url, { type: 'module' });
+      // 内联 new URL 模式：esbuild 会把 worker 及其依赖打包为独立产物并重写 URL
+      // （分离变量写法会让 esbuild 无法识别，打包后 URL 会指向不存在的 dist/worker.js）
+      const w = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
       w.addEventListener('message', ev => this._onWorkerMessage(ev));
       w.addEventListener('error', err => {
         console.warn('[AI] Worker 运行出错，降级为主线程时间切片：', err && err.message);
@@ -99,13 +100,18 @@ export class AIEngine {
     this.mode = 'sliced';
     this.ready = true;
     this._slicedReason = reason;
+    // D10：大师档仅 worker 开放——worker 探活失败降级时自动回到高手档
+    if (this.difficulty === 4) this.difficulty = 3;
     if (this.onModeChange) this.onModeChange('sliced', reason);
   }
 
   // -------------------------------------------------------------------------
 
   setDifficulty(level) {
-    this.difficulty = DIFFICULTY[level] ? level : 2;
+    level = DIFFICULTY[level] ? level : 2;
+    // D10：大师档（4）仅 worker 模式开放；sliced 模式拒绝，保持当前难度
+    if (level === 4 && this.mode === 'sliced') return this.difficulty;
+    this.difficulty = level;
     return this.difficulty;
   }
 
@@ -148,8 +154,9 @@ export class AIEngine {
       if (this.mode === 'worker' && this.worker) {
         result = await this._thinkInWorker(fen, side, depth, timeLimit, randomness);
       } else {
+        // D10 兜底：任何原因进入 sliced 时，深度封顶 4（大师档深度 6 会卡主线程）
         const board = boardFromFen(fen);
-        result = await searchBestMoveSliced(board, side, { depth, timeLimit, randomness });
+        result = await searchBestMoveSliced(board, side, { depth: Math.min(depth, 4), timeLimit, randomness });
       }
     } catch (err) {
       console.warn('[AI] 搜索失败，降级为主线程时间切片：', err && err.message);

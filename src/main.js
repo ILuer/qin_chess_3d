@@ -15,6 +15,7 @@ import {
   RED, BLACK, PT, FILES, RANKS, BOARD_HALF_W, PALETTE, TIMING, toWorld
 } from './core/constants.js';
 import { GameState } from './core/gameState.js';
+import { loadSave, writeSave, clearSave, buildSave } from './core/save.js';   // M4 对局存档/恢复
 import { createSceneSystem } from './render/scene.js';
 import { createEffects } from './render/effects.js';
 import { animator, updateTweens } from './render/animator.js';
@@ -23,11 +24,12 @@ import { createInputSystem } from './ui/input.js';
 import { createHUD } from './ui/hud.js';
 import { createControls } from './ui/controls.js';
 import { createAIEngine } from './ai/engine.js';
-import { createPieceMesh } from './render/pieceFactory.js';
+import { createPieceMesh, disposePieceFactory } from './render/pieceFactory.js';
 import { createBoard, createEnvironment } from './render/boardMesh.js';
-import { getMaterials } from './render/materials.js';
+import { getMaterials, disposeMaterials } from './render/materials.js';
 import { SFX } from './audio/sfx.js';
 import { CombatDirector } from './render/combat/CombatDirector.js';
+import { trackEvent, trackError, flush as flushTelemetry, tickFps, elapsedMs } from './telemetry.js';
 
 // ---------------------------------------------------------------------------
 // 全局状态
@@ -68,7 +70,10 @@ function rebuildPieces() {
       if (!pieceMeshes[f]) continue;
       for (let r = 0; r < RANKS; r++) {
         const m = pieceMeshes[f][r];
-        if (m) sceneSys.piecesGroup.remove(m);
+        if (!m) continue;
+        // H3：引用计数释放（内部 remove + tpl.count--；模板几何收口到 disposePieceFactory）
+        if (typeof m.userData.dispose === 'function') m.userData.dispose();
+        else sceneSys.piecesGroup.remove(m);
       }
     }
   }
@@ -321,6 +326,7 @@ function doReset() {
   syncControls();
   openingAnimation();
   aiCooldown = 0.9;                     // 开局动画期间不打扰；之后由 pumpAI 接管
+  trackEvent('game_start', { aiEnabled, difficulty });   // H1 事件
 }
 
 function doResign() {
@@ -335,13 +341,23 @@ function doResign() {
 function toggleAI() {
   aiEnabled = !aiEnabled;
   hud.showToast(aiEnabled ? '已开启人机对战（你执红）' : '已切换为双人对战', 'info', 2.0);
+  saveGame();       // M4：AI 开关变更写入存档
   syncControls();
+  trackEvent('ai_mode', { aiEnabled, difficulty });   // H1 事件
   // 若切回人机且此刻正轮到 AI，pumpAI 会在下一帧自动接手
 }
 
 function setDifficulty(level) {
+  // D10：大师档（4）仅 worker 模式开放——controls 已灰显，此处兜底拦截
+  if (Number(level) === 4 && aiEngine && aiEngine.mode === 'sliced') {
+    hud.showToast('大师难度仅在 AI 独立线程模式可用（已保持当前难度）', 'warn', 2.4);
+    syncControls();
+    return;
+  }
   difficulty = aiEngine.setDifficulty(level);
+  saveGame();       // M4：难度变更写入存档
   syncControls();
+  trackEvent('ai_mode', { difficulty, aiEnabled });   // H1 事件
 }
 
 function toggleSound() {
@@ -437,6 +453,15 @@ function onGameOver() {
   const winner = gs.winner;
   const tone = winner === humanSide ? 'win' : (winner ? 'lose' : 'draw');
   SFX.play(winner ? (winner === humanSide ? 'win' : 'lose') : 'start');
+  // H1 事件：对局结束（result 以执棋方视角记 win/lose/draw，turns=已过回合数）
+  trackEvent('game_over', {
+    result: winner ? (winner === RED ? 'red' : 'black') : 'draw',
+    tone,
+    turns: Math.max(0, gs.moveNumber - 1),
+    moves: gs.history.length,
+    aiEnabled,
+    difficulty
+  });
   hud.showGameOver({
     title: winner ? (winner === RED ? '红方胜' : '黑方胜') : '和棋',
     detail: gs.getResultText(),
@@ -462,6 +487,62 @@ function syncControls() {
     controls.setTopViewState(sceneSys.isTopView);
   }
   if (followCam) controls.setFollowCamState(followCam.enabled);
+}
+
+// ---------------------------------------------------------------------------
+// M4 对局存档/恢复
+// ---------------------------------------------------------------------------
+
+/** 落子 / 悔棋 / AI 开关 / 难度变更后写入存档（localStorage 不可用时静默降级） */
+function saveGame() {
+  if (!gs) return;
+  writeSave(buildSave(gs, { aiEnabled, difficulty }));
+}
+
+/** 对局结束 / 重开时清除存档 */
+function clearGameSave() {
+  clearSave();
+}
+
+/**
+ * 启动读档恢复：fromFen(startFen) + 重放 moves（复用 gs.move(force=true)）+ 回填配置。
+ * 重放后 toFen() === 存档 fen（当前局面快照）才视为完整恢复；
+ * 不一致（坏档 / 版本漂移 / 历史缺失）降级为仅按 fen 恢复（保棋盘与行棋方，丢走子记录）。
+ * @param {object} save normalizeSave 后的存档对象
+ * @returns {{restored:boolean, full:boolean}}
+ */
+function restoreFromSave(save) {
+  let full = true;
+  // 冗余字段校验：sideToMove 必须与当前局面 FEN 第 2 段一致
+  const fenSide = save.fen.trim().split(/\s+/)[1] === 'b' ? 'b' : 'r';
+  if (save.sideToMove !== fenSide) full = false;
+
+  try {
+    gs = GameState.fromFen(save.startFen);   // 从起始局面开始重放（不可用当前局面，否则双重落子）
+  } catch (e) {
+    return { restored: false, full: false };
+  }
+
+  if (full) {
+    for (const mv of save.moves) {
+      const res = gs.move(mv.from, mv.to, { force: true });
+      if (!res.ok) { full = false; break; }   // 历史与起始局面不一致 → 降级
+    }
+  }
+
+  if (full) {
+    try { if (gs.toFen() !== save.fen) full = false; } catch (e) { full = false; }
+  }
+
+  if (!full) {
+    // 降级：只按当前局面 fen 恢复（丢走子记录，保棋盘与行棋方）
+    try { gs = GameState.fromFen(save.fen); } catch (e) { return { restored: false, full: false }; }
+  }
+
+  // 回填配置（存档 difficulty=4 且引擎最终非 worker 时，由 onModeChange 兜底降档）
+  aiEnabled = !!save.aiEnabled;
+  difficulty = save.difficulty;
+  return { restored: true, full };
 }
 
 // ---------------------------------------------------------------------------
@@ -534,6 +615,17 @@ function webglAvailable() {
   }
 }
 
+/**
+ * H3：卸载期全量释放（先几何→材质→renderer；tweens 先停避免回调引用已释放对象）。
+ * 顺序依赖：disposePieceFactory（模板几何）→ disposeMaterials（材质/贴图）→ sceneSys.dispose（renderer）。
+ */
+function disposeAll() {
+  try { animator && animator.killAll(false); } catch (e) { /* 幂等 */ }
+  try { disposePieceFactory(); } catch (e) { /* 幂等 */ }
+  try { disposeMaterials(); } catch (e) { /* 幂等 */ }
+  try { if (sceneSys) sceneSys.dispose(); } catch (e) { /* 幂等 */ }
+}
+
 function onFatal(e) {
   const msg = (e && e.message) || '初始化失败';
   const detail = (e && e.error && e.error.stack) ||
@@ -545,6 +637,7 @@ function onFatal(e) {
     if (t) t.textContent = msg;
   }
   console.error('[致命错误]', msg, detail);
+  trackError(msg, detail);   // H1：本地埋点错误（不上报外部）
 }
 
 function onFatalRejection(e) {
@@ -554,6 +647,8 @@ function onFatalRejection(e) {
 
 async function boot() {
   const container = document.getElementById('canvas-container');
+
+  trackEvent('session_start', { viewport: `${window.innerWidth}x${window.innerHeight}` });   // H1 事件
 
   // HUD 先建，便于显示进度与错误
   hud = createHUD({ onRestart: doReset, onPreviewMove: previewMove });
@@ -566,6 +661,16 @@ async function boot() {
   window.addEventListener('pointerdown', audioInit, { once: true });
   window.addEventListener('keydown', audioInit, { once: true });
 
+  // H3：页面卸载释放全部 WebGL 资源（几何→材质→renderer 顺序）。
+  // BFCache 兜底：若页面被缓存后恢复（persisted=true），直接刷新重开（WebGL 游戏常见做法）。
+  window.addEventListener('pagehide', () => {
+    flushTelemetry();
+    disposeAll();
+  });
+  window.addEventListener('pageshow', (e) => {
+    if (e.persisted) window.location.reload();
+  });
+
   try {
     if (!webglAvailable()) {
       throw new Error('当前浏览器不支持 WebGL，请使用 Chrome / Edge / Firefox / Safari 等现代浏览器。');
@@ -575,7 +680,8 @@ async function boot() {
     await raf();
 
     // 1) 场景 / 相机 / 渲染器 / 灯光 / 视角控制
-    sceneSys = createSceneSystem(container, {
+    // L5：异步渲染器工厂 —— WebGPU 可用则 WebGPURenderer，否则 WebGLRenderer 回退
+    sceneSys = await createSceneSystem(container, {
       onQualityDrop: (fps) => hud.showToast(`帧率偏低（约 ${fps}fps），已自动降低画质以保障流畅`, 'warn', 3.2)
     });
     // 棋子检查跟随相机（Phase 1.5）：选中棋子平滑聚焦；T 键切换跟随 / 固定
@@ -592,6 +698,26 @@ async function boot() {
 
     // 3) 初始局面 + 棋子
     gs = new GameState();
+    // —— M4：启动读档恢复（无档 / 坏档 / localStorage 禁用时静默跳过）——
+    let restoreToast = null;
+    const save = loadSave();
+    if (save) {
+      const r = restoreFromSave(save);
+      if (r.restored) {
+        restoreToast = r.full
+          ? `已恢复上次对局（第 ${gs.moveNumber} 回合）`
+          : '存档校验不一致，已按棋盘局面恢复（走子记录已丢失）';
+        hud.setLoadingProgress(0.62, r.full ? '恢复上次对局…' : '按棋盘局面恢复…');
+      } else {
+        clearGameSave();   // 无法恢复的坏档直接清除，避免每次启动反复报错
+      }
+    }
+    // M4：状态变更钩子（落子 / 悔棋 / 重开 / 结束）。
+    // 注意：恢复重放发生在监听器挂载之前，重放触发的 'move' 不会重复写盘。
+    gs.on('move', saveGame);
+    gs.on('undo', saveGame);
+    gs.on('gameover', clearGameSave);
+    gs.on('reset', clearGameSave);
     rebuildPieces();
     hud.setLoadingProgress(0.68, '凝聚将 / 帅之气…');
     await raf();
@@ -638,8 +764,17 @@ async function boot() {
     // 6) AI 引擎（优先 Worker，失败降级主线程时间切片）
     aiEngine = createAIEngine({
       difficulty,
-      onModeChange: (mode, reason) =>
-        hud.showToast(`AI 引擎：${mode === 'worker' ? '独立线程' : '主线程时间切片'}${reason ? '（' + reason + '）' : ''}`, 'info', 2.4)
+      onModeChange: (mode, reason) => {
+        // D10：大师档仅 worker 开放——engine 降级 sliced 时自动回高手档并同步 UI
+        if (mode === 'sliced' && difficulty === 4) {
+          difficulty = aiEngine.setDifficulty(3);
+          hud.showToast('AI 引擎降级为主线程模式，大师难度不可用，已自动切换为高手', 'warn', 3.0);
+        } else {
+          hud.showToast(`AI 引擎：${mode === 'worker' ? '独立线程' : '主线程时间切片'}${reason ? '（' + reason + '）' : ''}`, 'info', 2.4);
+        }
+        if (controls) controls.setMasterAvailable(mode !== 'sliced');
+        syncControls();
+      }
     });
     hud.setLoadingProgress(1.0, '红方先行');
     await raf();
@@ -649,6 +784,7 @@ async function boot() {
     hud.syncAll(gs, {});
     updateCheckRing();
     syncControls();
+    if (controls) controls.setMasterAvailable(aiEngine.mode !== 'sliced');   // D10：同步大师档可用态（unknown/worker 开放）
     hud.startTimer();
     SFX.play('start');
     openingAnimation();
@@ -658,15 +794,21 @@ async function boot() {
 
     // 淡出加载界面
     hud.hideLoading(320);
+    // M4：读档恢复提示（遮罩淡出后可见）
+    if (restoreToast) hud.showToast(restoreToast, 'info', 3.4);
 
     // 调试句柄
     window.__game = {
       THREE, gs, sceneSys, effects, animator, aiEngine, input, hud, controls, SFX,
       combatDirector, followCam, computeFollowFitRadius,
       applyMove, rebuildPieces, doReset, doUndo, doResign, toggleAI, setDifficulty, previewMove,
-      toggleFollowCamera
+      toggleFollowCamera, saveGame, clearGameSave   // M4：QA 调试存档读写
     };
     started = true;
+
+    // H1：启动完成探针（TTI）+ 首局事件
+    trackEvent('tti', { ms: elapsedMs(), backend: sceneSys.backend });
+    trackEvent('game_start', { aiEnabled, difficulty });
   } catch (err) {
     onFatal({ message: (err && err.message) || '初始化失败', error: err });
   }
@@ -708,6 +850,7 @@ function startLoop() {
       idleSoundTimer = 0;
     }
     pumpAI(dt);                       // 回合泵：rawDt（不冻回合泵）
+    tickFps(effectiveDt);             // H1：fps_bucket 探针（与 scene 帧率状态机同口径）
     if (input) input.update();        // 悬停射线（rawDt）
     if (effects) effects.update(effectiveDt);  // 粒子 / 涟漪 / 尘土 / 残影（effectiveDt）
     if (sceneSys) { sceneSys.update(effectiveDt); }
@@ -722,3 +865,23 @@ function startLoop() {
 
 // 启动
 boot();
+
+// ---------------------------------------------------------------------------
+// L1 PWA · Service Worker 注册（release-ops-lead）
+// 仅在支持 SW 的环境注册；注册失败不阻塞游戏。注册时显式传 scope '/'，
+// 保证 SW 接管整站根路径（manifest scope 同此）。
+// ---------------------------------------------------------------------------
+if ('serviceWorker' in navigator) {
+  // window 'load' 之后注册，避免与首屏资源争抢
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js', { scope: './' })
+      .then((reg) => {
+        // 仅调试可观察；正式可静默
+        if (window.console && console.log) console.log('[SW] registered, scope=', reg.scope);
+      })
+      .catch((err) => {
+        // 注册失败不应影响游戏（SW 是渐进增强）
+        if (window.console && console.warn) console.warn('[SW] register failed:', err && err.message);
+      });
+  });
+}

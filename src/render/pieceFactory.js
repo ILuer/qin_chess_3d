@@ -175,68 +175,78 @@ class Parts {
   }
 
   /**
-   * 按「PBR 材质族」合并 -> Mesh 数组（draw call 优化的核心，V6 专项）。
+   * 按「PBR 材质族」合并 -> Mesh 数组（draw call 优化的核心，V6 专项 / H6 双族双 mesh）。
    *
    * 硬约束：子组 2.0 契约要求每个演出子组保持独立 Object3D（windUp/strike/
    * settle/dissolvePose 按子组驱动），因此**绝不跨子组合并**、也**绝不把整个
    * 子组实例化**。这里的合并只发生在**单个子组内部**：
-   *   1) 取该子组的「主导材质族」= 顶点数更多的族（matte 或 metal）；
-   *   2) 子组内所有非双面零件（含木纹等单面贴图）全部烘焙进顶点色，
-   *      并入**单 mesh**，材质用主导族代表材质（familyMatte/familyMetal）；
-   *   3) 双面零件（banner 旗面 / cape 披风）因 culling/贴图语义不同保持独立。
-   * 效果：每子组 N 个材质 → 单 mesh（+ 至多 1 个双面特殊件），
-   *       32 子 draw call 544 → ~114（棋子侧 < 155 达标）。
-   * 代价：子组内非主导族的 roughness/metalness 统一到主导族代表值——
-   *       例：以布料为主的子组里的甲片/鎏金会失去高金属光泽（颜色仍在）。
+   *   1) 按 `mat.metalness >= 0.5` 把单面零件分入 matteList / metalList 双桶；
+   *   2) 顶点色烘焙分别对两桶执行，**emit 两次**（familyMatte / familyMetal）——
+   *      甲片(0.85)/鎏金(0.95)/兵刃(0.92) 从布料主导子组中独立出来，恢复金属高光；
+   *   3) 金属顶点占比 < 12% 时回退旧单族（单 mesh + 顶点数更多的族代表材质），
+   *      以 +0 draw call 避免为个位数金属件多开一族；
+   *   4) 双面零件（banner 旗面 / cape 披风）因 culling/贴图语义不同保持独立。
+   * 效果：每子组 N 个材质 → ≤2 个单面 mesh（+ 至多 1 个双面特殊件），
+   *       32 子 draw call 114 → 峰值约 180（实测上界仍 < 200 达标；上升是预期，
+   *       本质是「以 +~60 dc 换金属高光」的视觉优化，三角形数不变）。
+   * 代价：同族零件 roughness/metalness 统一到族代表值（视觉差异极小）；
+   *       metalRatio < 12% 回退子组内的少量金属件仍失去高金属光泽（颜色仍在）。
    */
   build() {
     const mats = getMaterials();
-    // 第一步：统计本子组的族分布（matte / metal / 双面特殊件）
+    // 第一步：统计本子组的族分布（matte / metal / 双面特殊件），并分桶
     let matteVerts = 0, metalVerts = 0;
-    const specials = []; // {geom, mat} 双面保持独立
+    const matteList = []; // {geom, mat} metalness < 0.5 的单面零件
+    const metalList = []; // {geom, mat} metalness >= 0.5 的单面零件
+    const specials = [];  // {geom, mat} 双面保持独立
     for (const p of this.list) {
       if (Array.isArray(p.mat) || !p.mat || p.mat.side === THREE.DoubleSide) {
         specials.push(p);
         continue;
       }
       const n = p.geom.attributes.position.count;
-      if (p.mat.metalness >= 0.5) metalVerts += n; else matteVerts += n;
+      if (p.mat.metalness >= 0.5) { metalVerts += n; metalList.push(p); }
+      else { matteVerts += n; matteList.push(p); }
     }
-    const useMetal = metalVerts > matteVerts;
-    const familyMat = useMetal ? mats.families.metal : mats.families.matte;
+    const totalVerts = matteVerts + metalVerts;
+    const metalRatio = totalVerts > 0 ? metalVerts / totalVerts : 0;
 
-    // 第二步：单面零件全部并入主导族 mesh
-    const familyGeos = [];
-    for (const p of this.list) {
-      if (Array.isArray(p.mat) || !p.mat || p.mat.side === THREE.DoubleSide) continue;
-      let g = p.geom.clone(); // 不污染模板共享几何
-      const pos = g.attributes.position;
-      const uv = g.attributes.uv;
-      const col = new Float32Array(pos.count * 3);
-      const c = p.mat.color;
-      // 木纹等单面贴图材质：采样贴图（× 材质色）烘焙进顶点色，保留纹理观感
-      const tex = p.mat.map || null;
-      const texData = tex ? _sampleMap(tex) : null;
-      for (let i = 0; i < pos.count; i++) {
-        let r = c.r, gg = c.g, bb = c.b;
-        if (texData && uv) {
-          const rep = tex.repeat || _v2one;
-          let u = uv.getX(i) * rep.x;
-          let v = uv.getY(i) * rep.y;
-          u = u - Math.floor(u);
-          v = v - Math.floor(v);
-          const px = Math.min(texData.w - 1, Math.max(0, Math.floor(u * texData.w)));
-          const py = Math.min(texData.h - 1, Math.max(0, Math.floor(v * texData.h)));
-          const idx = (py * texData.w + px) * 4;
-          r = (texData.data[idx] / 255) * c.r;
-          gg = (texData.data[idx + 1] / 255) * c.g;
-          bb = (texData.data[idx + 2] / 255) * c.b;
+    // 第二步：把单面零件按族分桶烘焙顶点色（颜色 = 材质色 × 贴图像素）
+    const bake = (list) => {
+      const geos = [];
+      for (const p of list) {
+        let g = p.geom.clone(); // 不污染模板共享几何
+        const pos = g.attributes.position;
+        const uv = g.attributes.uv;
+        const col = new Float32Array(pos.count * 3);
+        const c = p.mat.color;
+        // 木纹等单面贴图材质：采样贴图（× 材质色）烘焙进顶点色，保留纹理观感
+        const tex = p.mat.map || null;
+        const texData = tex ? _sampleMap(tex) : null;
+        for (let i = 0; i < pos.count; i++) {
+          let r = c.r, gg = c.g, bb = c.b;
+          if (texData && uv) {
+            const rep = tex.repeat || _v2one;
+            let u = uv.getX(i) * rep.x;
+            let v = uv.getY(i) * rep.y;
+            u = u - Math.floor(u);
+            v = v - Math.floor(v);
+            const px = Math.min(texData.w - 1, Math.max(0, Math.floor(u * texData.w)));
+            const py = Math.min(texData.h - 1, Math.max(0, Math.floor(v * texData.h)));
+            const idx = (py * texData.w + px) * 4;
+            r = (texData.data[idx] / 255) * c.r;
+            gg = (texData.data[idx + 1] / 255) * c.g;
+            bb = (texData.data[idx + 2] / 255) * c.b;
+          }
+          col[i * 3] = r; col[i * 3 + 1] = gg; col[i * 3 + 2] = bb;
         }
-        col[i * 3] = r; col[i * 3 + 1] = gg; col[i * 3 + 2] = bb;
+        g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+        geos.push(g);
       }
-      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-      familyGeos.push(g);
-    }
+      return geos;
+    };
+    const matteGeos = bake(matteList);
+    const metalGeos = bake(metalList);
 
     // 第三步：双面特殊件按各自材质独立合并
     const specialByMat = new Map();
@@ -263,7 +273,16 @@ class Parts {
       mesh.receiveShadow = false;
       out.push(mesh);
     };
-    emit(familyGeos, familyMat);
+
+    // 第四步：输出 —— 双族双 mesh（H6）；金属占比过低则回退旧单族（D5：12% 阈值）
+    if (metalRatio < 0.12) {
+      const familyMat = matteVerts >= metalVerts
+        ? mats.families.matte : mats.families.metal;
+      emit(matteGeos.concat(metalGeos), familyMat);
+    } else {
+      emit(matteGeos, mats.families.matte);
+      emit(metalGeos, mats.families.metal);
+    }
     for (const entry of specialByMat) emit(entry[1], entry[0]);
 
     this.list.length = 0;
@@ -575,9 +594,9 @@ function buildAdvisor(mp, M, K, side) {
   Pb.add(cyl(0.064, 0.086, 0.030, 12), M.accentDim, { pos: [0, 0.615, 0] });
   Pb.add(cyl(0.028, 0.030, 0.030, 8), M.skin, { pos: [0, 0.648, 0] });
   Pb.add(sph(0.056, 12, 10), M.skin, { pos: [0, 0.715, -0.004] });
-  // 武弁
+  // 武弁（D7 拍板：武弁为皮革帽，帽体用 leather 材质槽，对应 HEADGEAR leather_helmet）
   Pb.add(cyl(0.062, 0.068, 0.024, 12), M.accentDim, { pos: [0, 0.756, -0.002] });
-  Pb.add(cyl(0.028, 0.062, 0.086, 12), M.clothDeep, { pos: [0, 0.810, -0.002] });
+  Pb.add(cyl(0.028, 0.062, 0.086, 12), M.leather, { pos: [0, 0.810, -0.002] });
   Pb.add(sph(0.020, 10, 8), M.accent, { pos: [0, 0.860, -0.002] });
   Pb.add(box(0.012, 0.088, 0.008), M.cloth, { pos: [0.052, 0.716, 0.040], rot: [0.16, 0, 0.08] });
   Pb.add(box(0.012, 0.088, 0.008), M.cloth, { pos: [-0.052, 0.716, 0.040], rot: [0.16, 0, -0.08] });
@@ -1423,12 +1442,17 @@ export function createPieceMesh(type, side) {
   group.userData.glyph = PIECE_GLYPH[side][type];
   group.userData.topY = PIECE_TOP_Y[type] || 0.9;
 
+  // H2：缓存 orient / idleGroup 引用（建棋一次查表，动画热路径每帧直接读 userData，
+  // 消除 tickIdle / _moveFlourish / captureStrike 每帧 64 次 getObjectByName）。
+  const orientRef = group.getObjectByName('orient') || group;
+  group.userData._orient = orientRef;
+  group.userData._idleGroup = orientRef.getObjectByName('idleGroup') || orientRef;
+
   // 解析子组名 → Object3D 引用（clone 后 orient 已重建，需重新查找）
   if (group.userData._subGroupNames) {
-    const orient = group.getObjectByName('orient');
     group.userData.subGroups = {};
     for (const name of group.userData._subGroupNames) {
-      group.userData.subGroups[name] = orient ? orient.getObjectByName(name) : null;
+      group.userData.subGroups[name] = orientRef.getObjectByName(name) || null;
     }
   }
 
@@ -1447,11 +1471,10 @@ export function createPieceMesh(type, side) {
     if (released) return;
     released = true;
     if (group.parent) group.parent.remove(group);
-    tpl.count--;
-    if (tpl.count <= 0 && _templates.get(key) === tpl) {
-      for (const g of tpl.geoms) g.dispose();
-      _templates.delete(key);
-    }
+    // H3（关键修正）：只做引用计数释放，绝不在此处释放模板几何。
+    // 模板几何统一收口到 disposePieceFactory()（卸载期一次性释放）——
+    // 否则悔棋/重开 count 归零会销毁模板、紧接着重建 7×2 套几何造成卡顿。
+    if (tpl.count > 0) tpl.count--;
   };
 
   return group;
@@ -1460,10 +1483,12 @@ export function createPieceMesh(type, side) {
 /**
  * 强制释放全部棋子模板几何体（换局/退出时调用）。
  * ⚠ 调用后所有仍在场景中的棋子实例将失效，请先清空场景。
+ * H3：统一收口点 —— 模板几何释放 + _mapCache（Canvas 像素数据，约 4-6MB）清理。
  */
 export function disposePieceFactory() {
   for (const tpl of _templates.values()) {
     for (const g of tpl.geoms) g.dispose();
   }
   _templates.clear();
+  _mapCache.clear();   // H3：_mapCache 不再常驻像素数据
 }
