@@ -18,6 +18,7 @@ import { GameState } from './core/gameState.js';
 import { createSceneSystem } from './render/scene.js';
 import { createEffects } from './render/effects.js';
 import { animator, updateTweens } from './render/animator.js';
+import { createFollowCamera, computeFollowFitRadius } from './render/followCamera.js';
 import { createInputSystem } from './ui/input.js';
 import { createHUD } from './ui/hud.js';
 import { createControls } from './ui/controls.js';
@@ -39,6 +40,7 @@ let hud = null;           // HUD
 let controls = null;      // Controls
 let aiEngine = null;      // AIEngine
 let gs = null;            // GameState
+let followCam = null;     // FollowCamera（棋子检查跟随；T 键切换）
 
 /** 棋子网格映射：pieceMeshes[file][rank] = THREE.Group | null */
 let pieceMeshes = [];
@@ -350,6 +352,38 @@ function toggleSound() {
   hud.showToast(on ? '音效已开启' : '音效已静音', 'info', 1.6);
 }
 
+/** 切换跟随相机模式（T 键；调试辅助：跟随 ↔ 固定对比） */
+function toggleFollowCamera() {
+  const on = followCam.toggleEnabled();
+  // 跟随激活：fixed 视图窄屏适配让位；关闭后恢复
+  if (sceneSys) sceneSys.viewAutoFit = !on;
+  if (on) {
+    // 开启：若已有选中棋子，立即平滑聚焦（携带落点适配距离，保证落点可见）
+    const sel = input ? input.getSelection() : null;
+    if (sel && sel.mesh) followCam.setTarget(sel.mesh, { fitRadius: followFitRadiusFor(sel) });
+    hud.showToast('跟随相机：开（选中棋子自动聚焦）', 'info', 1.8);
+  } else {
+    hud.showToast('固定相机：开（选中棋子不移动视角）', 'info', 1.8);
+  }
+  syncControls();   // 与按钮状态同源（UI-FIX-123：开关与 T 键互相同步）
+}
+
+/**
+ * 计算选中棋子的落点自适应跟随距离（UI-FIX-123）。
+ * 保证跟随模式下选中棋子的全部落点标记投影进视口。
+ * @param {{mesh:THREE.Object3D, moves:Array}} sel input.getSelection()
+ * @returns {number|null}
+ */
+function followFitRadiusFor(sel) {
+  if (!sel || !sel.mesh || !sceneSys) return null;
+  return computeFollowFitRadius({
+    camera: sceneSys.camera,
+    controls: sceneSys.controls,
+    moves: sel.moves,
+    piece: sel.mesh
+  });
+}
+
 /** 走子记录点击：高亮该步并标记其起终点（轻量预览） */
 function previewMove(idx) {
   if (!gs) return;
@@ -427,6 +461,7 @@ function syncControls() {
     controls.setFlipState(sceneSys.viewSide);
     controls.setTopViewState(sceneSys.isTopView);
   }
+  if (followCam) controls.setFollowCamState(followCam.enabled);
 }
 
 // ---------------------------------------------------------------------------
@@ -447,11 +482,21 @@ const inputGame = {
     effects.highlightSelected(sel.mesh);          // 选中光环（Windex）
     effects.showMoveHints(sel.moves);             // 合法落点光圈 / 危险环
     effects.showBlockedHints(sel.blocked);        // 蹩马腿 / 塞象眼 灰叉
+    // 跟随相机：平滑聚焦选中棋子；携带落点自适应距离，保证全部落点标记在视口内（UI-FIX-123）
+    if (followCam) {
+      followCam.setTarget(sel.mesh, { fitRadius: followFitRadiusFor(sel) });
+      // 跟随期间 fixed 视图窄屏适配让位（避免 resize 时与 fitRadius 打架）
+      if (sceneSys) sceneSys.viewAutoFit = false;
+    }
     SFX.play('select');
   },
   onDeselect: () => {
     effects.clearAllHints();
     if (hoverMesh) { animator.unhover(hoverMesh); hoverMesh = null; }
+    if (followCam) {
+      followCam.clearTarget();       // 取消选中：平滑回到棋盘中心视图
+      if (sceneSys) sceneSys.viewAutoFit = true;
+    }
   },
   onMove: (from, to) => applyMove(from, to),
   onIllegal: (from, to, reason, mesh) => {
@@ -533,6 +578,8 @@ async function boot() {
     sceneSys = createSceneSystem(container, {
       onQualityDrop: (fps) => hud.showToast(`帧率偏低（约 ${fps}fps），已自动降低画质以保障流畅`, 'warn', 3.2)
     });
+    // 棋子检查跟随相机（Phase 1.5）：选中棋子平滑聚焦；T 键切换跟随 / 固定
+    followCam = createFollowCamera();
     hud.setLoadingProgress(0.2, '点亮宫灯与青铜辉光…');
     await raf();
 
@@ -580,8 +627,9 @@ async function boot() {
       toggleSound,
       toggleAI,
       setDifficulty,
+      toggleFollowCamera,
       resign: doResign,
-      toggleHelp: () => hud.toggleHelp(),
+      toggleHelp: (force) => hud.toggleHelp(force),   // UI-FIX-123：force=false 供 Esc / 关闭按钮强制关闭
       cancelSelection: () => input.deselect('esc')
     });
     hud.setLoadingProgress(0.92, '唤醒 AI 心智…');
@@ -613,9 +661,10 @@ async function boot() {
 
     // 调试句柄
     window.__game = {
-      gs, sceneSys, effects, animator, aiEngine, input, hud, controls, SFX,
-      combatDirector,
-      applyMove, rebuildPieces, doReset, doUndo, doResign, toggleAI, setDifficulty, previewMove
+      THREE, gs, sceneSys, effects, animator, aiEngine, input, hud, controls, SFX,
+      combatDirector, followCam, computeFollowFitRadius,
+      applyMove, rebuildPieces, doReset, doUndo, doResign, toggleAI, setDifficulty, previewMove,
+      toggleFollowCamera
     };
     started = true;
   } catch (err) {
@@ -661,7 +710,10 @@ function startLoop() {
     pumpAI(dt);                       // 回合泵：rawDt（不冻回合泵）
     if (input) input.update();        // 悬停射线（rawDt）
     if (effects) effects.update(effectiveDt);  // 粒子 / 涟漪 / 尘土 / 残影（effectiveDt）
-    if (sceneSys) { sceneSys.update(effectiveDt); sceneSys.render(); }
+    if (sceneSys) { sceneSys.update(effectiveDt); }
+    // 跟随相机：scene.update 之后（拿到 controls.update 后的真实相机位）、render 之前
+    if (followCam && sceneSys) followCam.update(effectiveDt, sceneSys.camera, sceneSys.controls);
+    if (sceneSys) sceneSys.render();
     if (hud) hud.updateTimer();
     requestAnimationFrame(frame);
   }

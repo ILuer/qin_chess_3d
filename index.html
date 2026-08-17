@@ -177,31 +177,44 @@
   <!-- 将军横幅 -->
   <div class="check-banner" aria-hidden="true">将 军 ！</div>
 
-  <!-- 右侧走子记录 -->
+  <!-- 右侧走子记录（可折叠，移动端不遮挡棋盘） -->
   <section id="move-log">
-    <header class="panel-header">对局记录</header>
+    <header class="panel-header">
+      <button class="move-log-collapse" type="button" aria-expanded="true">
+        对局记录 <span class="collapse-caret" aria-hidden="true">▾</span>
+      </button>
+    </header>
     <div class="move-log-scroll"><ul class="move-log-list"></ul></div>
     <div class="move-log-empty">尚无着法</div>
   </section>
 
-  <!-- 底部控制栏 -->
+  <!-- 底部控制栏（UI-FIX-123：按 视图 / 对局 / 辅助 分组） -->
   <nav id="controls">
-    <div class="control-field">
-      <label for="select-difficulty">难度</label>
-      <select id="select-difficulty">
-        <option value="1">入门</option>
-        <option value="2" selected>进阶</option>
-        <option value="3">高手</option>
-      </select>
+    <div class="control-group" data-group="view">
+      <span class="control-group-label">视图</span>
+      <button id="btn-follow-cam" class="btn" type="button" aria-pressed="true">棋子居中</button>
+      <button id="btn-flip" class="btn" type="button">翻转视角</button>
+      <button id="btn-top" class="btn" type="button">俯视视角</button>
     </div>
-    <button id="btn-restart" class="btn btn-primary" type="button">重新开局</button>
-    <button id="btn-undo" class="btn" type="button">悔棋</button>
-    <button id="btn-reset-view" class="btn" type="button">复位视角</button>
-    <button id="btn-flip" class="btn" type="button">翻转视角</button>
-    <button id="btn-top" class="btn" type="button">俯视视角</button>
-    <button id="btn-sound" class="btn" type="button">音效 开</button>
-    <button id="btn-ai" class="btn" type="button">人机 开</button>
-    <button id="btn-resign" class="btn btn-danger" type="button">认输</button>
+    <div class="control-group" data-group="game">
+      <span class="control-group-label">对局</span>
+      <button id="btn-undo" class="btn" type="button">悔棋</button>
+      <button id="btn-restart" class="btn btn-primary" type="button">重新开局</button>
+      <button id="btn-resign" class="btn btn-danger" type="button">认输</button>
+    </div>
+    <div class="control-group" data-group="assist">
+      <span class="control-group-label">辅助</span>
+      <div class="control-field">
+        <label for="select-difficulty">难度</label>
+        <select id="select-difficulty">
+          <option value="1">入门</option>
+          <option value="2" selected>进阶</option>
+          <option value="3">高手</option>
+        </select>
+      </div>
+      <button id="btn-ai" class="btn" type="button">人机 开</button>
+      <button id="btn-sound" class="btn" type="button">音效 开</button>
+    </div>
   </nav>
 
   <!-- 结束面板 -->
@@ -215,9 +228,11 @@
     </div>
   </div>
 
-  <!-- 帮助面板 -->
+  <!-- 帮助面板（UI-FIX-123：有关闭按钮 + 遮罩点击关闭 + Esc 关闭） -->
+  <div class="help-backdrop" aria-hidden="true"></div>
   <button class="help-toggle btn" type="button" aria-expanded="false">规则 ?</button>
   <aside class="help-panel" aria-hidden="true">
+    <button class="help-close" type="button" aria-label="关闭">×</button>
     <div class="help-content"></div>
   </aside>
 

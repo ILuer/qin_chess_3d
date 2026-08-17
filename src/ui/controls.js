@@ -3,7 +3,7 @@
  *
  * 快捷键（同时列在帮助面板里，Windex）：
  *   R 复位视角 · F 翻转视角 · Space 俯视切换 · U / Ctrl+Z 悔棋
- *   M 静音 · N 重新开局 · ? 帮助 · Esc 取消选择
+ *   M 静音 · N 重新开局 · T 跟随相机开关（棋盘居中 ↔ 棋子居中）· ? 帮助 · Esc 取消选择 / 关闭浮层
  *
  * 破坏性操作（重新开局 / 认输）采用"按钮二次确认"，比 confirm() 更顺滑（Oil）。
  */
@@ -24,6 +24,7 @@ export class Controls {
    * @param {Function} actions.toggleSound
    * @param {Function} actions.toggleAI
    * @param {Function} actions.setDifficulty
+   * @param {Function} actions.toggleFollowCamera
    * @param {Function} actions.resign
    * @param {Function} actions.toggleHelp
    * @param {Function} actions.cancelSelection
@@ -35,7 +36,7 @@ export class Controls {
 
     this.btnRestart = $('#btn-restart');
     this.btnUndo = $('#btn-undo');
-    this.btnResetView = $('#btn-reset-view');
+    this.btnFollowCam = $('#btn-follow-cam');   // UI-FIX-123：棋盘居中 ↔ 棋子居中 开关（替换复位视角按钮）
     this.btnFlip = $('#btn-flip');
     this.btnTop = $('#btn-top');
     this.btnSound = $('#btn-sound');
@@ -109,7 +110,8 @@ export class Controls {
       this._call('undo');
     });
 
-    this._on(this.btnResetView, 'click', () => this._call('resetView'));
+    // UI-FIX-123：居中开关（棋盘居中 ↔ 棋子居中）替换复位视角按钮；与 T 键同源（main.js toggleFollowCamera）
+    this._on(this.btnFollowCam, 'click', () => this._call('toggleFollowCamera'));
     this._on(this.btnFlip, 'click', () => this._call('flipView'));
     this._on(this.btnTop, 'click', () => this._call('toggleTopView'));
     this._on(this.btnSound, 'click', () => this._call('toggleSound'));
@@ -150,11 +152,15 @@ export class Controls {
           this._armConfirm(this.btnRestart, '确认重开？', () => this._call('restart'));
           if (!this.btnRestart) this._call('restart');
           break;
+        case 't': case 'T':
+          ev.preventDefault(); this._call('toggleFollowCamera'); break;
         case '?': case '/':
           ev.preventDefault(); this._call('toggleHelp'); break;
         case 'Escape':
           ev.preventDefault();
           this.disarmAll();
+          // UI-FIX-123：Esc 优先关闭规则浮层；否则取消选择
+          if (this.actions.toggleHelp) this._call('toggleHelp', false);
           this._call('cancelSelection');
           break;
         default: break;
@@ -208,6 +214,19 @@ export class Controls {
     this.btnTop.classList.toggle('is-on', !!on);
     const label = this.btnTop.querySelector('.btn-label') || this.btnTop;
     label.textContent = on ? '斜视视角' : '俯视视角';
+  }
+
+  /**
+   * 跟随相机开关状态（UI-FIX-123：棋盘居中 ↔ 棋子居中）。
+   * 由 main.js syncControls() 统一同步 —— T 键与按钮共用同一状态源。
+   * @param {boolean} on 跟随相机开启 → 「棋子居中」；关闭 → 「棋盘居中」
+   */
+  setFollowCamState(on) {
+    if (!this.btnFollowCam) return;
+    this.btnFollowCam.classList.toggle('is-on', !!on);
+    this.btnFollowCam.setAttribute('aria-pressed', on ? 'true' : 'false');
+    const label = this.btnFollowCam.querySelector('.btn-label') || this.btnFollowCam;
+    label.textContent = on ? '棋子居中' : '棋盘居中';
   }
 
   setFlipState(side) {

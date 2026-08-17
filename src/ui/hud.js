@@ -32,6 +32,7 @@ export const SHORTCUTS = [
   ['U 或 Ctrl+Z', '悔棋'],
   ['M', '音效开关'],
   ['N', '重新开局'],
+  ['T', '棋盘居中 / 棋子居中（跟随相机开关）'],
   ['?', '打开 / 关闭本帮助'],
   ['Esc', '取消当前选择']
 ];
@@ -58,6 +59,7 @@ export class HUD {
     this.moveLog = $('#move-log');
     this.moveLogList = $('.move-log-list');
     this.moveLogEmpty = $('.move-log-empty');
+    this.moveLogCollapse = $('.move-log-collapse');   // UI-FIX-123：可折叠（移动端不遮棋盘）
 
     // —— 吃子陈列 ——
     this.capturedRed = $('.captured-red');
@@ -77,6 +79,8 @@ export class HUD {
     this.helpPanel = $('.help-panel');
     this.helpToggle = $('.help-toggle');
     this.helpContent = $('.help-content');
+    this.helpClose = $('.help-close');        // UI-FIX-123：规则浮层关闭按钮
+    this.helpBackdrop = $('.help-backdrop');  // UI-FIX-123：点击遮罩关闭
 
     this._toasts = [];
     this._timerStart = 0;
@@ -85,11 +89,24 @@ export class HUD {
 
     this._bind();
     this.renderHelp();
+    // 移动端默认折叠对局记录，避免遮挡核心棋盘（UI-FIX-123）
+    if (typeof matchMedia === 'function' && matchMedia('(max-width: 768px)').matches) {
+      this.toggleMoveLog(true);
+    }
   }
 
   _bind() {
     if (this.helpToggle) {
       this.helpToggle.addEventListener('click', () => this.toggleHelp());
+    }
+    if (this.helpClose) {
+      this.helpClose.addEventListener('click', () => this.toggleHelp(false));
+    }
+    if (this.helpBackdrop) {
+      this.helpBackdrop.addEventListener('click', () => this.toggleHelp(false));
+    }
+    if (this.moveLogCollapse) {
+      this.moveLogCollapse.addEventListener('click', () => this.toggleMoveLog());
     }
     if (this.btnAgain) {
       this.btnAgain.addEventListener('click', () => {
@@ -386,7 +403,26 @@ export class HUD {
     this.helpPanel.classList.toggle('is-open', open);
     this.helpPanel.setAttribute('aria-hidden', open ? 'false' : 'true');
     if (this.helpToggle) this.helpToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    // UI-FIX-123：遮罩随浮层显隐；关闭后清理焦点，保证再打开状态干净
+    if (this.helpBackdrop) this.helpBackdrop.classList.toggle('is-open', open);
+    if (!open && document.activeElement && this.helpClose &&
+        (document.activeElement === this.helpClose || document.activeElement === this.helpToggle)) {
+      document.activeElement.blur();
+    }
     return open;
+  }
+
+  /**
+   * 对局记录折叠 / 展开（UI-FIX-123：移动端不遮挡棋盘）。
+   * @param {boolean} [force]
+   * @returns {boolean} 折叠后是否为 collapsed
+   */
+  toggleMoveLog(force) {
+    if (!this.moveLog) return false;
+    const collapsed = force != null ? !!force : !this.moveLog.classList.contains('is-collapsed');
+    this.moveLog.classList.toggle('is-collapsed', collapsed);
+    if (this.moveLogCollapse) this.moveLogCollapse.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    return collapsed;
   }
 
   // -------------------------------------------------------------------------

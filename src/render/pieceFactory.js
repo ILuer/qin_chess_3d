@@ -67,8 +67,11 @@ export const PIECE_GLYPH = {
   b: { K: '將', A: '士', B: '象', N: '馬', R: '車', C: '砲', P: '卒' }
 };
 
-/** 各类型标称总高（去基座后，含最高装饰，master-plan §1.1） */
-export const PIECE_TOP_Y = { P: 0.70, N: 0.86, B: 0.79, A: 0.79, R: 0.99, C: 0.93, K: 1.29 };
+/** 各类型标称总高（去基座后，含最高装饰，master-plan §1.1）
+ *  QIN-P15-FIX2（反馈 #1）：crown 恢复原比例后，K 顶高从 1.29（crown 撑高）
+ *  下修至 ~1.15（throne 高背撑高，与 art-royal-throne §2.1「龙椅为高度主体」
+ *  的设计口径一致）。其他兵种不变。 */
+export const PIECE_TOP_Y = { P: 0.70, N: 0.86, B: 0.79, A: 0.79, R: 0.99, C: 0.93, K: 1.15 };
 
 /**
  * K 整体等比预缩放（用户拍板：路径 B，idleGroup.scale=1.25；crown 零加长）。
@@ -310,6 +313,15 @@ function buildPawn(mp, M, K, side) {
   // 战靴（legs 组，接触面用鞋底材质）
   legP.add(box(0.075, 0.045, 0.115), M.bootSole, { pos: [0.055, FOOT + 0.022, -0.028] });
   legP.add(box(0.075, 0.045, 0.115), M.bootSole, { pos: [-0.055, FOOT + 0.022, -0.028] });
+  // 大腿（anatomy 大腿，hip → knee）
+  legP.strut(M.clothDeep, [+0.055, 0.430, -0.010], [+0.055, 0.230, -0.018], 0.034, 0.030, 8);
+  legP.strut(M.clothDeep, [-0.055, 0.430, -0.010], [-0.055, 0.230, -0.018], 0.034, 0.030, 8);
+  // 膝盖小球
+  legP.add(sph(0.026, 8, 6), M.clothDeep, { pos: [+0.055, 0.230, -0.018] });
+  legP.add(sph(0.026, 8, 6), M.clothDeep, { pos: [-0.055, 0.230, -0.018] });
+  // 小腿（anatomy 小腿，knee → ankle）
+  legP.strut(M.clothDeep, [+0.055, 0.230, -0.018], [+0.055, FOOT + 0.045, -0.025], 0.028, 0.024, 8);
+  legP.strut(M.clothDeep, [-0.055, 0.230, -0.018], [-0.055, FOOT + 0.045, -0.025], 0.028, 0.024, 8);
   // 短褐（下摆）
   Pb.add(cyl(0.105, 0.155, 0.235, 14), M.cloth, { pos: [0, FOOT + 0.118, 0] });
   Pb.add(tor(0.150, 0.012, 5, 16), M.clothDeep, { pos: [0, FOOT + 0.024, 0], rot: [Math.PI / 2, 0, 0] });
@@ -317,6 +329,9 @@ function buildPawn(mp, M, K, side) {
   Pb.add(tor(0.108, 0.016, 5, 16), M.leather, { pos: [0, 0.345, 0], rot: [Math.PI / 2, 0, 0] });
   // 躯干 + 皮甲片（三层）
   Pb.add(cyl(0.100, 0.112, 0.185, 14), M.clothDeep, { pos: [0, 0.437, 0] });
+  // 腹部层（anatomy 腹部，独立一层区分胸腹）
+  Pb.add(cyl(0.110, 0.118, 0.060, 14), M.clothDeep, { pos: [0, 0.378, 0] });
+  // 胸部皮甲（anatomy 胸部）
   Pb.add(cyl(0.118, 0.122, 0.022, 14), M.armor, { pos: [0, 0.375, 0] });
   Pb.add(cyl(0.118, 0.122, 0.022, 14), M.armor, { pos: [0, 0.435, 0] });
   Pb.add(cyl(0.116, 0.120, 0.022, 14), M.armor, { pos: [0, 0.492, 0] });
@@ -332,9 +347,16 @@ function buildPawn(mp, M, K, side) {
   Pb.add(tor(0.062, 0.008, 5, 14), M.leather, { pos: [0, 0.664, -0.004], rot: [Math.PI / 2, 0, 0] });
   Pb.add(cyl(0.022, 0.068, 0.070, 12), M.cloth, { pos: [0, 0.700, -0.004], rot: [-0.12, 0, 0] });
 
-  // 双臂（arm 组，绕肩 pivot）
-  armP.strut(M.clothDeep, [0.096, 0.505, 0], [0.150, 0.372, -0.012], 0.028, 0.024, 8);
-  armP.strut(M.clothDeep, [-0.096, 0.505, 0], [-0.148, 0.402, -0.040], 0.028, 0.024, 8);
+  // 双臂（arm 组，绕肩 pivot）—— anatomy 大臂 + 小臂 + 手
+  // 右臂：大臂(肩→肘) + 小臂(肘→手腕) + 手
+  armP.strut(M.clothDeep, [+0.096, 0.505, 0.000], [+0.122, 0.438, -0.006], 0.030, 0.026, 8); // 大臂
+  armP.add(sph(0.026, 9, 7), M.clothDeep, { pos: [+0.122, 0.438, -0.006] }); // 肘
+  armP.strut(M.clothDeep, [+0.122, 0.438, -0.006], [+0.150, 0.372, -0.012], 0.026, 0.022, 8); // 小臂
+  // 左臂
+  armP.strut(M.clothDeep, [-0.096, 0.505, 0.000], [-0.122, 0.454, -0.020], 0.030, 0.026, 8);
+  armP.add(sph(0.026, 9, 7), M.clothDeep, { pos: [-0.122, 0.454, -0.020] });
+  armP.strut(M.clothDeep, [-0.122, 0.454, -0.020], [-0.148, 0.402, -0.040], 0.026, 0.022, 8);
+  // 手
   armP.add(sph(0.032, 10, 8), M.skin, { pos: [0.156, 0.366, -0.014] });
   armP.add(sph(0.032, 10, 8), M.skin, { pos: [-0.152, 0.398, -0.046] });
   // 戈：长杆 + 青铜援 + 内 + 顶刺
@@ -372,34 +394,69 @@ function buildHorse(mp, M, K, side) {
   mountP.add(box(0.014, 0.058, 0.048), K.hair, { pos: [0, 0.564, -0.152], rot: [0.62, 0, 0] });
   // 马面帘
   mountP.add(box(0.060, 0.075, 0.018), M.armor, { pos: [0, 0.610, -0.342], rot: [0.12, 0, 0] });
-  // 四腿（左前腿抬起 = 动势）
-  mountP.strut(hide, [0.076, 0.300, -0.140], [0.108, 0.178, -0.262], 0.030, 0.024, 8);
-  mountP.strut(hide, [-0.076, 0.300, -0.140], [-0.082, FOOT, -0.170], 0.030, 0.024, 8);
-  mountP.strut(hide, [0.080, 0.300, 0.165], [0.086, FOOT, 0.208], 0.031, 0.025, 8);
-  mountP.strut(hide, [-0.080, 0.300, 0.165], [-0.086, FOOT, 0.208], 0.031, 0.025, 8);
+  // 四腿（anatomy 大腿/小腿/蹄；FL raised = 动势，FR/BL/BR 站姿）
+  // 左前腿 FL 抬起：大腿 hip→knee + 小腿 knee→ankle + 蹄
+  mountP.strut(hide, [0.076, 0.300, -0.140], [0.094, 0.220, -0.200], 0.034, 0.028, 8); // 大腿
+  mountP.add(sph(0.024, 8, 6), hide, { pos: [0.094, 0.220, -0.200] });                   // 膝
+  mountP.strut(hide, [0.094, 0.220, -0.200], [0.108, FOOT + 0.095, -0.262], 0.024, 0.020, 8); // 小腿
+  // 右前腿 FR 落地
+  mountP.strut(hide, [-0.076, 0.300, -0.140], [-0.080, 0.220, -0.155], 0.034, 0.028, 8);
+  mountP.add(sph(0.024, 8, 6), hide, { pos: [-0.080, 0.220, -0.155] });
+  mountP.strut(hide, [-0.080, 0.220, -0.155], [-0.082, FOOT + 0.095, -0.170], 0.024, 0.020, 8);
+  // 左后腿 BL 落地
+  mountP.strut(hide, [0.080, 0.300, 0.165], [0.084, 0.220, 0.188], 0.034, 0.028, 8);
+  mountP.add(sph(0.024, 8, 6), hide, { pos: [0.084, 0.220, 0.188] });
+  mountP.strut(hide, [0.084, 0.220, 0.188], [0.086, FOOT + 0.095, 0.208], 0.024, 0.020, 8);
+  // 右后腿 BR 落地
+  mountP.strut(hide, [-0.080, 0.300, 0.165], [-0.084, 0.220, 0.188], 0.034, 0.028, 8);
+  mountP.add(sph(0.024, 8, 6), hide, { pos: [-0.084, 0.220, 0.188] });
+  mountP.strut(hide, [-0.084, 0.220, 0.188], [-0.086, FOOT + 0.095, 0.208], 0.024, 0.020, 8);
+  // 蹄（4 蹄，落地蹄底用 hoofSole 材质，独立件 → 仍并入 mount matte 族）
+  mountP.add(box(0.034, 0.018, 0.040), M.hoofSole, { pos: [+0.108, FOOT + 0.009, -0.262] }); // FL
+  mountP.add(box(0.034, 0.018, 0.040), M.hoofSole, { pos: [-0.082, FOOT + 0.009, -0.170] }); // FR
+  mountP.add(box(0.034, 0.018, 0.040), M.hoofSole, { pos: [+0.086, FOOT + 0.009,  0.208] }); // BL
+  mountP.add(box(0.034, 0.018, 0.040), M.hoofSole, { pos: [-0.086, FOOT + 0.009,  0.208] }); // BR
   // 尾
   mountP.strut(K.hair, [0, 0.420, 0.240], [0, 0.196, 0.332], 0.030, 0.010, 8);
   // 鞍
   mountP.add(cyl(0.098, 0.108, 0.052, 12), M.cloth, { pos: [0, 0.438, 0.020], scale: [1, 1, 1.45] });
 
-  /* ---- 骑手（rider） ---- */
+  /* ---- 骑手（rider，anatomy 完整覆盖）---- */
+  // 腿（大腿外侧夹马身，小腿下垂贴马肋）
+  riderP.strut(M.clothDeep, [+0.062, 0.430, 0.005], [+0.078, 0.300, -0.020], 0.034, 0.030, 8); // 大腿
+  riderP.strut(M.clothDeep, [-0.062, 0.430, 0.005], [-0.078, 0.300, -0.020], 0.034, 0.030, 8);
+  riderP.strut(M.clothDeep, [+0.078, 0.300, -0.020], [+0.072, 0.180, -0.018], 0.028, 0.024, 8); // 小腿
+  riderP.strut(M.clothDeep, [-0.078, 0.300, -0.020], [-0.072, 0.180, -0.018], 0.028, 0.024, 8);
+  // 战靴
+  riderP.add(box(0.052, 0.030, 0.080), M.bootSole, { pos: [+0.072, 0.150, -0.018] });
+  riderP.add(box(0.052, 0.030, 0.080), M.bootSole, { pos: [-0.072, 0.150, -0.018] });
+  // 髋部胯下
   riderP.add(sph(0.070, 10, 8), M.cloth, { pos: [0, 0.490, 0.020] });
-  riderP.strut(M.cloth, [0.078, 0.482, 0.005], [0.116, 0.338, -0.098], 0.034, 0.026, 8);
+  // 腹部（anatomy 腹部，独立层）
+  riderP.add(cyl(0.080, 0.092, 0.080, 12), M.clothDeep, { pos: [0, 0.510, 0.012] });
+  // 胸部 + 鱼鳞甲（anatomy 胸部，3 层甲片区分胸/腹过渡）
+  riderP.strut(M.cloth, [+0.078, 0.482, 0.005], [+0.116, 0.338, -0.098], 0.034, 0.026, 8);
   riderP.strut(M.cloth, [-0.078, 0.482, 0.005], [-0.116, 0.338, -0.098], 0.034, 0.026, 8);
   riderP.add(cyl(0.082, 0.096, 0.160, 12), M.armorDeep, { pos: [0, 0.580, 0.010] });
   riderP.add(cyl(0.101, 0.104, 0.020, 12), M.armor, { pos: [0, 0.548, 0.010] });
   riderP.add(cyl(0.099, 0.102, 0.020, 12), M.armor, { pos: [0, 0.608, 0.010] });
   riderP.add(sph(0.045, 10, 8), M.armorDeep, { pos: [0.086, 0.652, 0.010] });
   riderP.add(sph(0.045, 10, 8), M.armorDeep, { pos: [-0.086, 0.652, 0.010] });
+  // 颈 + 头
   riderP.add(cyl(0.026, 0.028, 0.030, 8), M.skin, { pos: [0, 0.676, 0.008] });
   riderP.add(sph(0.050, 12, 10), M.skin, { pos: [0, 0.716, 0.002] });
   // 兜鍪 + 顿项 + 缨
   riderP.add(cyl(0.058, 0.070, 0.032, 12), M.armorDeep, { pos: [0, 0.704, 0.002] });
   riderP.add(dome(0.056, 12, 7, 0.58), M.armor, { pos: [0, 0.732, 0.002] });
   riderP.add(cyl(0.000, 0.020, 0.062, 8), M.plume, { pos: [0, 0.796, 0.002] });
-  // 双臂持戟
-  riderP.strut(M.armorDeep, [0.088, 0.638, 0.005], [0.132, 0.548, -0.086], 0.028, 0.024, 8);
-  riderP.strut(M.armorDeep, [-0.088, 0.638, 0.005], [-0.120, 0.556, 0.060], 0.028, 0.024, 8);
+  // 双臂持戟（anatomy 大臂 + 小臂 + 手）
+  riderP.strut(M.armorDeep, [+0.088, 0.638, 0.005], [+0.110, 0.590, -0.040], 0.030, 0.026, 8); // 大臂
+  riderP.add(sph(0.024, 8, 6), M.armorDeep, { pos: [+0.110, 0.590, -0.040] });                    // 肘
+  riderP.strut(M.armorDeep, [+0.110, 0.590, -0.040], [+0.132, 0.548, -0.086], 0.024, 0.020, 8); // 小臂
+  riderP.strut(M.armorDeep, [-0.088, 0.638, 0.005], [-0.104, 0.598, 0.020], 0.030, 0.026, 8);
+  riderP.add(sph(0.024, 8, 6), M.armorDeep, { pos: [-0.104, 0.598, 0.020] });
+  riderP.strut(M.armorDeep, [-0.104, 0.598, 0.020], [-0.120, 0.556, 0.060], 0.024, 0.020, 8);
+  // 手
   riderP.add(sph(0.030, 10, 8), M.skin, { pos: [0.136, 0.542, -0.094] });
   // 长戟（斜指前上方）
   riderP.add(cyl(0.011, 0.013, 0.680, 8), M.woodDeep, { pos: [0.132, 0.610, -0.010], rot: [-0.742, 0, 0] });
@@ -449,12 +506,25 @@ function buildElephant(mp, M, K, side) {
   robeP.add(box(0.060, 0.012, 0.098), M.accentDim, { pos: [0, 0.862, 0.002], rot: [-0.18, 0, 0] });
   robeP.add(box(0.070, 0.058, 0.014), M.clothDeep, { pos: [0, 0.726, 0.074], rot: [0.30, 0, 0] });
 
-  // 宽袖 + 双手 + 简牍（arms，绕肩关节摆动）
-  armsP.strut(M.robe, [0.104, 0.545, -0.010], [0.176, 0.378, -0.042], 0.060, 0.088, 12);
-  armsP.strut(M.robe, [-0.104, 0.545, -0.010], [-0.176, 0.378, -0.042], 0.060, 0.088, 12);
-  armsP.add(tor(0.084, 0.012, 5, 14), M.clothDeep, { pos: [0.178, 0.372, -0.044], rot: [1.30, 0, -0.38] });
+  // 腹部层（anatomy 腹部，深衣车削分层之下追加独立腹部环）
+  robeP.add(cyl(0.158, 0.164, 0.040, 18), M.robe, { pos: [0, 0.220, 0] });
+  // 胸部层（anatomy 胸部）
+  robeP.add(cyl(0.140, 0.152, 0.060, 18), M.cloth, { pos: [0, 0.330, 0] });
+  robeP.add(cyl(0.130, 0.142, 0.040, 18), M.clothDeep, { pos: [0, 0.420, 0] });
+
+  // 宽袖 + 双手 + 简牍（arms，绕肩关节摆动，anatomy 大臂 + 小臂 + 手）
+  // 右臂 大臂 + 小臂
+  armsP.strut(M.robe, [+0.104, 0.545, -0.010], [+0.140, 0.462, -0.026], 0.062, 0.072, 12);
+  armsP.add(sph(0.034, 8, 6), M.robe, { pos: [+0.140, 0.462, -0.026] });
+  armsP.strut(M.robe, [+0.140, 0.462, -0.026], [+0.176, 0.378, -0.042], 0.060, 0.088, 12);
+  // 左臂 大臂 + 小臂
+  armsP.strut(M.robe, [-0.104, 0.545, -0.010], [-0.140, 0.462, -0.026], 0.062, 0.072, 12);
+  armsP.add(sph(0.034, 8, 6), M.robe, { pos: [-0.140, 0.462, -0.026] });
+  armsP.strut(M.robe, [-0.140, 0.462, -0.026], [-0.176, 0.378, -0.042], 0.060, 0.088, 12);
+  armsP.add(tor(0.084, 0.012, 5, 14), M.clothDeep, { pos: [+0.178, 0.372, -0.044], rot: [1.30, 0, -0.38] });
   armsP.add(tor(0.084, 0.012, 5, 14), M.clothDeep, { pos: [-0.178, 0.372, -0.044], rot: [1.30, 0, 0.38] });
-  armsP.add(sph(0.032, 10, 8), M.skin, { pos: [0.052, 0.498, -0.118] });
+  // 手（捧简牍）
+  armsP.add(sph(0.032, 10, 8), M.skin, { pos: [+0.052, 0.498, -0.118] });
   armsP.add(sph(0.032, 10, 8), M.skin, { pos: [-0.052, 0.498, -0.118] });
   armsP.add(box(0.168, 0.112, 0.016), K.paper, { pos: [0, 0.516, -0.136], rot: [-0.34, 0, 0] });
   armsP.add(box(0.174, 0.009, 0.020), K.ink, { pos: [0, 0.549, -0.146], rot: [-0.34, 0, 0] });
@@ -473,7 +543,12 @@ function buildAdvisor(mp, M, K, side) {
   const armP = mp.get('arms');  // 双臂 + 手（按剑下压，绕肩 pivot）
   const swordP = mp.get('sword'); // 剑（挥斩，绕握把 pivot）
 
-  // 战靴（接触面用鞋底材质）
+  // 大腿/小腿/战靴（anatomy 腿，藏于甲裙之内，仅靴底露出）
+  Pb.strut(M.clothDeep, [+0.040, 0.150, 0.000], [+0.040, FOOT + 0.080, 0.000], 0.028, 0.024, 8);
+  Pb.strut(M.clothDeep, [-0.040, 0.150, 0.000], [-0.040, FOOT + 0.080, 0.000], 0.028, 0.024, 8);
+  Pb.add(box(0.054, 0.024, 0.078), M.bootSole, { pos: [+0.040, FOOT + 0.012, 0.008] });
+  Pb.add(box(0.054, 0.024, 0.078), M.bootSole, { pos: [-0.040, FOOT + 0.012, 0.008] });
+  // 战靴（接触面用鞋底材质，保留旧位置以贴合甲裙下摆）
   Pb.add(box(0.070, 0.040, 0.100), M.bootSole, { pos: [0.050, FOOT + 0.020, -0.024] });
   Pb.add(box(0.070, 0.040, 0.100), M.bootSole, { pos: [-0.050, FOOT + 0.020, -0.024] });
   // 甲裙
@@ -482,7 +557,9 @@ function buildAdvisor(mp, M, K, side) {
   Pb.add(cyl(0.143, 0.148, 0.022, 14), M.armor, { pos: [0, 0.252, 0] });
   // 腰带
   Pb.add(tor(0.130, 0.017, 5, 18), M.leather, { pos: [0, 0.346, 0], rot: [Math.PI / 2, 0, 0] });
-  // 筒袖铠躯干 + 四层甲片
+  // 腹部（anatomy 腹部）
+  Pb.add(cyl(0.124, 0.134, 0.070, 14), M.armorDeep, { pos: [0, 0.400, 0] });
+  // 筒袖铠躯干 + 四层甲片（anatomy 胸部）
   Pb.add(cyl(0.116, 0.132, 0.262, 14), M.armorDeep, { pos: [0, 0.472, 0] });
   Pb.add(cyl(0.136, 0.140, 0.023, 14), M.armor, { pos: [0, 0.382, 0] });
   Pb.add(cyl(0.134, 0.138, 0.023, 14), M.armor, { pos: [0, 0.446, 0] });
@@ -505,10 +582,14 @@ function buildAdvisor(mp, M, K, side) {
   Pb.add(box(0.012, 0.088, 0.008), M.cloth, { pos: [0.052, 0.716, 0.040], rot: [0.16, 0, 0.08] });
   Pb.add(box(0.012, 0.088, 0.008), M.cloth, { pos: [-0.052, 0.716, 0.040], rot: [0.16, 0, -0.08] });
 
-  // 双臂 + 手（arms 组，绕肩 pivot）
-  armP.strut(M.armorDeep, [0.140, 0.560, -0.006], [0.048, 0.556, -0.100], 0.030, 0.026, 8);
-  armP.strut(M.armorDeep, [-0.140, 0.560, -0.006], [-0.048, 0.534, -0.100], 0.030, 0.026, 8);
-  armP.add(sph(0.032, 10, 8), M.skin, { pos: [0.036, 0.556, -0.114] });
+  // 双臂 + 手（arms 组，anatomy 大臂 + 小臂 + 手，按剑下压）
+  armP.strut(M.armorDeep, [+0.140, 0.560, -0.006], [+0.094, 0.556, -0.052], 0.032, 0.028, 8);
+  armP.add(sph(0.026, 9, 7), M.armorDeep, { pos: [+0.094, 0.556, -0.052] });
+  armP.strut(M.armorDeep, [+0.094, 0.556, -0.052], [+0.048, 0.556, -0.100], 0.028, 0.024, 8);
+  armP.strut(M.armorDeep, [-0.140, 0.560, -0.006], [-0.094, 0.544, -0.052], 0.032, 0.028, 8);
+  armP.add(sph(0.026, 9, 7), M.armorDeep, { pos: [-0.094, 0.544, -0.052] });
+  armP.strut(M.armorDeep, [-0.094, 0.544, -0.052], [-0.048, 0.534, -0.100], 0.028, 0.024, 8);
+  armP.add(sph(0.032, 10, 8), M.skin, { pos: [+0.036, 0.556, -0.114] });
   armP.add(sph(0.032, 10, 8), M.skin, { pos: [-0.036, 0.532, -0.114] });
 
   // 双手拄剑（sword 组，绕握把 pivot）
@@ -612,15 +693,35 @@ function buildOneHorse(P, M, K, ox, oz, scl) {
   P.add(box(0.011 * s, 0.052 * s, 0.040 * s), K.hair, { pos: [ox, 0.504 * s + 0.086, oz - 0.156 * s], rot: [0.55, 0, 0] });
   // 马面帘
   P.add(box(0.048 * s, 0.060 * s, 0.014 * s), M.armor, { pos: [ox, 0.504 * s + 0.086, oz - 0.284 * s], rot: [0.12, 0, 0] });
-  // 四腿（奔腾姿态：左前右后抬起）
+  // 四腿（anatomy 大腿/小腿/蹄；左前右后抬起 = 奔腾姿态）
+  // 左前 FL 抬起
   P.strut(hide, [ox + 0.062 * s, 0.250 * s + 0.086, oz - 0.116 * s],
-          [ox + 0.088 * s, 0.086, oz - 0.216 * s], 0.024 * s, 0.020 * s, 8);
+          [ox + 0.078 * s, 0.250 * s + 0.086 - 0.080, oz - 0.170 * s], 0.026 * s, 0.022 * s, 8);
+  P.strut(hide, [ox + 0.078 * s, 0.250 * s + 0.086 - 0.080, oz - 0.170 * s],
+          [ox + 0.088 * s, 0.086 + 0.060 * s, oz - 0.216 * s], 0.020 * s, 0.018 * s, 8);
+  P.add(box(0.028 * s, 0.016 * s, 0.034 * s), M.hoofSole,
+    { pos: [ox + 0.088 * s, 0.086 + 0.008 * s, oz - 0.216 * s] });
+  // 右前 FR 落地
   P.strut(hide, [ox - 0.062 * s, 0.250 * s + 0.086, oz - 0.116 * s],
-          [ox - 0.066 * s, 0.086, oz - 0.140 * s], 0.024 * s, 0.020 * s, 8);
+          [ox - 0.062 * s, 0.250 * s + 0.086 - 0.080, oz - 0.130 * s], 0.026 * s, 0.022 * s, 8);
+  P.strut(hide, [ox - 0.062 * s, 0.250 * s + 0.086 - 0.080, oz - 0.130 * s],
+          [ox - 0.066 * s, 0.086 + 0.060 * s, oz - 0.140 * s], 0.020 * s, 0.018 * s, 8);
+  P.add(box(0.028 * s, 0.016 * s, 0.034 * s), M.hoofSole,
+    { pos: [ox - 0.066 * s, 0.086 + 0.008 * s, oz - 0.140 * s] });
+  // 左后 BL 落地
   P.strut(hide, [ox + 0.064 * s, 0.250 * s + 0.086, oz + 0.136 * s],
-          [ox + 0.068 * s, 0.086, oz + 0.172 * s], 0.025 * s, 0.021 * s, 8);
+          [ox + 0.066 * s, 0.250 * s + 0.086 - 0.080, oz + 0.156 * s], 0.026 * s, 0.022 * s, 8);
+  P.strut(hide, [ox + 0.066 * s, 0.250 * s + 0.086 - 0.080, oz + 0.156 * s],
+          [ox + 0.068 * s, 0.086 + 0.060 * s, oz + 0.172 * s], 0.021 * s, 0.018 * s, 8);
+  P.add(box(0.028 * s, 0.016 * s, 0.034 * s), M.hoofSole,
+    { pos: [ox + 0.068 * s, 0.086 + 0.008 * s, oz + 0.172 * s] });
+  // 右后 BR 抬起
   P.strut(hide, [ox - 0.064 * s, 0.250 * s + 0.086, oz + 0.136 * s],
-          [ox - 0.090 * s, 0.086, oz + 0.168 * s], 0.025 * s, 0.021 * s, 8);
+          [ox - 0.078 * s, 0.250 * s + 0.086 - 0.080, oz + 0.156 * s], 0.026 * s, 0.022 * s, 8);
+  P.strut(hide, [ox - 0.078 * s, 0.250 * s + 0.086 - 0.080, oz + 0.156 * s],
+          [ox - 0.090 * s, 0.086 + 0.060 * s, oz + 0.168 * s], 0.021 * s, 0.018 * s, 8);
+  P.add(box(0.028 * s, 0.016 * s, 0.034 * s), M.hoofSole,
+    { pos: [ox - 0.090 * s, 0.086 + 0.008 * s, oz + 0.168 * s] });
   // 尾
   P.strut(K.hair, [ox, 0.350 * s + 0.086, oz + 0.196 * s],
           [ox, 0.164 * s + 0.086, oz + 0.272 * s], 0.024 * s, 0.008 * s, 8);
@@ -632,10 +733,18 @@ function buildOneHorse(P, M, K, ox, oz, scl) {
 /** 御马兵（站姿，双手握缰绳状） */
 function buildDriver(P, M, K, ox, oz, s, oy = 0.086) {
   const sc = s || 1.0;
-  // 下身（简化为裙甲）
+  // 大腿（anatomy 大腿，hip→knee）
+  P.strut(M.clothDeep, [ox, 0.150 * sc + oy, oz], [ox, 0.080 * sc + oy, oz], 0.034, 0.030, 8);
+  P.strut(M.clothDeep, [ox + 0.020 * sc, 0.150 * sc + oy, oz], [ox + 0.022 * sc, 0.080 * sc + oy, oz], 0.028, 0.024, 8);
+  // 战靴（脚）
+  P.add(box(0.052 * sc, 0.024 * sc, 0.084 * sc), M.bootSole,
+    { pos: [ox + 0.010 * sc, 0.012 * sc + oy, oz + 0.012 * sc] });
+  // 下身裙甲（覆盖大腿上段）
   P.add(cyl(0.058 * sc, 0.080 * sc, 0.160 * sc, 10), M.clothDeep, { pos: [ox, 0.080 * sc + oy, oz] });
   P.add(tor(0.080 * sc, 0.012 * sc, 4, 12), M.leather, { pos: [ox, 0.156 * sc + oy, oz], rot: [Math.PI / 2, 0, 0] });
-  // 躯干
+  // 腹部（anatomy 腹部）
+  P.add(cyl(0.066 * sc, 0.072 * sc, 0.060 * sc, 10), M.clothDeep, { pos: [ox, 0.205 * sc + oy, oz] });
+  // 胸部 + 鱼鳞甲
   P.add(cyl(0.056 * sc, 0.066 * sc, 0.140 * sc, 10), M.armorDeep, { pos: [ox, 0.256 * sc + oy, oz] });
   P.add(cyl(0.068 * sc, 0.072 * sc, 0.018 * sc, 10), M.armor, { pos: [ox, 0.216 * sc + oy, oz] });
   P.add(cyl(0.066 * sc, 0.070 * sc, 0.018 * sc, 10), M.armor, { pos: [ox, 0.264 * sc + oy, oz] });
@@ -648,11 +757,18 @@ function buildDriver(P, M, K, ox, oz, s, oy = 0.086) {
   P.add(sph(0.044 * sc, 10, 8), M.skin, { pos: [ox, 0.416 * sc + oy, oz - 0.004 * sc] });
   // 兜鍪
   P.add(dome(0.042 * sc, 10, 6, 0.56), M.armor, { pos: [ox, 0.436 * sc + oy, oz - 0.004 * sc] });
-  // 双臂前伸（握缰绳姿态，收窄 lateral 防穿侧板）
+  // 双臂前伸（anatomy 大臂 + 小臂 + 手，握缰）
   P.strut(M.armorDeep, [ox + 0.068 * sc, 0.304 * sc + oy, oz],
-          [ox + 0.075 * sc, 0.248 * sc + oy, oz - 0.080 * sc], 0.024 * sc, 0.020 * sc, 8);
+          [ox + 0.072 * sc, 0.278 * sc + oy, oz - 0.040 * sc], 0.026 * sc, 0.022 * sc, 8);
+  P.add(sph(0.022 * sc, 8, 6), M.armorDeep, { pos: [ox + 0.072 * sc, 0.278 * sc + oy, oz - 0.040 * sc] });
+  P.strut(M.armorDeep, [ox + 0.072 * sc, 0.278 * sc + oy, oz - 0.040 * sc],
+          [ox + 0.075 * sc, 0.248 * sc + oy, oz - 0.080 * sc], 0.022 * sc, 0.018 * sc, 8);
   P.strut(M.armorDeep, [ox - 0.068 * sc, 0.304 * sc + oy, oz],
-          [ox - 0.065 * sc, 0.252 * sc + oy, oz - 0.070 * sc], 0.024 * sc, 0.020 * sc, 8);
+          [ox - 0.066 * sc, 0.280 * sc + oy, oz - 0.034 * sc], 0.026 * sc, 0.022 * sc, 8);
+  P.add(sph(0.022 * sc, 8, 6), M.armorDeep, { pos: [ox - 0.066 * sc, 0.280 * sc + oy, oz - 0.034 * sc] });
+  P.strut(M.armorDeep, [ox - 0.066 * sc, 0.280 * sc + oy, oz - 0.034 * sc],
+          [ox - 0.065 * sc, 0.252 * sc + oy, oz - 0.070 * sc], 0.022 * sc, 0.018 * sc, 8);
+  // 手
   P.add(sph(0.026 * sc, 9, 7), M.skin, { pos: [ox + 0.077 * sc, 0.244 * sc + oy, oz - 0.082 * sc] });
   P.add(sph(0.026 * sc, 9, 7), M.skin, { pos: [ox - 0.067 * sc, 0.248 * sc + oy, oz - 0.072 * sc] });
 }
@@ -660,10 +776,17 @@ function buildDriver(P, M, K, ox, oz, s, oy = 0.086) {
 /** 持戈兵（站姿，双手持长戈） */
 function buildSpearman(P, M, K, ox, oz, s, oy = 0.086) {
   const sc = s || 1.0;
+  // 大腿 + 小腿 + 战靴
+  P.strut(M.clothDeep, [ox, 0.150 * sc + oy, oz], [ox, 0.080 * sc + oy, oz], 0.034, 0.030, 8);
+  P.strut(M.clothDeep, [ox + 0.020 * sc, 0.150 * sc + oy, oz], [ox + 0.022 * sc, 0.080 * sc + oy, oz], 0.028, 0.024, 8);
+  P.add(box(0.052 * sc, 0.024 * sc, 0.084 * sc), M.bootSole,
+    { pos: [ox + 0.010 * sc, 0.012 * sc + oy, oz + 0.012 * sc] });
   // 下身
   P.add(cyl(0.060 * sc, 0.082 * sc, 0.165 * sc, 10), M.clothDeep, { pos: [ox, 0.082 * sc + oy, oz] });
   P.add(tor(0.082 * sc, 0.012 * sc, 4, 12), M.leather, { pos: [ox, 0.162 * sc + oy, oz], rot: [Math.PI / 2, 0, 0] });
-  // 躯干
+  // 腹部
+  P.add(cyl(0.068 * sc, 0.074 * sc, 0.060 * sc, 10), M.clothDeep, { pos: [ox, 0.208 * sc + oy, oz] });
+  // 胸部 + 鱼鳞甲
   P.add(cyl(0.058 * sc, 0.068 * sc, 0.145 * sc, 10), M.armorDeep, { pos: [ox, 0.258 * sc + oy, oz] });
   P.add(cyl(0.070 * sc, 0.074 * sc, 0.018 * sc, 10), M.armor, { pos: [ox, 0.218 * sc + oy, oz] });
   P.add(cyl(0.068 * sc, 0.072 * sc, 0.018 * sc, 10), M.armor, { pos: [ox, 0.266 * sc + oy, oz] });
@@ -676,20 +799,27 @@ function buildSpearman(P, M, K, ox, oz, s, oy = 0.086) {
   P.add(sph(0.044 * sc, 10, 8), M.skin, { pos: [ox, 0.418 * sc + oy, oz - 0.004 * sc] });
   // 兜鍪
   P.add(dome(0.042 * sc, 10, 6, 0.56), M.armor, { pos: [ox, 0.438 * sc + oy, oz - 0.004 * sc] });
-  // 右臂前伸持戈
+  // 右臂前伸持戈（anatomy 大臂 + 小臂 + 手）
   P.strut(M.armorDeep, [ox + 0.070 * sc, 0.306 * sc + oy, oz],
-          [ox + 0.124 * sc, 0.272 * sc + oy, oz - 0.084 * sc], 0.024 * sc, 0.020 * sc, 8);
+          [ox + 0.098 * sc, 0.288 * sc + oy, oz - 0.040 * sc], 0.026 * sc, 0.022 * sc, 8);
+  P.add(sph(0.022 * sc, 8, 6), M.armorDeep, { pos: [ox + 0.098 * sc, 0.288 * sc + oy, oz - 0.040 * sc] });
+  P.strut(M.armorDeep, [ox + 0.098 * sc, 0.288 * sc + oy, oz - 0.040 * sc],
+          [ox + 0.124 * sc, 0.272 * sc + oy, oz - 0.084 * sc], 0.022 * sc, 0.018 * sc, 8);
+  // 手
   P.add(sph(0.026 * sc, 9, 7), M.skin, { pos: [ox + 0.126 * sc, 0.268 * sc + oy, oz - 0.086 * sc] });
-  // 长戈（斜指右上方）
+  // 长戈
   P.add(cyl(0.010 * sc, 0.012 * sc, 0.480 * sc, 8), M.woodDeep,
     { pos: [ox + 0.122 * sc, 0.340 * sc + oy, oz - 0.080 * sc], rot: [-0.55, 0, 0] });
   P.add(box(0.096 * sc, 0.024 * sc, 0.010 * sc), K.bronze,
     { pos: [ox + 0.168 * sc, 0.540 * sc + oy, oz - 0.106 * sc], rot: [0, 0, -0.10] });
   P.add(box(0.044 * sc, 0.018 * sc, 0.010 * sc), K.bronze,
     { pos: [ox + 0.094 * sc, 0.528 * sc + oy, oz - 0.106 * sc] });
-  // 左臂垂放
+  // 左臂垂放（anatomy 大臂 + 小臂 + 手）
   P.strut(M.armorDeep, [ox - 0.070 * sc, 0.306 * sc + oy, oz],
-          [ox - 0.102 * sc, 0.210 * sc + oy, oz - 0.044 * sc], 0.024 * sc, 0.020 * sc, 8);
+          [ox - 0.088 * sc, 0.260 * sc + oy, oz - 0.022 * sc], 0.026 * sc, 0.022 * sc, 8);
+  P.add(sph(0.022 * sc, 8, 6), M.armorDeep, { pos: [ox - 0.088 * sc, 0.260 * sc + oy, oz - 0.022 * sc] });
+  P.strut(M.armorDeep, [ox - 0.088 * sc, 0.260 * sc + oy, oz - 0.022 * sc],
+          [ox - 0.102 * sc, 0.210 * sc + oy, oz - 0.044 * sc], 0.022 * sc, 0.018 * sc, 8);
   P.add(sph(0.026 * sc, 9, 7), M.skin, { pos: [ox - 0.104 * sc, 0.206 * sc + oy, oz - 0.046 * sc] });
 }
 
@@ -823,16 +953,29 @@ function buildCannonSoldier(P, M, K, ox, oy, s, mirrorX) {
   const sc = s || 0.85;
   const mx = mirrorX || 1;
   const legH = 0.038 * sc;
-  // 腿 + 靴（落地，靴底 y = oy；接触面用鞋底材质）
-  P.add(cyl(0.016 * sc, 0.020 * sc, 0.055 * sc, 8), M.clothDeep, { pos: [ox - 0.024 * sc * mx, oy + 0.027 * sc, 0] });
-  P.add(cyl(0.016 * sc, 0.020 * sc, 0.055 * sc, 8), M.clothDeep, { pos: [ox + 0.024 * sc * mx, oy + 0.027 * sc, 0] });
+  // 大腿（anatomy 大腿，hip→knee）
+  P.strut(M.clothDeep, [ox - 0.024 * sc * mx, oy + legH + 0.130 * sc, 0],
+          [ox - 0.024 * sc * mx, oy + legH + 0.060 * sc, 0], 0.028 * sc, 0.024 * sc, 8);
+  P.strut(M.clothDeep, [ox + 0.024 * sc * mx, oy + legH + 0.130 * sc, 0],
+          [ox + 0.024 * sc * mx, oy + legH + 0.060 * sc, 0], 0.028 * sc, 0.024 * sc, 8);
+  // 膝盖小球
+  P.add(sph(0.020 * sc, 8, 6), M.clothDeep, { pos: [ox - 0.024 * sc * mx, oy + legH + 0.060 * sc, 0] });
+  P.add(sph(0.020 * sc, 8, 6), M.clothDeep, { pos: [ox + 0.024 * sc * mx, oy + legH + 0.060 * sc, 0] });
+  // 小腿（anatomy 小腿，knee→ankle）
+  P.strut(M.clothDeep, [ox - 0.024 * sc * mx, oy + legH + 0.060 * sc, 0],
+          [ox - 0.024 * sc * mx, oy + legH + 0.020 * sc, 0], 0.024 * sc, 0.020 * sc, 8);
+  P.strut(M.clothDeep, [ox + 0.024 * sc * mx, oy + legH + 0.060 * sc, 0],
+          [ox + 0.024 * sc * mx, oy + legH + 0.020 * sc, 0], 0.024 * sc, 0.020 * sc, 8);
+  // 战靴（anatomy 脚）
   P.add(box(0.034 * sc, 0.022 * sc, 0.058 * sc), M.bootSole, { pos: [ox - 0.024 * sc * mx, oy + 0.011 * sc, -0.016 * sc] });
   P.add(box(0.034 * sc, 0.022 * sc, 0.058 * sc), M.bootSole, { pos: [ox + 0.024 * sc * mx, oy + 0.011 * sc, -0.016 * sc] });
   // 身体微微前倾，面向绞盘方向（身体抬高 legH 给腿留可见空间）
   // 下身（简化裙甲）
   P.add(cyl(0.052 * sc, 0.072 * sc, 0.140 * sc, 10), M.clothDeep, { pos: [ox, oy + legH + 0.070 * sc, 0] });
   P.add(tor(0.072 * sc, 0.010 * sc, 4, 10), M.leather, { pos: [ox, oy + legH + 0.138 * sc, 0], rot: [Math.PI / 2, 0, 0] });
-  // 躯干（前倾）
+  // 腹部（anatomy 腹部）
+  P.add(cyl(0.058 * sc, 0.064 * sc, 0.050 * sc, 10), M.clothDeep, { pos: [ox, oy + legH + 0.170 * sc, 0.016 * mx] });
+  // 躯干（前倾）+ 胸部（anatomy 胸部，2 层甲片）
   P.add(cyl(0.050 * sc, 0.060 * sc, 0.130 * sc, 10), M.armorDeep, { pos: [ox, oy + legH + 0.222 * sc, 0.016 * mx] });
   P.add(cyl(0.062 * sc, 0.066 * sc, 0.016 * sc, 10), M.armor, { pos: [ox, oy + legH + 0.186 * sc, 0.016 * mx] });
   P.add(cyl(0.060 * sc, 0.064 * sc, 0.016 * sc, 10), M.armor, { pos: [ox, oy + legH + 0.228 * sc, 0.016 * mx] });
@@ -846,11 +989,18 @@ function buildCannonSoldier(P, M, K, ox, oy, s, mirrorX) {
   // 介帻帽
   P.add(cyl(0.056 * sc, 0.060 * sc, 0.010 * sc, 12), M.clothDeep, { pos: [ox, oy + legH + 0.392 * sc, 0.014 * mx] });
   P.add(tor(0.048 * sc, 0.007 * sc, 4, 12), M.leather, { pos: [ox, oy + legH + 0.398 * sc, 0.014 * mx], rot: [Math.PI / 2, 0, 0] });
-  // 双臂前伸（推车/转绞盘姿态）
+  // 双臂前伸（anatomy 大臂 + 小臂 + 手，推车/转绞盘姿态）
   P.strut(M.armorDeep, [ox + 0.058 * sc * mx, oy + legH + 0.264 * sc, 0.016 * mx],
-          [ox + 0.110 * sc * mx, oy + legH + 0.218 * sc, -0.048 * sc], 0.022 * sc, 0.018 * sc, 8);
+          [ox + 0.084 * sc * mx, oy + legH + 0.244 * sc, -0.020 * sc], 0.024 * sc, 0.020 * sc, 8);
+  P.add(sph(0.020 * sc, 8, 6), M.armorDeep, { pos: [ox + 0.084 * sc * mx, oy + legH + 0.244 * sc, -0.020 * sc] });
+  P.strut(M.armorDeep, [ox + 0.084 * sc * mx, oy + legH + 0.244 * sc, -0.020 * sc],
+          [ox + 0.110 * sc * mx, oy + legH + 0.218 * sc, -0.048 * sc], 0.020 * sc, 0.016 * sc, 8);
   P.strut(M.armorDeep, [ox - 0.058 * sc * mx, oy + legH + 0.264 * sc, 0.016 * mx],
-          [ox - 0.096 * sc * mx, oy + legH + 0.222 * sc, -0.038 * sc], 0.022 * sc, 0.018 * sc, 8);
+          [ox - 0.078 * sc * mx, oy + legH + 0.246 * sc, -0.020 * sc], 0.024 * sc, 0.020 * sc, 8);
+  P.add(sph(0.020 * sc, 8, 6), M.armorDeep, { pos: [ox - 0.078 * sc * mx, oy + legH + 0.246 * sc, -0.020 * sc] });
+  P.strut(M.armorDeep, [ox - 0.078 * sc * mx, oy + legH + 0.246 * sc, -0.020 * sc],
+          [ox - 0.096 * sc * mx, oy + legH + 0.222 * sc, -0.038 * sc], 0.020 * sc, 0.016 * sc, 8);
+  // 手
   P.add(sph(0.024 * sc, 9, 7), M.skin, { pos: [ox + 0.112 * sc * mx, oy + legH + 0.214 * sc, -0.050 * sc] });
   P.add(sph(0.024 * sc, 9, 7), M.skin, { pos: [ox - 0.098 * sc * mx, oy + legH + 0.218 * sc, -0.040 * sc] });
 }
@@ -889,20 +1039,23 @@ function buildKing(mp, M, K, side) {
   Pt.add(box(0.320, 0.035, 0.280), M.clothDeep, { pos: [0, FOOT + 0.198, 0] });      // 座垫 0.1805→0.2155
   Pt.add(box(0.320, 0.009, 0.280), M.accentDim, { pos: [0, FOOT + 0.2155, 0] });     // 座垫沿
 
-  // —— t03 高背主体（高度主体：背板顶 ~0.86 → ×1.25 ≈ 1.08；V3「高背王座」成立）——
-  Pt.add(box(0.300, 0.600, 0.060), M.woodDeep,  { pos: [0, FOOT + 0.560, -0.100] }); // 背板 0.26→0.86
-  Pt.add(box(0.270, 0.540, 0.042), M.wood,      { pos: [0, FOOT + 0.550, -0.096] }); // 内衬分层（厚度感）
-  // 顶部夔龙纹横梁（几何化兽首对望，鎏金）
-  Pt.add(box(0.340, 0.070, 0.080), M.accent,    { pos: [0, FOOT + 0.880, -0.100] }); // 横梁 0.845→0.915
-  Pt.add(sph(0.030, 10, 8), M.accent,           { pos: [0.170, FOOT + 0.885, -0.100] }); // 左端球饰
-  Pt.add(sph(0.030, 10, 8), M.accent,           { pos: [-0.170, FOOT + 0.885, -0.100] }); // 右端球饰
-  // 中央竖脊（横梁垂至座垫，中轴）
-  Pt.add(box(0.030, 0.520, 0.030), M.accentDim, { pos: [0, FOOT + 0.600, -0.112] });
-  // 云雷纹饰板 ×2（分层细带模拟镂空）
-  Pt.add(box(0.060, 0.380, 0.020), M.accent,    { pos: [0.092, FOOT + 0.500, -0.110] });
-  Pt.add(box(0.060, 0.380, 0.020), M.accent,    { pos: [-0.092, FOOT + 0.500, -0.110] });
-  // 靠背中央蟠螭纹独立双面装饰件（用户拍板启用：+1 mesh/枚 K = +2 dc；DoubleSide 中性色）
-  Pt.add(box(0.110, 0.420, 0.012), K.panChi,    { pos: [0, FOOT + 0.505, -0.086] });
+  // —— t03 高背主体（QIN-P15-FIX3 反馈 #2 根因修复：
+  //   棋子"前方"= 面向对手方向（红方 -Z / 黑方 +Z）。
+  //   FIX2 错误地认为 body "后表面" 在 -Z，把背板 z 移到 -0.22 → 实际是把椅背
+  //   推到了将/帅正前方（-Z），从玩家视角看椅背挡在脸前。
+  //   本次按棋子 orient 约定把整组 z 取反：背板在 +Z = body 身后（己方一侧）——
+  //   从玩家视角（红方 -Z 看 +Z）看，椅背从将/帅身后露出，body 完整坐姿可见。
+  //   尺寸与高度不变，仅 z 符号翻转，保持 piece-check maxY≈1.15 / throne 顶≥0.95 ——）
+  Pt.add(box(0.300, 0.600, 0.060), M.woodDeep,  { pos: [0, FOOT + 0.560, +0.220] }); // 背板
+  Pt.add(box(0.270, 0.540, 0.042), M.wood,      { pos: [0, FOOT + 0.550, +0.216] }); // 内衬分层
+  // 顶部夔龙纹横梁
+  Pt.add(box(0.340, 0.070, 0.080), M.accent,    { pos: [0, FOOT + 0.880, +0.220] });
+  Pt.add(sph(0.030, 10, 8), M.accent,           { pos: [+0.170, FOOT + 0.885, +0.220] });
+  Pt.add(sph(0.030, 10, 8), M.accent,           { pos: [-0.170, FOOT + 0.885, +0.220] });
+  Pt.add(box(0.030, 0.520, 0.030), M.accentDim, { pos: [0, FOOT + 0.600, +0.232] });
+  Pt.add(box(0.060, 0.380, 0.020), M.accent,    { pos: [+0.092, FOOT + 0.500, +0.230] });
+  Pt.add(box(0.060, 0.380, 0.020), M.accent,    { pos: [-0.092, FOOT + 0.500, +0.230] });
+  Pt.add(box(0.110, 0.420, 0.012), K.panChi,    { pos: [0, FOOT + 0.505, +0.206] });
 
   // —— t04 扶手 + 龙首（fx=±0.16，与人物手臂对位；端头鎏金兽首）——
   for (let s = -1; s <= 1; s += 2) {
@@ -921,54 +1074,109 @@ function buildKing(mp, M, K, side) {
     Pt.add(box(0.030, 0.026, 0.040), M.accentDim, { pos: [fx, FOOT + 0.013, -0.050] });
   }
 
-  // —— t05 踏脚（新增，底 y≈0.05 不插穿棋盘面；K 双脚踩实）——
-  Pt.add(box(0.260, 0.040, 0.160), M.woodDeep, { pos: [0, FOOT + 0.070, 0.120] });    // 0.05→0.09
+  // —— t05 踏脚（QIN-P15-FIX3 反馈 #2+#4：原 pos z=+0.110 在 king 身后（屁股后），
+  //   腿反而伸向 +Z（背后）。本次 z 取反到 -0.110（king 身前），配合 body 双腿/靴
+  //   z 也取反到 -Z：双腿 → 膝盖 → 小腿 → 战靴踩在 -Z 踏脚顶，坐姿成立。
+  //   y/高度不变，靴底仍贴棋盘面 y=0（FOOT 减法保证）。——
+  Pt.add(box(0.260, 0.020, 0.140), M.woodDeep, { pos: [0, FOOT, -0.110] });
 
-  // —— t06 双层垂帘（暗红丝织；下摆收在 y=0 之上，避免插穿棋盘面）——
-  Pt.add(box(0.240, 0.070, 0.014), M.capeCloth, { pos: [0, FOOT + 0.120, 0.100] });   // 外层 0.085→0.155
-  Pt.add(box(0.210, 0.052, 0.010), M.capeCloth, { pos: [0, FOOT + 0.108, 0.088] });   // 内层分层
+  // —— t06 双层垂帘（QIN-P15-FIX3 反馈 #2：前垂帘应在 king 身前（-Z）遮挡座前；
+  //   原 pos z=+0.100/+0.088 在 king 屁股后。z 取反到 -Z，与椅背 z 镜像对称。）——
+  Pt.add(box(0.240, 0.070, 0.014), M.capeCloth, { pos: [0, FOOT + 0.120, -0.100] });   // 外层
+  Pt.add(box(0.210, 0.052, 0.010), M.capeCloth, { pos: [0, FOOT + 0.108, -0.088] });   // 内层分层
 
-  /* ======== 坐姿人物（body 组，路径 B：几何零改动，仅移除右臂交给 rArm）======== */
-  // 臀部+大腿（简化为坐姿椭球，不可见或仅露边缘）
-  Pb.add(sph(0.090, 10, 8), M.clothDeep, { pos: [0, BODY_BOT - 0.010, 0.020], scale: [1.1, 0.55, 0.85] });
-  // 躯干（坐姿挺直，比站立略矮）
-  Pb.add(cyl(0.110, 0.128, 0.200, 14), M.clothDeep, { pos: [0, BODY_BOT + 0.098, 0] });
-  // 鱼鳞甲（四层，坐姿时下两层被椅背遮挡部分仍保留）
-  Pb.add(cyl(0.130, 0.142, 0.020, 14), M.armor, { pos: [0, BODY_BOT + 0.038, 0] });
-  Pb.add(cyl(0.128, 0.140, 0.020, 14), M.armor, { pos: [0, BODY_BOT + 0.076, 0] });
-  Pb.add(cyl(0.124, 0.136, 0.020, 14), M.armor, { pos: [0, BODY_BOT + 0.114, 0] });
-  Pb.add(cyl(0.120, 0.132, 0.020, 14), M.armor, { pos: [0, BODY_BOT + 0.152, 0] });
-  // 甲裙腰带
-  Pb.add(tor(0.118, 0.018, 5, 16), M.accent, { pos: [0, BODY_BOT + 0.018, 0], rot: [Math.PI / 2, 0, 0] });
+  /* ======== 坐姿人物（body 组，QIN-P15-FIX3 反馈 #2+#4+#3+#B5 完整重建）========
+   *
+   * 坐标公式（QIN-P15-FIX3 勘误，FIX2/FIX3 初版误把 joint.y 加到 pos_y）：
+   *   vertex 终位置（idleGroup-local / piece-local）= (px, py - FOOT, pz)。
+   *   JOINT 不参与位置换算，只决定**旋转枢轴**（Group origin = joint idleGroup-local）。
+   *   故 pos_y = piece_local_y + FOOT。PY(yPiece) = yPiece + FOOT。
+   *   例：旧 FIX2 头 pos y = BODY_BOT+0.268 = 0.439 → 实际 piece y = 0.353 (差 FOOT)；
+   *   本次按正确公式重写，piece y 直接 = 设计值。
+   *
+   * 坐姿坐标（piece-local，红方面前 = -Z）：
+   *   SEAT_Y=0.151  座面上沿
+   *   BODY_BOT=0.171 臀部坐在椅面上
+   *   大腿（水平，向前 -Z）：hip(±0.045, 0.180, 0) → knee(±0.050, 0.180, -0.115)
+   *   小腿（垂直向下）：knee(±0.050, 0.180, -0.115) → ankle(±0.050, 0.098, -0.115)
+   *   脚（战靴踩在踏脚顶 piece-y=0.038）：center(±0.050, 0.054, -0.120)
+   *   腹部：piece y 0.22→0.33（r≈0.11）
+   *   胸部：piece y 0.34→0.48（r≈0.13，四层鱼鳞甲）
+   *   肩部（披膊）：piece(±0.142, 0.48, 0)
+   *   颈：piece y 0.50→0.54
+   *   头：center(0, 0.58, -0.01) r=0.06 → 顶 0.64
+   *   左手搭左扶手：shoulder(-0.14,0.48,0) → elbow(-0.16,0.36,0.04) → hand(-0.16,0.275,0.02)
+   *
+   * 解剖覆盖：手/小臂/大臂/脚/小腿/大腿/腹部/胸部/头部（含颈），全部加入 body 子组，
+   *   由 Parts.build() 的主导材质族合并入 body family mesh，dc 不增。
+   */
+  const PY = (yPiece) => yPiece + FOOT;  // body pos_y = piece_y + FOOT（piece = pos - FOOT）
 
-  // 披风（坐姿时从肩后垂落到椅背外；下摆收在 y=0 之上，避免插穿棋盘面）
+  // 臀部（坐姿扁球，落在座面 piece-y=0.171）
+  Pb.add(sph(0.088, 10, 8), M.clothDeep, { pos: [0, PY(0.171), 0.010], scale: [1.10, 0.55, 0.85] });
+
+  // —— 大腿（horizontal，水平前伸）——
+  Pb.strut(M.clothDeep, [+0.045, PY(0.180),  0.000], [+0.050, PY(0.180), -0.115], 0.052, 0.048, 10);
+  Pb.strut(M.clothDeep, [-0.045, PY(0.180),  0.000], [-0.050, PY(0.180), -0.115], 0.052, 0.048, 10);
+  Pb.add(sph(0.038, 10, 8), M.clothDeep, { pos: [+0.050, PY(0.180), -0.115] }); // 膝盖
+  Pb.add(sph(0.038, 10, 8), M.clothDeep, { pos: [-0.050, PY(0.180), -0.115] });
+
+  // —— 小腿（vertical，垂直向下）——
+  Pb.strut(M.clothDeep, [+0.050, PY(0.180), -0.115], [+0.050, PY(0.098), -0.115], 0.034, 0.030, 8);
+  Pb.strut(M.clothDeep, [-0.050, PY(0.180), -0.115], [-0.050, PY(0.098), -0.115], 0.034, 0.030, 8);
+
+  // —— 脚（战靴踩在踏脚顶 piece-y≈0.038，center y=0.054）——
+  Pb.add(box(0.060, 0.032, 0.095), M.bootSole, { pos: [+0.050, PY(0.054), -0.120] });
+  Pb.add(box(0.060, 0.032, 0.095), M.bootSole, { pos: [-0.050, PY(0.054), -0.120] });
+
+  // —— 腹部（anatomy 腹部，waist→midriff）——
+  Pb.add(cyl(0.110, 0.118, 0.120, 14), M.clothDeep, { pos: [0, PY(0.280), -0.005] });
+  // 腰带
+  Pb.add(tor(0.108, 0.014, 5, 16), M.accent, { pos: [0, PY(0.310), 0], rot: [Math.PI / 2, 0, 0] });
+
+  // —— 胸部（anatomy 胸部，躯干主体，四层鱼鳞甲微微后仰靠椅背）——
+  Pb.add(cyl(0.122, 0.132, 0.150, 14), M.armorDeep, { pos: [0, PY(0.415), +0.010] });
+  Pb.add(cyl(0.138, 0.146, 0.022, 14), M.armor,     { pos: [0, PY(0.348), +0.010] });
+  Pb.add(cyl(0.136, 0.144, 0.022, 14), M.armor,     { pos: [0, PY(0.392), +0.010] });
+  Pb.add(cyl(0.134, 0.142, 0.022, 14), M.armor,     { pos: [0, PY(0.436), +0.010] });
+  Pb.add(cyl(0.132, 0.140, 0.022, 14), M.armor,     { pos: [0, PY(0.480), +0.010] });
+
+  // 兽面披膊（shoulder 护肩）
+  Pb.add(dome(0.078, 12, 7, 0.62), M.armor, { pos: [+0.142, PY(0.480), 0] });
+  Pb.add(dome(0.078, 12, 7, 0.62), M.armor, { pos: [-0.142, PY(0.480), 0] });
+  Pb.add(box(0.062, 0.046, 0.044), M.accent, { pos: [+0.174, PY(0.480), -0.020] });
+  Pb.add(box(0.062, 0.046, 0.044), M.accent, { pos: [-0.174, PY(0.480), -0.020] });
+
+  // 披风（自肩后垂落到椅背外；下摆收在 piece-y≈0.05 之上，避免插穿棋盘面/踏脚）
+  // LatheGeometry profile y → piece-local y = profile_y - FOOT。设计 piece-y 直接给，
+  // 故 profile y = piece_y + FOOT。
   const capePts = [
-    new THREE.Vector2(0.100, BODY_BOT + 0.178),
-    new THREE.Vector2(0.140, BODY_BOT + 0.098),
-    new THREE.Vector2(0.178, BODY_BOT - 0.002),
-    new THREE.Vector2(0.208, BODY_BOT - 0.085),
-    new THREE.Vector2(0.222, BODY_BOT - 0.085)
+    new THREE.Vector2(0.130, PY(0.500)),   // piece y 0.500 肩部
+    new THREE.Vector2(0.168, PY(0.380)),   // piece y 0.380 背中部
+    new THREE.Vector2(0.198, PY(0.240)),   // piece y 0.240 腰下
+    new THREE.Vector2(0.222, PY(0.110)),   // piece y 0.110 膝部
+    new THREE.Vector2(0.232, PY(0.050))    // piece y 0.050 下摆
   ];
   Pb.add(
     new THREE.LatheGeometry(capePts, 18, -Math.PI * 0.52, Math.PI * 1.04),
     M.capeCloth, {}
   );
-  Pb.add(cyl(0.098, 0.120, 0.040, 14), M.cloth, { pos: [0, BODY_BOT + 0.188, 0] });
 
-  // 兽面披膊
-  Pb.add(dome(0.078, 12, 7, 0.62), M.armor, { pos: [0.142, BODY_BOT + 0.158, 0] });
-  Pb.add(dome(0.078, 12, 7, 0.62), M.armor, { pos: [-0.142, BODY_BOT + 0.158, 0] });
-  Pb.add(box(0.062, 0.046, 0.044), M.accent, { pos: [0.174, BODY_BOT + 0.158, -0.036] });
-  Pb.add(box(0.062, 0.046, 0.044), M.accent, { pos: [-0.174, BODY_BOT + 0.158, -0.036] });
+  // —— 左手（anatomy 大臂 + 小臂 + 手，搭左扶手）——
+  // 大臂：肩 → 肘（肩源 piece(-0.14, 0.48, 0) → 肘 piece(-0.16, 0.36, 0.04)）
+  Pb.strut(M.armorDeep, [-0.140, PY(0.480), 0.000], [-0.160, PY(0.360), +0.040], 0.034, 0.030, 8);
+  // 肘关节小球
+  Pb.add(sph(0.030, 10, 8), M.armorDeep, { pos: [-0.160, PY(0.360), +0.040] });
+  // 小臂：肘 → 手腕 piece(-0.16, 0.275, 0.02) on 左扶手横杆顶
+  Pb.strut(M.armorDeep, [-0.160, PY(0.360), +0.040], [-0.160, PY(0.275), +0.020], 0.030, 0.026, 8);
+  // 手（抚扶手，球径贴合扶手横杆顶）
+  Pb.add(sph(0.030, 10, 8), M.skin, { pos: [-0.160, PY(0.275), +0.020] });
 
-  // 左臂：左手搁扶手上（右手已拆给 rArm 子组，待机抚扶手）
-  Pb.strut(M.armorDeep, [-0.140, BODY_BOT + 0.146, 0], [-0.168, BODY_BOT + 0.118, 0.056], 0.042, 0.032, 8);
-  Pb.add(sph(0.032, 10, 8), M.skin, { pos: [-0.168, BODY_BOT + 0.114, 0.058] });
-
-  // 颈 + 头 + 髯
-  Pb.add(cyl(0.030, 0.032, 0.030, 8), M.skin, { pos: [0, BODY_BOT + 0.218, 0] });
-  Pb.add(sph(0.056, 12, 10), M.skin, { pos: [0, BODY_BOT + 0.268, -0.004] });
-  Pb.strut(K.hair, [0, BODY_BOT + 0.244, -0.048], [0, BODY_BOT + 0.204, -0.032], 0.030, 0.008, 8);
+  // —— 颈 + 头 + 髯（face 朝 -Z）——
+  Pb.add(cyl(0.030, 0.032, 0.040, 8), M.skin,     { pos: [0, PY(0.520), -0.005] });
+  Pb.add(sph(0.060, 12, 10), M.skin,                { pos: [0, PY(0.580), -0.010] });
+  // 髯（自颌下向前 -Z 垂）
+  Pb.strut(K.hair, [0, PY(0.560), -0.040], [0, PY(0.498), -0.020], 0.026, 0.008, 6);
 
   // 鹖冠（crown 组）+ 佩剑（sword 组）+ 帅旗（banner 组）+ 右臂（rArm 组）
   buildKingCrown(Pcrown, M, K, BODY_BOT);
@@ -978,26 +1186,40 @@ function buildKing(mp, M, K, side) {
 }
 
 /** 右臂 + 右手（rArm 组，契约 2.1）—— 待机「抚扶手摩挲」；战斗 windUp/strike/settle 不引用。
- *  绕右肩关节（SUBGROUP_JOINTS.K.rArm = [0.14, 0.317, 0]）自转，
- *  默认姿态烘焙为「右手搁扶手端头」，与 t04 右扶手（fx=+0.16, y≈0.19~0.21）对位。 */
+ *  绕右肩关节（SUBGROUP_JOINTS.K.rArm = [0.14, 0.46, 0] = 肩 piece-local）自转，
+ *  解剖：大臂（肩→肘）+ 小臂（肘→手腕）+ 手（抚扶手）。右手落在 t04 右扶手横杆顶。
+ *  坐标公式（FIX3 勘误）：vertex 终位置 = (px, py - FOOT, pz)。JOINT 仅决定旋转枢轴。
+ *  故 pos = (piece_x, piece_y + FOOT, piece_z)。 */
 function buildKingArm(P, M, K) {
-  // 上臂 + 前臂（从肩关节斜下至扶手端头）
-  P.strut(M.armorDeep, [0.140, 0.317, 0], [0.160, 0.195, -0.050], 0.030, 0.022, 8);
-  // 袖口（近肘，形成袖袍层次）
-  P.add(sph(0.036, 10, 8), M.clothDeep, { pos: [0.150, FOOT + 0.252, -0.022] });
-  // 右手（抚扶手）
-  P.add(sph(0.030, 10, 8), M.skin, { pos: [0.160, FOOT + 0.190, -0.050] });
+  // 大臂：肩 piece(0.14, 0.48, 0) → 肘 piece(0.16, 0.36, 0.04)
+  P.strut(M.armorDeep, [+0.140, FOOT + 0.480, 0.000], [+0.160, FOOT + 0.360, +0.040], 0.034, 0.030, 8);
+  // 肘关节小球
+  P.add(sph(0.030, 10, 8), M.armorDeep, { pos: [+0.160, FOOT + 0.360, +0.040] });
+  // 小臂：肘 → 手腕 piece(0.16, 0.275, 0.02) on 右扶手横杆顶
+  P.strut(M.armorDeep, [+0.160, FOOT + 0.360, +0.040], [+0.160, FOOT + 0.275, +0.020], 0.030, 0.026, 8);
+  // 手（抚扶手 — 皮肤球，r=0.030 贴合扶手横杆顶 world y≈0.34）
+  P.add(sph(0.030, 10, 8), M.skin, { pos: [+0.160, FOOT + 0.275, +0.020] });
 }
 
-/** 鹖冠（高冠 + 立缨双羽）—— 归入 crown 子组，DISSOLVE_POSE 冕落用。
- *  V6 高度专项：crown 锚点契约 0.964 不变，几何整体加高——冠身加长、
- *  立缨双羽抬高，使 K 顶高 0.68 → ~1.03（剪影仍为最高子，且不倒退）。 */
+/**
+ * 鹖冠（高冠 + 立缨双羽）—— 归入 crown 子组，DISSOLVE_POSE 冕落用。
+ * QIN-P15-FIX3（用户反馈 #3 比例协调 + crown/body ≥0.9 探头）：
+ *   crown plume 顶端 piece-y 0.565（world 0.718）反而低于 head top piece-y 0.64
+ *   （world 0.80），crown/body=0.90 卡下限且帽子埋在头里看不见。本次微调：
+ *   冠箍/冠身/冠顶珠整体上移到头顶 piece-y≈0.60~0.66，plume 末端到 piece-y 0.70
+ *   （world 0.875），略高于 head top 0.80，crown/body≈1.23——装饰性顶饰，
+ *   仍远低于 throne 背板顶 0.946 本地 / 1.18 世界（背板为剪影主体）。
+ */
 function buildKingCrown(P, M, K, BODY_BOT) {
-  P.add(cyl(0.064, 0.068, 0.024, 14), M.accent, { pos: [0, BODY_BOT + 0.312, -0.002] });
-  P.add(cyl(0.026, 0.060, 0.300, 14), M.clothDeep, { pos: [0, BODY_BOT + 0.450, -0.002] });
-  P.add(sph(0.024, 10, 8), M.accent, { pos: [0, BODY_BOT + 0.620, -0.002] });
-  P.strut(M.plume, [0.030, BODY_BOT + 0.600, 0.016], [0.075, BODY_BOT + 0.945, 0.062], 0.006, 0.018, 6);
-  P.strut(M.plume, [-0.030, BODY_BOT + 0.600, 0.016], [-0.075, BODY_BOT + 0.945, 0.062], 0.006, 0.018, 6);
+  // 冠箍（鎏金窄环，坐于头顶 piece-y≈0.60）
+  P.add(cyl(0.066, 0.070, 0.024, 14), M.accent, { pos: [0, BODY_BOT + 0.514, -0.002] });
+  // 冠身（h=0.060，piece-y 0.60→0.66）
+  P.add(cyl(0.060, 0.064, 0.060, 14), M.clothDeep, { pos: [0, BODY_BOT + 0.544, -0.002] });
+  // 冠顶圆珠（鎏金小珠封顶，piece-y≈0.66）
+  P.add(sph(0.018, 10, 8), M.accent, { pos: [0, BODY_BOT + 0.574, -0.002] });
+  // 立缨双羽（plume 顶端 piece-y≈0.70 / world 0.875，略高于 head top 0.80）
+  P.strut(M.plume, [0.026, BODY_BOT + 0.600, +0.012], [0.066, BODY_BOT + 0.700, +0.056], 0.005, 0.014, 6);
+  P.strut(M.plume, [-0.026, BODY_BOT + 0.600, +0.012], [-0.066, BODY_BOT + 0.700, +0.056], 0.005, 0.014, 6);
 }
 
 /** 佩剑（右侧按剑）—— 归入 sword 子组，windUp/strike/settle 挥斩用。
@@ -1053,7 +1275,7 @@ const SUBGROUP_JOINTS = {
   B: { robe: [0, 0.368, 0], arms: [0, 0.328, -0.10] },
   R: { horses: [0, 0.168, -0.30], body: [0, 0.288, 0.02], driver: [0.05, 0.378, 0.40], spearman: [-0.05, 0.378, 0.46] },
   C: { trebuchet: [0, 0.308, 0], cart: [0, 0.114, 0], soldierL: [-0.25, 0.248, 0.09], soldierR: [0.25, 0.248, 0.09] },
-  K: { body: [0, 0.378, 0], throne: [0, 0.028, 0], crown: [0, 0.964, 0], sword: [0.14, 0.434, -0.02], banner: [0, 0.394, 0], rArm: [0.14, 0.317, 0] }
+  K: { body: [0, 0.378, 0], throne: [0, 0.028, 0], crown: [0, 0.964, 0], sword: [0.14, 0.434, -0.02], banner: [0, 0.394, 0], rArm: [0.14, 0.46, 0] }
 };
 
 const _templates = new Map();

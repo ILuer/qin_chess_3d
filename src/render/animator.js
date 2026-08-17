@@ -471,10 +471,14 @@ export class Animator {
       idleGroup.position.y = 0;
       idleGroup.rotation.z = 0;
       if (cfg && cfg.zeroChannels && sg) {
+        // 解析 "sub.prop.path"：当前数据全部为 rotation.{x|y|z}。
+        // Parts[0]=子组名，Parts[1]=父属性（如 'rotation'），Parts[2]=子属性（如 'z'）。
+        // 写入 sg[sub].prop.path = 0，绝不写 sg[sub]['rotation.z'] 这种带点的伪键。
         for (const ch of cfg.zeroChannels) {
-          const dot = ch.indexOf('.');
-          const sub = sg[ch.slice(0, dot)];
-          if (sub) sub[ch.slice(dot + 1)] = 0;
+          const parts = ch.split('.');
+          const sub = sg[parts[0]];
+          if (!sub) continue;
+          if (parts.length >= 3 && sub[parts[1]]) sub[parts[1]][parts[2]] = 0;
         }
       }
       return;
@@ -490,12 +494,15 @@ export class Animator {
 
     if (!sg || !cfg) return;
     // L1 子组微动层（个性化主体；无每帧对象分配）
+    // 数据约定：w[1] 为 'x'|'y'|'z' 单字符轴名，对应 sub.rotation[axis]。
+    // ★ 原 bug：sub[w[1]] 写入伪属性（如 sub.z），THREE.Object3D 无 .x/.y/.z 直接访问器，
+    //   视觉上完全无效——所有兵种只剩 L0 呼吸层。已修复：sub.rotation[w[1]]。
     if (cfg.l1) {
       const l1Amp = amp;
       for (const w of cfg.l1) {
         const sub = sg[w[0]];
         if (!sub) continue;
-        sub[w[1]] = w[2] * l1Amp * Math.sin(t * 2 * Math.PI * w[3] + ph + w[4]);
+        sub.rotation[w[1]] = w[2] * l1Amp * Math.sin(t * 2 * Math.PI * w[3] + ph + w[4]);
       }
     }
     // L2 偶发脉冲层（确定性门控；选中时脉冲幅度 ×min(amp,1.5) 防超 0.11）
@@ -509,7 +516,9 @@ export class Animator {
         if (gate === 'phMinus' && Math.sin(ph) > 0) continue;
         const u = t / p[3] + ph / (2 * Math.PI);
         const pulse = Math.pow(Math.sin(Math.PI * (u - Math.floor(u))), 2);
-        sub[p[1]] += p[2] * l2Amp * pulse;
+        // 脉冲以「加性」方式叠加在子组 rotation 上；与 L1 同轴则叠加，否则赋值覆盖。
+        const ax = p[1];
+        sub.rotation[ax] += p[2] * l2Amp * pulse;
       }
     }
   }

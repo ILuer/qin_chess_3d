@@ -7,6 +7,11 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { PALETTE, RED, BLACK, TIMING } from '../core/constants.js';
+import { FIXED_VIEW_FIT, computeFixedViewFitRadius } from './followCamera.js';
+
+// 窄屏 fixed 视图自适应（QIN-UI-FIX-MOBILE-CAM）：
+// 方案与常量定义在 followCamera.js（相机 fit 逻辑同源、Node 可测），此处再导出以保持 API。
+export { FIXED_VIEW_FIT, computeFixedViewFitRadius };
 
 /** 视角预设（球坐标，相对 controls.target） */
 export const VIEW_PRESETS = {
@@ -109,12 +114,15 @@ export class SceneSystem {
     controls.minPolarAngle = MIN_POLAR;     // 防止翻到棋盘上方奇怪角度
     controls.maxPolarAngle = MAX_POLAR;     // 防止转到棋盘下面
     controls.minDistance = 6.5;
-    controls.maxDistance = 26;
+    controls.maxDistance = FIXED_VIEW_FIT.maxR;   // 30：仅窄屏 fitted 视图需要（桌面默认视野远小于此）
     controls.enablePan = false;             // 禁用平移，避免棋盘跑出视野
     controls.target.set(0, 0.2, 0);
     this.controls = controls;
 
-    this._applyPreset(VIEW_PRESETS.red);
+    // —— 窄屏 fixed 视图自适应开关（main.js 在跟随模式激活时置 false，避免与 fitRadius 打架）——
+    this.viewAutoFit = true;
+
+    this._applyFinalPreset(VIEW_PRESETS.red);
     controls.update();
 
     // —— 灯光 ——
@@ -252,12 +260,56 @@ export class SceneSystem {
     return { radius: s.radius, phi: s.phi, theta: s.theta };
   }
 
-  /** 立即应用一个球坐标预设 */
+  /** 立即应用一个球坐标预设（raw：tween 中间帧用，不放大距离） */
   _applyPreset(p) {
     const s = new THREE.Spherical(p.radius, p.phi, p.theta);
     const v = new THREE.Vector3().setFromSpherical(s).add(this.controls.target);
     this.camera.position.copy(v);
     this.camera.lookAt(this.controls.target);
+  }
+
+  /**
+   * 应用一个「最终」球坐标预设（含窄屏全棋盘入框适配）。
+   * @param {{radius:number, phi:number, theta:number}} p
+   */
+  _applyFinalPreset(p) {
+    const dir = new THREE.Vector3().setFromSpherical(new THREE.Spherical(1, p.phi, p.theta)).normalize();
+    const radius = this._fittedRadius(p.radius, dir);
+    this._applyPreset({ ...p, radius });
+  }
+
+  /**
+   * 计算窄屏 fitted 半径（方向优先显式传入；缺省用当前相机→target 方向）。
+   * 桌面宽屏（aspect ≥ 阈值）返回 baseRadius 本身 → 零回归。
+   */
+  _fittedRadius(baseRadius, dir) {
+    if (!dir) {
+      dir = new THREE.Vector3().subVectors(this.camera.position, this.controls.target);
+      if (dir.lengthSq() < 1e-9) dir.set(0, 1, 0);
+      dir.normalize();
+    }
+    return computeFixedViewFitRadius({
+      fov: this.camera.fov,
+      aspect: this.camera.aspect,
+      dir,
+      target: this.controls.target,
+      baseRadius
+    });
+  }
+
+  /**
+   * 当前球坐标中，与某个视角预设最接近时返回其基础半径（未 fitted），否则回退 fallback。
+   * 用于 resize 后判断「该恢复到哪个预设距离」（用户自由旋转/缩放的视角则保持其缩放）。
+   */
+  _baseRadiusForView(phi, theta, fallback) {
+    let best = null, bestD = Infinity;
+    for (const p of Object.values(VIEW_PRESETS)) {
+      const dPhi = Math.abs(phi - p.phi);
+      const dTheta = Math.min(Math.abs(theta - p.theta), Math.PI * 2 - Math.abs(theta - p.theta));
+      const d = dPhi + dTheta;
+      if (d < bestD) { bestD = d; best = p; }
+    }
+    return (best && bestD < 0.2) ? best.radius : fallback;
   }
 
   /**
@@ -267,7 +319,11 @@ export class SceneSystem {
    */
   tweenToView(to, duration = TIMING.viewTween) {
     const from = this._currentSpherical();
-    this._viewTween = { from, to: { ...to }, t: 0, dur: Math.max(0.001, duration) };
+    // 目标半径做窄屏 fitted（方向取目标预设方向）；baseRadius 记住未 fitted 值，
+    // 供 resize 中途切换视口时正确回退到桌面预设距离
+    const dir = new THREE.Vector3().setFromSpherical(new THREE.Spherical(1, to.phi, to.theta)).normalize();
+    const radius = this._fittedRadius(to.radius, dir);
+    this._viewTween = { from, to: { ...to, radius }, baseRadius: to.radius, t: 0, dur: Math.max(0.001, duration) };
     this.controls.enabled = false;
   }
 
@@ -275,7 +331,7 @@ export class SceneSystem {
   resetView(animate = true) {
     this.isTopView = false;
     const p = this.viewSide === BLACK ? VIEW_PRESETS.black : VIEW_PRESETS.red;
-    if (animate) this.tweenToView(p); else { this._applyPreset(p); this.controls.update(); }
+    if (animate) this.tweenToView(p); else { this._applyFinalPreset(p); this.controls.update(); }
     this.currentView = this.viewSide === BLACK ? 'black' : 'red';
   }
 
@@ -516,6 +572,30 @@ export class SceneSystem {
     this.renderer.setSize(w, h, false);
     this.renderer.domElement.style.width = '100%';
     this.renderer.domElement.style.height = '100%';
+
+    // 窄屏 fixed 视图：视口变化后重新保证全棋盘入框（方向不变、按需拉近/拉远）。
+    // 跟随模式（main.js 置 viewAutoFit=false）由 FollowCamera 接管，不在此干预。
+    if (!this.viewAutoFit) return;
+    if (this._viewTween) {
+      // 补间进行中：只更新目标半径（方向沿用目标预设方向），当前帧照常插值
+      const to = this._viewTween.to;
+      const dir = new THREE.Vector3().setFromSpherical(new THREE.Spherical(1, to.phi, to.theta)).normalize();
+      to.radius = this._fittedRadius(this._viewTween.baseRadius, dir);
+    } else {
+      const cur = this._currentSpherical();
+      const dir = new THREE.Vector3().subVectors(this.camera.position, this.controls.target);
+      if (dir.lengthSq() < 1e-9) dir.set(0, 1, 0);
+      dir.normalize();
+      // 基础距离：当前方向若匹配某个预设则用其预设距离（桌面恢复默认视野），
+      // 否则保留用户当前缩放（仅做「放不下就拉远」的兜底）。
+      const base = this._baseRadiusForView(cur.phi, cur.theta, cur.radius);
+      const fitted = this._fittedRadius(base, dir);
+      if (Math.abs(fitted - cur.radius) > 0.01) {
+        this.camera.position.copy(this.controls.target).addScaledVector(dir, fitted);
+        this.camera.lookAt(this.controls.target);
+        this.controls.update();
+      }
+    }
   }
 
   dispose() {
