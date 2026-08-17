@@ -37,6 +37,14 @@ export const SHORTCUTS = [
   ['Esc', '取消当前选择']
 ];
 
+/** L2：复盘模式快捷键（design/gameplay/review-export-design.md §5.6，追加到帮助面板） */
+export const REVIEW_SHORTCUTS = [
+  ['← / →', '复盘：上一 / 下一步'],
+  ['Shift+← / Shift+→ 或 Home / End', '复盘：跳到开始 / 结尾'],
+  ['Space', '复盘：自动播放 开 / 关'],
+  ['Esc', '复盘：退出复盘']
+];
+
 export class HUD {
   constructor(opts = {}) {
     this.opts = opts;
@@ -60,6 +68,29 @@ export class HUD {
     this.moveLogList = $('.move-log-list');
     this.moveLogEmpty = $('.move-log-empty');
     this.moveLogCollapse = $('.move-log-collapse');   // UI-FIX-123：可折叠（移动端不遮棋盘）
+
+    // —— L2 复盘 / 导出 ——
+    this.btnReview = $('#btn-review');
+    this.btnExport = $('#btn-export');
+    this.exportPanel = $('#export-panel');
+    this.btnExportClose = $('#btn-export-close');
+    this.tabUcci = $('#tab-ucci');
+    this.tabChinese = $('#tab-chinese');
+    this.exportUcciPre = $('#export-ucci');
+    this.exportChinesePre = $('#export-chinese');
+    this.btnCopy = $('#btn-copy');
+    this.btnDownload = $('#btn-download');
+    this.reviewBar = $('#review-bar');
+    this.reviewCursor = $('#rv-cursor');
+    this.rvFirst = $('#rv-first');
+    this.rvPrev = $('#rv-prev');
+    this.rvNext = $('#rv-next');
+    this.rvLast = $('#rv-last');
+    this.rvPlay = $('#rv-play');
+    this.rvInterval = $('#rv-interval');
+    this.rvExit = $('#rv-exit');
+    this.btnReviewGameOver = $('#btn-review-gameover');
+    this._exportTab = 'ucci';
 
     // —— 吃子陈列 ——
     this.capturedRed = $('.captured-red');
@@ -125,6 +156,64 @@ export class HUD {
         if (Number.isNaN(idx) || idx < 0) return;
         if (this.opts.onPreviewMove) this.opts.onPreviewMove(idx);
       });
+      // L2：双击着法 → 进入复盘到该步（或复盘内跳转）
+      this.moveLogList.addEventListener('dblclick', ev => {
+        const cell = ev.target.closest('[data-move-index]');
+        if (!cell) return;
+        const idx = Number(cell.dataset.moveIndex);
+        if (Number.isNaN(idx) || idx < 0) return;
+        if (this.opts.onMoveLogDblClick) this.opts.onMoveLogDblClick(idx);
+      });
+    }
+
+    // —— L2：棋谱导出 ——
+    if (this.btnExport) {
+      this.btnExport.addEventListener('click', () => { if (this.opts.onExport) this.opts.onExport(); });
+    }
+    if (this.btnExportClose) {
+      this.btnExportClose.addEventListener('click', () => this.closeExportPanel());
+    }
+    if (this.tabUcci) {
+      this.tabUcci.addEventListener('click', () => this.setExportTab('ucci'));
+    }
+    if (this.tabChinese) {
+      this.tabChinese.addEventListener('click', () => this.setExportTab('chinese'));
+    }
+    if (this.btnCopy) {
+      this.btnCopy.addEventListener('click', () => {
+        if (this._exportPanelOpen()) this.copyText(this.getExportText());
+      });
+    }
+    if (this.btnDownload) {
+      this.btnDownload.addEventListener('click', () => {
+        if (this._exportPanelOpen()) this.downloadText(this.getExportText(), this._exportFilename());
+      });
+    }
+
+    // —— L2：复盘控制条 ——
+    const reviewBind = (el, action) => {
+      if (!el) return;
+      el.addEventListener('click', () => { if (this.opts[action]) this.opts[action](); });
+    };
+    reviewBind(this.rvFirst, 'onReviewFirst');
+    reviewBind(this.rvPrev, 'onReviewPrev');
+    reviewBind(this.rvNext, 'onReviewNext');
+    reviewBind(this.rvLast, 'onReviewLast');
+    reviewBind(this.rvPlay, 'onReviewTogglePlay');
+    reviewBind(this.rvExit, 'onReviewExit');
+    if (this.rvInterval) {
+      this.rvInterval.addEventListener('change', ev => {
+        if (this.opts.onReviewInterval) this.opts.onReviewInterval(Number(ev.target.value));
+      });
+    }
+    if (this.btnReviewGameOver) {
+      this.btnReviewGameOver.addEventListener('click', () => {
+        if (this.opts.onReviewEnter) this.opts.onReviewEnter();
+      });
+    }
+    // L2：move-log 头部「复盘」按钮
+    if (this.btnReview) {
+      this.btnReview.addEventListener('click', () => { if (this.opts.onReviewEnter) this.opts.onReviewEnter(); });
     }
   }
 
@@ -237,6 +326,10 @@ export class HUD {
   renderMoveLog(rows, activeIndex = -1) {
     if (!this.moveLogList) return;
     if (this.moveLogEmpty) this.moveLogEmpty.style.display = rows.length ? 'none' : '';
+    // L2：有历史才可复盘 / 导出
+    const hasMoves = rows.length > 0;
+    if (this.btnExport) this.btnExport.disabled = !hasMoves;
+    if (this.btnReview) this.btnReview.disabled = !hasMoves;
     const html = rows.map(r => {
       const redActive = r.redIndex === activeIndex ? ' is-active' : '';
       const blackActive = r.blackIndex === activeIndex ? ' is-active' : '';
@@ -372,6 +465,10 @@ export class HUD {
     const keys = SHORTCUTS.map(([k, d]) =>
       `<div class="help-key-row"><kbd>${escapeHtml(k)}</kbd><span>${escapeHtml(d)}</span></div>`
     ).join('');
+    // L2：复盘模式快捷键（design §5.6）
+    const reviewKeys = REVIEW_SHORTCUTS.map(([k, d]) =>
+      `<div class="help-key-row"><kbd>${escapeHtml(k)}</kbd><span>${escapeHtml(d)}</span></div>`
+    ).join('');
     this.helpContent.innerHTML = `
       <section class="help-section">
         <h3 class="help-title">走子规则速查</h3>
@@ -388,6 +485,12 @@ export class HUD {
       <section class="help-section">
         <h3 class="help-title">快捷键</h3>
         ${keys}
+      </section>
+      <section class="help-section">
+        <h3 class="help-title">复盘模式</h3>
+        ${reviewKeys}
+        <div class="help-rule"><span class="help-piece">入口</span><span class="help-desc">move-log「复盘」按钮，或双击某步着法；结束面板「复盘本局」</span></div>
+        <div class="help-rule"><span class="help-piece">说明</span><span class="help-desc">复盘期间输入与 AI 冻结，Esc 退出后原样恢复</span></div>
       </section>
       <section class="help-section">
         <h3 class="help-title">操作方式</h3>
@@ -423,6 +526,142 @@ export class HUD {
     this.moveLog.classList.toggle('is-collapsed', collapsed);
     if (this.moveLogCollapse) this.moveLogCollapse.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
     return collapsed;
+  }
+
+  // -------------------------------------------------------------------------
+  // L2 · 棋谱导出面板（design §4：双 Tab + 复制/下载）
+  // -------------------------------------------------------------------------
+
+  /** 切换导出面板 Tab（ucci / chinese），并同步内容显隐 */
+  setExportTab(tab) {
+    this._exportTab = tab === 'chinese' ? 'chinese' : 'ucci';
+    const isUcci = this._exportTab === 'ucci';
+    if (this.tabUcci) {
+      this.tabUcci.classList.toggle('is-active', isUcci);
+      this.tabUcci.setAttribute('aria-selected', isUcci ? 'true' : 'false');
+    }
+    if (this.tabChinese) {
+      this.tabChinese.classList.toggle('is-active', !isUcci);
+      this.tabChinese.setAttribute('aria-selected', !isUcci ? 'true' : 'false');
+    }
+    if (this.exportUcciPre) this.exportUcciPre.classList.toggle('is-active', isUcci);
+    if (this.exportChinesePre) this.exportChinesePre.classList.toggle('is-active', !isUcci);
+  }
+
+  /**
+   * 打开导出面板并填充内容（导出始终为完整对局；复盘游标不影响导出内容）。
+   * @param {{ucci:string, chinese:string}} data
+   */
+  openExportPanel({ ucci, chinese }) {
+    if (!this.exportPanel) return false;
+    if (this.exportUcciPre) this.exportUcciPre.textContent = ucci || '';
+    if (this.exportChinesePre) this.exportChinesePre.textContent = chinese || '';
+    this.exportPanel.classList.add('is-visible');
+    this.exportPanel.setAttribute('aria-hidden', 'false');
+    this.setExportTab('ucci');
+    return true;
+  }
+
+  closeExportPanel() {
+    if (!this.exportPanel) return;
+    this.exportPanel.classList.remove('is-visible');
+    this.exportPanel.setAttribute('aria-hidden', 'true');
+  }
+
+  _exportPanelOpen() {
+    return !!(this.exportPanel && this.exportPanel.classList.contains('is-visible'));
+  }
+
+  /** 当前 Tab 的棋谱文本 */
+  getExportText() {
+    const pre = this._exportTab === 'ucci' ? this.exportUcciPre : this.exportChinesePre;
+    return pre ? pre.textContent : '';
+  }
+
+  /** 下载文件名：秦风棋谱_YYYYMMDD_HHmmss_格式.txt */
+  _exportFilename() {
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+    return `秦风棋谱_${stamp}_${this._exportTab === 'ucci' ? 'UCCI' : '中文'}.txt`;
+  }
+
+  /**
+   * 复制文本到剪贴板（优先 Clipboard API，失败降级 execCommand）。
+   * @returns {Promise<boolean>}
+   */
+  async copyText(text) {
+    if (!text) return false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        this.showToast('已复制到剪贴板', 'success', 1.8);
+        return true;
+      }
+    } catch (e) { /* 权限被拒 → 降级 */ }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const done = document.execCommand('copy');
+      document.body.removeChild(ta);
+      if (done) { this.showToast('已复制到剪贴板', 'success', 1.8); return true; }
+    } catch (e2) { /* 继续降级 */ }
+    this.showToast('复制失败，请手动选择复制', 'warn', 2.4);
+    return false;
+  }
+
+  /** 下载棋谱为 UTF-8 .txt（Blob + <a download>） */
+  downloadText(text, filename) {
+    if (!text) return false;
+    try {
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      this.showToast('已下载棋谱', 'success', 1.8);
+      return true;
+    } catch (e) {
+      this.showToast('下载失败，请手动复制', 'warn', 2.4);
+      return false;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // L2 · 复盘控制条（design §5：游标/自动播放/退出）
+  // -------------------------------------------------------------------------
+
+  /**
+   * 同步复盘条状态（显隐 / 游标文本 / 按钮可用态 / 播放态）。
+   * @param {{active:boolean, cursor:number, len:number, playing:boolean}} st
+   */
+  setReviewState({ active, cursor = 0, len = 0, playing = false }) {
+    if (!this.reviewBar) return;
+    this.reviewBar.classList.toggle('is-visible', !!active);
+    this.reviewBar.setAttribute('aria-hidden', active ? 'false' : 'true');
+    if (this.reviewCursor) this.reviewCursor.textContent = `${cursor}/${len}`;
+    const atStart = cursor <= 0;
+    const atEnd = cursor >= len;
+    if (this.rvFirst) this.rvFirst.disabled = atStart;
+    if (this.rvPrev) this.rvPrev.disabled = atStart;
+    if (this.rvNext) this.rvNext.disabled = atEnd;
+    if (this.rvLast) this.rvLast.disabled = atEnd;
+    if (this.rvPlay) {
+      const canPlay = len > 0 && !atEnd;
+      this.rvPlay.disabled = !canPlay && !playing;
+      this.rvPlay.classList.toggle('is-on', playing);
+      const label = this.rvPlay.querySelector('.btn-label') || this.rvPlay;
+      label.textContent = playing ? '暂停' : '播放';
+    }
   }
 
   // -------------------------------------------------------------------------

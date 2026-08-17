@@ -12,9 +12,10 @@
 
 import * as THREE from 'three';
 import {
-  RED, BLACK, PT, FILES, RANKS, BOARD_HALF_W, PALETTE, TIMING, toWorld
+  RED, BLACK, PT, FILES, RANKS, BOARD_HALF_W, PALETTE, TIMING, toWorld, INITIAL_FEN
 } from './core/constants.js';
 import { GameState } from './core/gameState.js';
+import { ReviewController } from './core/reviewController.js';   // L2：复盘状态机（纯逻辑）
 import { loadSave, writeSave, clearSave, buildSave } from './core/save.js';   // M4 对局存档/恢复
 import { createSceneSystem } from './render/scene.js';
 import { createEffects } from './render/effects.js';
@@ -59,12 +60,22 @@ let hoverMesh = null;     // 当前悬停浮起的棋子
 let started = false;
 let combatDirector = null; // CombatDirector 战场演出总调度
 
+// L2 · REVIEW 复盘状态（design/gameplay/review-export-design.md §5）
+let reviewCtrl = null;        // ReviewController（纯逻辑状态机，boot 中创建）
+let reviewGs = null;          // scratch 局面：从 gs.startFen 重放 history[0..cursor)
+let renderGs = null;          // 显示局面：PLAY=gs，REVIEW=reviewGs（rebuildPieces/updateCheckRing 读它）
+let reviewActive = false;     // 镜像 reviewCtrl.active（输入/AI 冻结快速判断）
+let reviewTimer = null;       // 自动播放定时器句柄
+let reviewHidGameOver = false;// 进入复盘时是否隐藏了结束面板（退出时恢复）
+let lastGameOverInfo = null;  // 结束面板内容缓存（复盘退出后重新展示，避免重复音效/埋点）
+
 // ---------------------------------------------------------------------------
 // 棋子网格管理
 // ---------------------------------------------------------------------------
 
-/** 依据当前逻辑棋盘重建全部棋子网格（悔棋 / 重开时使用） */
+/** 依据当前显示局面（renderGs）重建全部棋子网格（悔棋 / 重开 / 复盘游标变化时使用） */
 function rebuildPieces() {
+  const src = renderGs || gs;
   if (sceneSys) {
     for (let f = 0; f < FILES; f++) {
       if (!pieceMeshes[f]) continue;
@@ -80,7 +91,7 @@ function rebuildPieces() {
   pieceMeshes = [];
   for (let f = 0; f < FILES; f++) pieceMeshes[f] = new Array(RANKS).fill(null);
 
-  gs.board.forEach((p, f, r) => {
+  src.board.forEach((p, f, r) => {
     const mesh = createPieceMesh(p.type, p.side);
     const w = toWorld(f, r);
     mesh.position.set(w.x, 0, w.z);
@@ -102,6 +113,7 @@ function rebuildPieces() {
  * 先改逻辑模型（gs.move），再委托 CombatDirector 驱动视觉演出。
  */
 function applyMove(from, to) {
+  if (reviewActive) return;   // L2：复盘期间冻结一切落子（防幽灵落子兜底）
   if (gameOver) return;
   if ((combatDirector && combatDirector.isBusy) || aiBusy) return;   // 演出 / AI 思考中不接受新走子
 
@@ -238,6 +250,7 @@ const IDLE_SOUND_INTERVAL = 1.1; // 触发周期（秒）
 let idleSoundTimer = 0;          // 倒计时
 
 function pumpAI(dt) {
+  if (reviewActive) return;   // L2：复盘期间 AI 回合泵停止
   if (!gs || !aiEnabled || gameOver || aiBusy) return;
   if (gs.sideToMove !== aiSide) return;
   if (animator.isBusy) { aiCooldown = AI_THINK_DELAY; return; }  // 动画未落定，重置节奏
@@ -255,6 +268,7 @@ async function requestAI() {
   const fen = gs.board.toFen();
   try {
     const res = await aiEngine.think(fen, aiSide);
+    if (reviewActive) return;   // L2：思考返回时若已进入复盘，丢弃（防幽灵落子）
     if (gameOver || gs.sideToMove !== aiSide) return;
     if (!res || !res.from || !res.to) {
       // AI 无着可走。正常情况下 gs 早已判定将死/困毙并结束对局，
@@ -280,6 +294,7 @@ async function requestAI() {
 // ---------------------------------------------------------------------------
 
 function doUndo() {
+  exitReviewIfActive();   // L2：E9/E10 —— 破坏性操作优先退出复盘再执行
   if (gameOver || animator.isBusy || aiBusy) return;
   if (!gs.canUndo()) return;
 
@@ -305,6 +320,7 @@ function doUndo() {
 }
 
 function doReset() {
+  exitReviewIfActive();   // L2：E9/E10 —— 破坏性操作优先退出复盘再执行
   if (animator.isBusy) return;          // 动画中忽略；AI 思考中也会先 cancel
   aiEngine.cancel();
   aiBusy = false;
@@ -330,6 +346,7 @@ function doReset() {
 }
 
 function doResign() {
+  exitReviewIfActive();   // L2：E9/E10 —— 破坏性操作优先退出复盘再执行
   if (gameOver) return;
   const side = aiEnabled ? humanSide : gs.sideToMove;
   gs.resign(side);
@@ -400,25 +417,138 @@ function followFitRadiusFor(sel) {
   });
 }
 
-/** 走子记录点击：高亮该步并标记其起终点（轻量预览） */
+/** 走子记录单击：PLAY=轻量预览（高亮该步起终点）；REVIEW=游标跳到该步之后 */
 function previewMove(idx) {
   if (!gs) return;
+  if (reviewActive) { reviewCtrl.seek(idx + 1); return; }
   hud.renderMoveLog(gs.getMoveLog(), idx);
   const rec = gs.history[idx];
   if (rec) effects.showLastMoveMarker(rec.from, rec.to);
 }
 
 // ---------------------------------------------------------------------------
+// L2 · REVIEW 复盘 / 棋谱导出（design/gameplay/review-export-design.md §4-§5）
+// ---------------------------------------------------------------------------
+
+/**
+ * REVIEW 渲染钩子：游标/子状态每次变化都会触发。
+ * 重建 scratch 局面（fromFen(startFen) + 重放 history[0..cursor)）、
+ * 切换显示局面 renderGs、重建棋子网格、同步 HUD。
+ */
+function renderReview(cursor, len, sub, active) {
+  reviewActive = active;
+  if (active) {
+    reviewGs = GameState.fromFen(gs.startFen || INITIAL_FEN);
+    for (let i = 0; i < cursor && i < gs.history.length; i++) {
+      const rec = gs.history[i];
+      reviewGs.move(rec.from, rec.to, { force: true });
+    }
+    renderGs = reviewGs;
+  } else {
+    renderGs = gs;
+  }
+
+  rebuildPieces();
+  if (effects) {
+    effects.clearAllHints();
+    if (active && cursor > 0) {
+      const rec = gs.history[cursor - 1];
+      effects.showLastMoveMarker(rec.from, rec.to);
+    }
+  }
+  if (hud) {
+    if (active) {
+      hud.renderMoveLog(gs.getMoveLog(), cursor - 1);
+      hud.setTurn(reviewGs.sideToMove, { moveNumber: reviewGs.moveNumber });
+      hud.renderCaptured(reviewGs.captured);
+    } else {
+      hud.syncAll(gs, {});   // 退出复盘：完整恢复 live HUD
+    }
+    hud.setReviewState({ active, cursor, len, playing: sub === 'playing' });
+  }
+  updateCheckRing();
+}
+
+/** E1：进入复盘（move-log「复盘」按钮 / 着法双击 / 结束面板「复盘本局」） */
+function enterReview(entryIndex) {
+  if (reviewActive) return;
+  if (!reviewCtrl || !gs) return;
+  if (gs.history.length === 0) {
+    hud.showToast('尚无着法可复盘', 'warn', 2.0);
+    return;
+  }
+  if (aiBusy || (animator && animator.isBusy)) {
+    hud.showToast('当前动画进行中，请稍候', 'warn', 2.0);
+    return;
+  }
+  // AI 兜底取消（E1 前置已保证非 busy；杜绝退出复盘后 AI 幽灵落子）
+  if (aiEngine) aiEngine.cancel();
+  aiBusy = false;
+  // 冻结输入：清选择与提示
+  if (input) input.deselect('review');
+  if (effects) effects.clearAllHints();
+  if (hoverMesh) { animator.unhover(hoverMesh); hoverMesh = null; }
+  if (followCam) followCam.clearTarget();
+  // 结束面板：进入复盘先隐藏，退出时恢复（避免模态遮挡棋盘）
+  if (gameOver && hud.gameOver && hud.gameOver.classList.contains('is-visible')) {
+    reviewHidGameOver = true;
+    hud.hideGameOver();
+  }
+  const ok = reviewCtrl.enter(entryIndex);
+  if (!ok) return;
+  hud.showToast('复盘模式：←→ 逐步 · Space 自动播放 · Esc 退出', 'info', 2.8);
+  syncControls();
+  trackEvent('review_enter', { moves: gs.history.length, entry: entryIndex != null ? entryIndex : gs.history.length });
+}
+
+/** E9：退出复盘（Esc / 复盘条「退出」 / 破坏性操作前置） */
+function exitReview() {
+  if (!reviewActive || !reviewCtrl) return;
+  reviewCtrl.exit();   // 停定时器、复位状态；onChange → renderReview(active=false) 恢复 live 渲染
+  hud.setReviewState({ active: false, cursor: 0, len: gs.history.length, playing: false });
+  // 对局已结束时：恢复结束面板（不重复音效 / 埋点）
+  if (reviewHidGameOver && gameOver) {
+    reviewHidGameOver = false;
+    if (lastGameOverInfo) hud.showGameOver(lastGameOverInfo);
+  }
+  updateCheckRing();
+  syncControls();
+  SFX.play('select');
+}
+
+/** 破坏性操作前置：先退出复盘再执行（E9/E10 语义） */
+function exitReviewIfActive() {
+  if (reviewActive) exitReview();
+}
+
+/** 走子记录双击：PLAY=进入复盘到该步之后；REVIEW=游标跳到该步之后 */
+function onMoveLogDblClick(idx) {
+  if (reviewActive) { reviewCtrl.seek(idx + 1); return; }
+  enterReview(idx + 1);
+}
+
+/** 导出棋谱入口（move-log「导出棋谱」按钮） */
+function openExportPanelFlow() {
+  if (!gs || gs.history.length === 0) {
+    hud.showToast('尚无着法可导出', 'warn', 2.0);
+    return;
+  }
+  hud.openExportPanel({ ucci: gs.exportUcci(), chinese: gs.exportChinese() });
+  trackEvent('export_open', { moves: gs.history.length });
+}
+
+// ---------------------------------------------------------------------------
 // 视觉辅助
 // ---------------------------------------------------------------------------
 
-/** 根据当前局面刷新将军红光 / 横幅 */
+/** 根据当前显示局面（renderGs）刷新将军红光 / 横幅（REVIEW 时读 scratch 局面） */
 function updateCheckRing() {
-  if (gs.status === 'check' || gs.status === 'checkmate') {
-    const k = gs.board.findKing(gs.sideToMove);
+  const src = renderGs || gs;
+  if (src.status === 'check' || src.status === 'checkmate') {
+    const k = src.board.findKing(src.sideToMove);
     const km = k ? (pieceMeshes[k.file] && pieceMeshes[k.file][k.rank]) : null;
     effects.setCheckedKing(km);
-    hud.setCheck(true, gs.sideToMove);
+    hud.setCheck(true, src.sideToMove);
   } else {
     effects.setCheckedKing(null);
     hud.setCheck(false);
@@ -462,7 +592,8 @@ function onGameOver() {
     aiEnabled,
     difficulty
   });
-  hud.showGameOver({
+  // L2：缓存面板内容（复盘退出后重新展示时复用，避免重复音效/埋点）
+  lastGameOverInfo = {
     title: winner ? (winner === RED ? '红方胜' : '黑方胜') : '和棋',
     detail: gs.getResultText(),
     tone,
@@ -472,7 +603,8 @@ function onGameOver() {
       ['我方吃子', String(gs.captured[aiSide].length)],
       ['对方吃子', String(gs.captured[humanSide].length)]
     ]
-  });
+  };
+  hud.showGameOver(lastGameOverInfo);
 }
 
 /** 同步控件启用 / 状态显示 */
@@ -550,8 +682,8 @@ function restoreFromSave(save) {
 // ---------------------------------------------------------------------------
 
 const inputGame = {
-  isLocked: () => animator.isBusy || aiBusy || gameOver,
-  canControl: (side) => !gameOver && side === gs.sideToMove && (!aiEnabled || side === humanSide),
+  isLocked: () => reviewActive || animator.isBusy || aiBusy || gameOver,
+  canControl: (side) => !reviewActive && !gameOver && side === gs.sideToMove && (!aiEnabled || side === humanSide),
   pieceAt: (f, r) => gs.pieceAt(f, r),
   legalMoves: (f, r) => gs.getLegalMoves(f, r),
   blockedPoints: (f, r) => gs.getBlockedPoints(f, r),
@@ -651,7 +783,21 @@ async function boot() {
   trackEvent('session_start', { viewport: `${window.innerWidth}x${window.innerHeight}` });   // H1 事件
 
   // HUD 先建，便于显示进度与错误
-  hud = createHUD({ onRestart: doReset, onPreviewMove: previewMove });
+  hud = createHUD({
+    onRestart: doReset,
+    onPreviewMove: previewMove,
+    // L2：复盘 / 棋谱导出回调
+    onMoveLogDblClick: onMoveLogDblClick,
+    onExport: openExportPanelFlow,
+    onReviewEnter: () => enterReview(),
+    onReviewFirst: () => { if (reviewCtrl) reviewCtrl.first(); },
+    onReviewPrev: () => { if (reviewCtrl) reviewCtrl.prev(); },
+    onReviewNext: () => { if (reviewCtrl) reviewCtrl.next(); },
+    onReviewLast: () => { if (reviewCtrl) reviewCtrl.last(); },
+    onReviewTogglePlay: () => { if (reviewCtrl) reviewCtrl.togglePlay(); },
+    onReviewExit: () => exitReview(),
+    onReviewInterval: (ms) => { if (reviewCtrl) reviewCtrl.setInterval(ms); }
+  });
 
   // 全局错误兜底（绝不白屏）
   window.addEventListener('error', onFatal);
@@ -718,6 +864,23 @@ async function boot() {
     gs.on('undo', saveGame);
     gs.on('gameover', clearGameSave);
     gs.on('reset', clearGameSave);
+    // L2 · E10：外部变更（undo/reset/gameover）强制退出复盘，避免 reviewGs 与 live gs 失同步
+    gs.on('undo', exitReviewIfActive);
+    gs.on('reset', exitReviewIfActive);
+    gs.on('gameover', exitReviewIfActive);
+
+    // L2：复盘状态机（纯逻辑；renderReview 为渲染钩子，定时器用 setTimeout 单拍续期）
+    reviewCtrl = new ReviewController({
+      getHistory: () => gs.history,
+      onChange: renderReview,
+      interval: 1000,
+      timer: {
+        set: (fn, ms) => { reviewTimer = setTimeout(fn, ms); },
+        clear: () => { if (reviewTimer != null) { clearTimeout(reviewTimer); reviewTimer = null; } }
+      }
+    });
+
+    renderGs = gs;   // L2：显示局面默认 = live gs
     rebuildPieces();
     hud.setLoadingProgress(0.68, '凝聚将 / 帅之气…');
     await raf();
@@ -756,7 +919,16 @@ async function boot() {
       toggleFollowCamera,
       resign: doResign,
       toggleHelp: (force) => hud.toggleHelp(force),   // UI-FIX-123：force=false 供 Esc / 关闭按钮强制关闭
-      cancelSelection: () => input.deselect('esc')
+      cancelSelection: () => input.deselect('esc'),
+      // L2：复盘快捷键分流（controls._bindKeys 按 isReviewActive 覆盖 ←→⏮⏭ Space Esc）
+      reviewEnter: () => enterReview(),
+      reviewExit: () => exitReview(),
+      reviewFirst: () => { if (reviewCtrl) reviewCtrl.first(); },
+      reviewPrev: () => { if (reviewCtrl) reviewCtrl.prev(); },
+      reviewNext: () => { if (reviewCtrl) reviewCtrl.next(); },
+      reviewLast: () => { if (reviewCtrl) reviewCtrl.last(); },
+      reviewTogglePlay: () => { if (reviewCtrl) reviewCtrl.togglePlay(); },
+      isReviewActive: () => reviewActive
     });
     hud.setLoadingProgress(0.92, '唤醒 AI 心智…');
     await raf();
@@ -802,7 +974,10 @@ async function boot() {
       THREE, gs, sceneSys, effects, animator, aiEngine, input, hud, controls, SFX,
       combatDirector, followCam, computeFollowFitRadius,
       applyMove, rebuildPieces, doReset, doUndo, doResign, toggleAI, setDifficulty, previewMove,
-      toggleFollowCamera, saveGame, clearGameSave   // M4：QA 调试存档读写
+      toggleFollowCamera, saveGame, clearGameSave,   // M4：QA 调试存档读写
+      reviewCtrl, renderGs, enterReview, exitReview, // L2：QA 复盘调试（reviewGs / 状态机）
+      get reviewGs() { return reviewGs; },
+      get reviewActive() { return reviewActive; }
     };
     started = true;
 

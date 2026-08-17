@@ -198,6 +198,10 @@
       <button class="move-log-collapse" type="button" aria-expanded="true">
         对局记录 <span class="collapse-caret" aria-hidden="true">▾</span>
       </button>
+      <span class="move-log-tools">
+        <button id="btn-review" class="btn btn-mini" type="button" disabled title="复盘（双击某步着法可跳转进入）">复盘</button>
+        <button id="btn-export" class="btn btn-mini" type="button" disabled title="导出棋谱（UCCI / 中文）">导出棋谱</button>
+      </span>
     </header>
     <div class="move-log-scroll"><ul class="move-log-list"></ul></div>
     <div class="move-log-empty">尚无着法</div>
@@ -240,7 +244,10 @@
       <h2 class="game-over-title">对局结束</h2>
       <p class="game-over-detail"></p>
       <div class="game-over-stats"></div>
-      <button id="btn-again" class="btn btn-primary" type="button">再来一局</button>
+      <div class="game-over-actions">
+        <button id="btn-review-gameover" class="btn" type="button">复盘本局</button>
+        <button id="btn-again" class="btn btn-primary" type="button">再来一局</button>
+      </div>
     </div>
   </div>
 
@@ -251,6 +258,43 @@
     <button class="help-close" type="button" aria-label="关闭">×</button>
     <div class="help-content"></div>
   </aside>
+
+  <!-- L2：棋谱导出面板（双 Tab + 复制/下载；design §4） -->
+  <div id="export-panel" class="export-panel" aria-hidden="true">
+    <div class="export-panel-head">
+      <span class="export-title">棋谱导出</span>
+      <button id="btn-export-close" class="panel-close" type="button" aria-label="关闭">×</button>
+    </div>
+    <div class="export-tabs" role="tablist">
+      <button id="tab-ucci" class="export-tab is-active" type="button" role="tab" aria-selected="true">UCCI 棋谱</button>
+      <button id="tab-chinese" class="export-tab" type="button" role="tab" aria-selected="false">中文记谱</button>
+    </div>
+    <div class="export-body">
+      <pre id="export-ucci" class="export-content is-active"></pre>
+      <pre id="export-chinese" class="export-content"></pre>
+    </div>
+    <div class="export-actions">
+      <button id="btn-copy" class="btn btn-primary" type="button">复制</button>
+      <button id="btn-download" class="btn" type="button">下载 .txt</button>
+    </div>
+  </div>
+
+  <!-- L2：复盘控制条（进入复盘后显示；design §5） -->
+  <div id="review-bar" class="review-bar" aria-hidden="true">
+    <span class="review-label">复盘</span>
+    <button id="rv-first" class="btn btn-mini" type="button" title="跳到开头 (Home / Shift+←)">⏮</button>
+    <button id="rv-prev" class="btn btn-mini" type="button" title="上一步 (←)">◀</button>
+    <span id="rv-cursor" class="review-cursor">0/0</span>
+    <button id="rv-next" class="btn btn-mini" type="button" title="下一步 (→)">▶</button>
+    <button id="rv-last" class="btn btn-mini" type="button" title="跳到结尾 (End / Shift+→)">⏭</button>
+    <button id="rv-play" class="btn btn-mini" type="button" title="自动播放 (Space)"><span class="btn-label">播放</span></button>
+    <select id="rv-interval" class="review-interval" title="自动播放间隔" aria-label="自动播放间隔">
+      <option value="500">0.5s</option>
+      <option value="1000" selected>1s</option>
+      <option value="2000">2s</option>
+    </select>
+    <button id="rv-exit" class="btn btn-mini" type="button" title="退出复盘 (Esc)">退出</button>
+  </div>
 
   <!-- toast 容器 -->
   <div id="toast-container"></div>

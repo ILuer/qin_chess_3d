@@ -328,8 +328,10 @@ export function createTextTexture(text, opts = {}) {
  * 旗面贴图：云雷纹边框 + 中央大字
  */
 export function createBannerTexture(glyph, side, opts = {}) {
-  const w = opts.w || 192;
-  const h = opts.h || 256;
+  // D6（第二批已拍板）：192×256 → 256×384 中间档（原 384×512 的 50%），
+  // 近距特写纹样/汉字锐度补偿；显存增量约 +1.5MB（6 面 × RGBA8 + mipmap），预算内。
+  const w = opts.w || 256;
+  const h = opts.h || 384;
   const warm = side === 'r';
   const cv = mkCanvas(w, h);
   const ctx = cv.getContext('2d');

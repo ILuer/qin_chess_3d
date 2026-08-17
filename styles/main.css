@@ -668,3 +668,122 @@ canvas.game-canvas {
   #btn-top, #btn-sound, #btn-ai, #btn-resign { height: 30px; padding: 0 7px; font-size: 11px; }
   .size-warning { display: block; }
 }
+
+/* ===========================================================================
+ * 15. L2 · 复盘 / 棋谱导出（design/gameplay/review-export-design.md）
+ *     导出面板 z=75（帮助70 / 结算80 之间）；复盘条 z=55（控制栏上方）
+ * ========================================================================= */
+
+/* —— move-log 头部工具按钮（复盘 / 导出棋谱） —— */
+#move-log .panel-header { display: flex; align-items: center; gap: 8px; }
+#move-log .panel-header .move-log-collapse { flex: 1 1 0; min-width: 0; width: auto; }
+.move-log-tools { display: inline-flex; gap: 6px; flex: 0 0 auto; }
+.btn-mini {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  height: 26px; min-width: 26px;
+  padding: 0 9px;
+  border-radius: 6px;
+  border: 1px solid rgba(201,162,39,0.4);
+  background: rgba(201,162,39,0.12);
+  color: var(--text);
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+  transition: background .18s var(--ease), border-color .18s var(--ease), color .18s var(--ease);
+}
+.btn-mini:hover:not(:disabled) { border-color: var(--liu-jin); background: rgba(201,162,39,0.26); }
+.btn-mini:disabled { opacity: .42; cursor: not-allowed; }
+.btn-mini.is-on { border-color: var(--qing-tong); color: var(--liu-jin-light); background: linear-gradient(180deg, #20271e, #161b14); }
+
+/* —— 导出面板 —— */
+.export-panel {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -46%) scale(.96);
+  z-index: 75;
+  width: min(520px, 92vw);
+  max-height: 78vh;
+  display: flex; flex-direction: column;
+  background: rgba(16,17,21,0.97);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+  opacity: 0; pointer-events: none;
+  transition: opacity .22s var(--ease), transform .22s var(--ease);
+}
+.export-panel.is-visible { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
+.export-panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--hairline);
+}
+.export-title { font-weight: 700; letter-spacing: 2px; color: var(--liu-jin-light); }
+.panel-close {
+  width: 28px; height: 28px; border-radius: 50%;
+  border: 1px solid var(--hairline); background: transparent;
+  color: var(--text-dim); font-size: 18px; line-height: 1;
+  cursor: pointer;
+}
+.panel-close:hover { color: var(--text); border-color: var(--liu-jin); }
+.export-tabs { display: flex; gap: 6px; padding: 8px 12px 0; }
+.export-tab {
+  padding: 5px 14px; border-radius: 8px 8px 0 0;
+  border: 1px solid var(--hairline); border-bottom: none;
+  background: transparent; color: var(--text-dim);
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: color .15s var(--ease), background .15s var(--ease);
+}
+.export-tab:hover { color: var(--text); }
+.export-tab.is-active {
+  color: var(--liu-jin-light); background: rgba(201,162,39,0.12);
+  border-color: rgba(201,162,39,0.35);
+}
+.export-body { padding: 0 12px; min-height: 0; }
+.export-content {
+  display: none;
+  margin: 0; padding: 12px 14px;
+  max-height: 46vh; overflow: auto;
+  background: rgba(0,0,0,0.32);
+  border: 1px solid var(--hairline); border-radius: 0 0 var(--r-md) var(--r-md);
+  font-family: var(--font-num); font-size: 12.5px; line-height: 1.7;
+  color: var(--text); white-space: pre-wrap; word-break: break-all;
+  user-select: text;
+  scrollbar-width: thin; scrollbar-color: var(--qing-tong-dark) transparent;
+}
+.export-content.is-active { display: block; }
+.export-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 12px; }
+
+/* —— 复盘控制条 —— */
+.review-bar {
+  position: fixed; left: 50%; bottom: 88px; transform: translateX(-50%);
+  z-index: 55;
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 12px;
+  background: rgba(16,17,21,0.94);
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  box-shadow: var(--shadow-2);
+  backdrop-filter: blur(4px);
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s var(--ease);
+}
+.review-bar.is-visible { opacity: 1; pointer-events: auto; }
+.review-label { font-size: 12px; letter-spacing: 2px; color: var(--liu-jin-light); margin-right: 4px; }
+.review-cursor {
+  font-family: var(--font-num); font-size: 12px; color: var(--text-dim);
+  min-width: 46px; text-align: center; font-variant-numeric: tabular-nums;
+}
+.review-interval {
+  height: 26px; padding: 0 4px;
+  border-radius: 6px; border: 1px solid rgba(201,162,39,0.35);
+  background: #181a1f; color: var(--text-dim); font-size: 11px;
+}
+
+/* 结束面板动作行 */
+.game-over-actions { display: flex; justify-content: center; gap: 10px; margin-bottom: 2px; }
+
+/* —— L2 响应式 —— */
+@media (max-width: 768px) {
+  .review-bar { bottom: 76px; flex-wrap: wrap; justify-content: center; max-width: 92vw; border-radius: 14px; }
+  .export-panel { width: min(94vw, 480px); }
+  .export-content { max-height: 40vh; }
+  #move-log .panel-header { gap: 4px; }
+  .move-log-tools { gap: 4px; }
+  .btn-mini { padding: 0 7px; font-size: 11px; height: 24px; }
+}

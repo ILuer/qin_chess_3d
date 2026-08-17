@@ -28,6 +28,13 @@ export class Controls {
    * @param {Function} actions.resign
    * @param {Function} actions.toggleHelp
    * @param {Function} actions.cancelSelection
+   * @param {Function} [actions.isReviewActive] 复盘模式判定（L2：键位分流）
+   * @param {Function} [actions.reviewFirst] 复盘：跳到开头
+   * @param {Function} [actions.reviewPrev] 复盘：上一步
+   * @param {Function} [actions.reviewNext] 复盘：下一步
+   * @param {Function} [actions.reviewLast] 复盘：跳到结尾
+   * @param {Function} [actions.reviewTogglePlay] 复盘：自动播放开/关
+   * @param {Function} [actions.reviewExit] 复盘：退出
    */
   constructor(actions = {}) {
     this.actions = actions;
@@ -127,6 +134,28 @@ export class Controls {
       // 输入框内不拦截
       const tag = (ev.target && ev.target.tagName) || '';
       if (tag === 'INPUT' || tag === 'TEXTAREA' || (ev.target && ev.target.isContentEditable)) return;
+
+      // L2：复盘内快捷键分流（design §5.6）——←→⏮⏭ Space Esc 语义覆盖，仅在 reviewActive 生效；
+      // 其余键（R/F/M/T/?/U/N 等）继续走正常绑定（破坏性操作由 main 侧先退出复盘再执行）
+      const inReview = !!(this.actions.isReviewActive && this.actions.isReviewActive());
+      const plain = !(ev.ctrlKey || ev.metaKey || ev.altKey);
+      if (inReview && plain) {
+        if (ev.key === 'ArrowLeft' && ev.shiftKey) { ev.preventDefault(); this._call('reviewFirst'); return; }
+        if (ev.key === 'ArrowRight' && ev.shiftKey) { ev.preventDefault(); this._call('reviewLast'); return; }
+        switch (ev.key) {
+          case 'ArrowLeft':  ev.preventDefault(); this._call('reviewPrev'); return;
+          case 'ArrowRight': ev.preventDefault(); this._call('reviewNext'); return;
+          case 'Home': ev.preventDefault(); this._call('reviewFirst'); return;
+          case 'End':   ev.preventDefault(); this._call('reviewLast'); return;
+          case ' ': case 'Spacebar': ev.preventDefault(); this._call('reviewTogglePlay'); return;
+          case 'Escape':
+            ev.preventDefault();
+            this.disarmAll();
+            this._call('reviewExit');
+            return;
+          default: break;
+        }
+      }
 
       // Ctrl+Z 悔棋
       if ((ev.ctrlKey || ev.metaKey) && (ev.key === 'z' || ev.key === 'Z')) {
