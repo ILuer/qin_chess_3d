@@ -22,7 +22,7 @@
 /styles/*
   Cache-Control: public, max-age=0, must-revalidate
 
-# vendor 是版本锁定的第三方库（three@0.169.0），内容永不变更。
+# vendor 是版本锁定的第三方库（three@0.185.0 / r185），内容永不变更。
 # 升级走「改目录名 + 改 importmap」，不会原地覆盖，故可安全 immutable 长缓存。
 # 1.27MB 的 three.module.js 只在首访下载一次，回访零请求。
 /vendor/*
