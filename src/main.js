@@ -177,6 +177,12 @@ function applyMove(from, to) {
   // 清选择 / 提示 / 悬停
   effects.clearAllHints();
   input.reset();
+  // P0：走子路径不触发 onDeselect，须手动复位跟随相机回棋盘中心，
+  // 否则镜头会一直跟随该棋子走后的新位置、从不回到居中默认位（homeTarget）。
+  if (followCam) {
+    followCam.clearTarget();
+    if (sceneSys) sceneSys.viewAutoFit = true;   // 与 onDeselect 对称：恢复窄屏自适应
+  }
   if (hoverMesh) { animator.unhover(hoverMesh); hoverMesh = null; }
 
   // 标记移动中：待机微动让位
@@ -740,7 +746,7 @@ const inputGame = {
       // 跟随期间 fixed 视图窄屏适配让位（避免 resize 时与 fitRadius 打架）
       if (sceneSys) sceneSys.viewAutoFit = false;
     }
-    SFX.play('select');
+    SFX.play('select', { piece: sel.type, faction: sel.side });
   },
   onDeselect: () => {
     effects.clearAllHints();

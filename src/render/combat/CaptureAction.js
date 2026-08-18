@@ -7,6 +7,7 @@
 
 import * as THREE from 'three';
 import { PT, PALETTE, TIMING, toWorld } from '../../core/constants.js';
+import { headingYaw } from '../animator.js';
 import {
   getCaptureBeat, getLiftMul, clampA0,
   MOVE_LEAN, M0_LEAN_BACK, M0_SQUASH,
@@ -81,6 +82,23 @@ export function execute(cd, attacker, victim, fromCell, toCell, opts = {}) {
     const endPos = new THREE.Vector3(toW.x, 0, toW.z);
 
     attacker.position.copy(startPos);
+
+    // ── 朝向：冲锋前（A0 的 M0+M1 蓄力段）平滑转向受害者 ──
+    // 只写根 Group 的 rotation.y（相对偏航），绝不写 orient.rotation（黑方 180° 已在 orient 内）。
+    // 落地后保留最终朝向（不回正），后续着法以当前 attacker.rotation.y 为起点做增量转向。
+    const capDx = endPos.x - startPos.x;
+    const capDz = endPos.z - startPos.z;
+    const capStartYaw = attacker.rotation.y;
+    let capSpin = headingYaw(aSide, capDx, capDz) - capStartYaw;
+    while (capSpin > Math.PI) capSpin -= Math.PI * 2;
+    while (capSpin < -Math.PI) capSpin += Math.PI * 2;
+    if (Math.abs(capSpin) > 0.001) {
+      animator.add({
+        duration: Math.max(0.001, M0f + M1f),
+        easing: animator.EASE.easeInOutCubic,
+        onUpdate: (t) => { attacker.rotation.y = capStartYaw + capSpin * t; }
+      });
+    }
 
     // ── 计算命中帧 T ──
     const totalBeforeT = A0 + A1 + A2;

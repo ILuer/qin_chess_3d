@@ -73,6 +73,9 @@ export const PARTIALS = {
 export const LEVEL = {
   /* 系统事件 */
   select: 0.34, hover: 0.11, check: 0.85,
+  'pawn.select': 0.32, 'horse.select': 0.32,
+  'elephant.select': 0.36, 'advisor.select': 0.30,
+  'rook.select': 0.36, 'cannon.select': 0.34, 'king.select': 0.34,
   illegal: 0.30, undo: 0.26, start: 0.42,
   win: 0.50, lose: 0.46,
   /* 通用后备 */
@@ -106,6 +109,9 @@ export const LEVEL = {
 
 export const WET = {
   select: 0.16, hover: 0.05, move: 0.10,
+  'pawn.select': 0.14, 'horse.select': 0.15,
+  'elephant.select': 0.20, 'advisor.select': 0.13,
+  'rook.select': 0.18, 'cannon.select': 0.17, 'king.select': 0.18,
   capture: 0.34, check: 0.60, illegal: 0.06,
   undo: 0.30, start: 0.45, win: 0.42, lose: 0.55,
   ambient: 0.50,
@@ -272,6 +278,92 @@ BEAT_RECIPES['select'] = {
     ]
   },
   opts: { wet: 0.16, life: 1.1 }
+};
+
+/* ----- 9.1b 各兵种选中音（按兵种可辨识，车/炮走金属/木石非编钟） ----- */
+
+BEAT_RECIPES['pawn.select'] = {
+  // 兵·戈：亮而短促的青铜剑鸣
+  layers: {
+    C: [{ type: 'bronzeBody', freq: 620, peak: 0.30, decayScale: 0.9, partials: 'BAR', vibHz: 0 }],
+    T: [{ type: 'transient', freq: 3600, q: 1.8, peak: 0.09, dur: 0.012, rate: 1.3 }]
+  },
+  opts: { wet: 0.14, life: 0.9 }
+};
+
+BEAT_RECIPES['horse.select'] = {
+  // 马·长戟：稍低的戟鸣 + 皮革吱呀
+  layers: {
+    C: [
+      { type: 'bronzeBody', freq: 480, peak: 0.26, decayScale: 1.0, partials: 'BAR', vibHz: 0 },
+      { type: 'leatherCreak', cf: 520, q: 1.8, peak: 0.07, dur: 0.16, grain: 3 }
+    ],
+    T: [{ type: 'transient', freq: 3000, q: 1.6, peak: 0.08, dur: 0.014, rate: 1.2 }]
+  },
+  opts: { wet: 0.15, life: 1.0 }
+};
+
+BEAT_RECIPES['elephant.select'] = {
+  // 象·铜钺：厚重的钟体 + 木底
+  layers: {
+    C: [{ type: 'bronzeBody', freq: 330, peak: 0.32, decayScale: 1.4, partials: 'BELL', vibHz: 0 }],
+    B: [{ type: 'woodKnock', f: 160, peak: 0.14, dur: 0.06 }],
+    T: [{ type: 'transient', freq: 2400, q: 1.4, peak: 0.08, dur: 0.016, rate: 1.1 }]
+  },
+  opts: { wet: 0.20, life: 1.2 }
+};
+
+BEAT_RECIPES['advisor.select'] = {
+  // 士·短剑：亮而轻的短剑 + 软甲
+  layers: {
+    C: [{ type: 'bronzeBody', freq: 880, peak: 0.24, decayScale: 0.7, partials: 'BAR', vibHz: 0 }],
+    T: [
+      { type: 'armorClink', n: 2, f0: 3400, f1: 4200, peak: 0.06, spread: 0.04, ring: 0.10, softAttack: 0.005 },
+      { type: 'transient', freq: 4200, q: 2.0, peak: 0.06, dur: 0.010, rate: 1.3 }
+    ]
+  },
+  opts: { wet: 0.13, life: 0.8 }
+};
+
+BEAT_RECIPES['rook.select'] = {
+  // 车·车戈铁箍：暗铁 + 木轮辚辚 + 甲片（非编钟）
+  layers: {
+    C: [{ type: 'bronzeBody', freq: 1660, peak: 0.22, decayScale: 0.8, partials: 'IRON', vibHz: 0 }],
+    B: [
+      { type: 'woodKnock', f: 150, peak: 0.16, dur: 0.06 },
+      { type: 'woodKnock', f: 138, peak: 0.10, dur: 0.05, offset: 0.05 }
+    ],
+    T: [
+      { type: 'armorClink', n: 4, f0: 2400, f1: 3600, peak: 0.12, spread: 0.08, ring: 0.20 },
+      { type: 'transient', freq: 3200, q: 1.6, peak: 0.10, dur: 0.014, rate: 1.2 }
+    ]
+  },
+  opts: { wet: 0.18, life: 1.0 }
+};
+
+BEAT_RECIPES['cannon.select'] = {
+  // 炮·石弹：木车吱呀 + 石弹碎裂（纯木石，无编钟）
+  layers: {
+    C: [
+      { type: 'woodKnock', f: 620, peak: 0.16, dur: 0.05 },
+      { type: 'dustScuff', f0: 2600, f1: 700, q: 1.2, peak: 0.14, dur: 0.18 }
+    ],
+    B: [{ type: 'woodKnock', f: 120, peak: 0.20, dur: 0.07 }],
+    T: [{ type: 'transient', freq: 2800, q: 2.0, peak: 0.08, dur: 0.014, rate: 1.2 }]
+  },
+  opts: { wet: 0.17, life: 0.9 }
+};
+
+BEAT_RECIPES['king.select'] = {
+  // 帅·王剑：剑鸣 + 编钟尾韵（王者）
+  layers: {
+    C: [
+      { type: 'bronzeBody', freq: 700, peak: 0.26, decayScale: 1.1, partials: 'BAR', vibHz: 0 },
+      { type: 'bronzeBody', freq: 466, peak: 0.14, decayScale: 1.2, partials: 'BELL', vibHz: 0, offset: 0.01 }
+    ],
+    T: [{ type: 'transient', freq: 4000, q: 1.6, peak: 0.10, dur: 0.012, rate: 1.3 }]
+  },
+  opts: { wet: 0.18, life: 1.1 }
 };
 
 BEAT_RECIPES['hover'] = {
@@ -527,12 +619,13 @@ function buildM2(p) {
       recipe.opts.wet = 0.14;
       break;
     case 'C':
-      recipe.layers.C.push({ type: 'noise', rate: 0.9, peak: 0.17, attack: 0.020, decay: 0.34, dur: 0.36,
-        filter: { type: 'bandpass', sweep: { f0: 250, f1: 430, ramp: 'linear', rampTime: 0.34 }, q: 7.0 } });
-      recipe.layers.B.push({ type: 'osc', oscType: 'sawtooth', freq: 68, peak: 0.22, attack: 0.025, decay: 0.34, dur: 0.38,
-        sweep: { end: 56, ramp: 'linear', rampTime: 0.34 }, filter: { type: 'lowpass', freq: 240, q: 2.4 } });
-      recipe.layers.C.push({ type: 'footStep', lo: 118, tone: 820, peak: 0.11, dur: 0.08, offset: 0.05, panOffset: -0.18 });
-      recipe.layers.C.push({ type: 'footStep', lo: 118, tone: 820, peak: 0.11, dur: 0.08, offset: 0.17, panOffset: 0.18 });
+      // 炮巡航：木车吱呀 + 木轮碾地 + 石弹微响（去低频 sawtooth 嗡鸣）
+      recipe.layers.C.push({ type: 'leatherCreak', cf: 190, q: 1.8, peak: 0.10, dur: 0.30, grain: 3 });
+      recipe.layers.B.push({ type: 'woodKnock', f: 130, peak: 0.13, dur: 0.06 });
+      recipe.layers.B.push({ type: 'woodKnock', f: 122, peak: 0.09, dur: 0.05, offset: 0.15 });
+      recipe.layers.C.push({ type: 'woodKnock', f: 620, peak: 0.07, dur: 0.04, offset: 0.06 });
+      recipe.layers.C.push({ type: 'footStep', lo: 118, tone: 820, peak: 0.11, dur: 0.08, offset: 0.05 });
+      recipe.layers.C.push({ type: 'footStep', lo: 118, tone: 820, peak: 0.11, dur: 0.08, offset: 0.17 });
       recipe.opts.wet = 0.18;
       break;
     case 'K':
@@ -662,7 +755,8 @@ makeMoveRecipes();
 /* ----- 9.3 各兵种吃子配方（A0-A5） ----- */
 
 function makeCaptureRecipes() {
-  for (const p of ['P', 'N', 'B', 'A', 'R', 'K']) {
+  // 含 'C'：炮虽走 stoneImpact 特殊路径，但被吃/收势仍需要 victim.shake 与 settle 配方
+  for (const p of ['P', 'N', 'B', 'A', 'R', 'C', 'K']) {
     const pk = `${PIECE_NAMES[p]}.capture`;
 
     /* A0 冲锋到达 */
@@ -851,20 +945,32 @@ BEAT_RECIPES['advisor.idle'] = {
 };
 
 BEAT_RECIPES['rook.idle'] = {
+  // 车：木轮辚辚 + 皮革吱呀 + 甲片轻响（去低频 sawtooth 嗡鸣）
   layers: {
-    B: [{ type: 'osc', oscType: 'sawtooth', freq: 92, peak: 0.015, attack: 0.04, decay: 0.36, dur: 0.40,
-          filter: { type: 'lowpass', freq: 320, q: 2.0 } }],
-    T: [{ type: 'transient', freq: 1200, q: 1.6, peak: 0.0075, dur: 0.02, rate: 1.0, offset: 0.05 }]
+    C: [
+      { type: 'leatherCreak', cf: 210, q: 1.6, peak: 0.010, dur: 0.30, grain: 4 },
+      { type: 'armorClink', n: 3, f0: 2400, f1: 3400, peak: 0.045, spread: 0.10, ring: 0.18 }
+    ],
+    B: [
+      { type: 'woodKnock', f: 150, peak: 0.010, dur: 0.05 },
+      { type: 'woodKnock', f: 138, peak: 0.007, dur: 0.05, offset: 0.15 }
+    ]
   },
-  opts: { wet: 0.24, life: 0.9 }
+  opts: { wet: 0.24, life: 0.8 }
 };
 
 BEAT_RECIPES['cannon.idle'] = {
+  // 炮：木车吱呀 + 石弹微响（去低频 sawtooth 嗡鸣）
   layers: {
-    C: [{ type: 'osc', oscType: 'sawtooth', freq: 64, peak: 0.015, attack: 0.05, decay: 0.40, dur: 0.44,
-          filter: { type: 'lowpass', freq: 240, q: 2.2 } }]
+    C: [
+      { type: 'leatherCreak', cf: 172, q: 1.9, peak: 0.010, dur: 0.34, grain: 3 },
+      { type: 'woodKnock', f: 620, peak: 0.008, dur: 0.04, offset: 0.06 }
+    ],
+    B: [
+      { type: 'woodKnock', f: 120, peak: 0.010, dur: 0.055 }
+    ]
   },
-  opts: { wet: 0.26, life: 0.9 }
+  opts: { wet: 0.26, life: 0.8 }
 };
 
 BEAT_RECIPES['king.idle'] = {

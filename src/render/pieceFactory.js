@@ -652,18 +652,18 @@ function buildAdvisor(mp, M, K, side) {
   // 双臂 + 手（arms 组，anatomy 大臂 + 小臂 + 手，按剑下压）
   armP.strut(M.armorDeep, [+0.140, 0.560, -0.006], [+0.094, 0.556, -0.052], 0.032, 0.028, 8);
   armP.add(sph(0.026, 9, 7), M.armorDeep, { pos: [+0.094, 0.556, -0.052] });
-  armP.strut(M.armorDeep, [+0.094, 0.556, -0.052], [+0.048, 0.556, -0.100], 0.028, 0.024, 8);
+  armP.strut(M.armorDeep, [+0.094, 0.556, -0.052], [+0.048, 0.556, -0.154], 0.028, 0.024, 8);
   armP.strut(M.armorDeep, [-0.140, 0.560, -0.006], [-0.094, 0.544, -0.052], 0.032, 0.028, 8);
   armP.add(sph(0.026, 9, 7), M.armorDeep, { pos: [-0.094, 0.544, -0.052] });
-  armP.strut(M.armorDeep, [-0.094, 0.544, -0.052], [-0.048, 0.534, -0.100], 0.028, 0.024, 8);
-  armP.add(sph(0.032, 10, 8), M.skin, { pos: [+0.036, 0.556, -0.114] });
-  armP.add(sph(0.032, 10, 8), M.skin, { pos: [-0.036, 0.532, -0.114] });
+  armP.strut(M.armorDeep, [-0.094, 0.544, -0.052], [-0.048, 0.534, -0.154], 0.028, 0.024, 8);
+  armP.add(sph(0.032, 10, 8), M.skin, { pos: [+0.036, 0.556, -0.168] });
+  armP.add(sph(0.032, 10, 8), M.skin, { pos: [-0.036, 0.532, -0.168] });
 
-  // 双手拄剑（sword 组，绕握把 pivot）
-  swordP.add(box(0.048, 0.400, 0.015), K.blade, { pos: [0, 0.288, -0.116] });
-  swordP.add(box(0.094, 0.022, 0.030), K.bronze, { pos: [0, 0.500, -0.116] });
-  swordP.add(cyl(0.017, 0.019, 0.086, 10), M.leather, { pos: [0, 0.554, -0.116] });
-  swordP.add(sph(0.026, 10, 8), K.bronze, { pos: [0, 0.606, -0.116] });
+  // 双手拄剑（sword 组，绕握把 pivot）—— z 前移 -0.054，剑身移出甲裙前表面（裙底 front z≈-0.168）
+  swordP.add(box(0.048, 0.400, 0.015), K.blade, { pos: [0, 0.288, -0.170] });
+  swordP.add(box(0.094, 0.022, 0.030), K.bronze, { pos: [0, 0.500, -0.170] });
+  swordP.add(cyl(0.017, 0.019, 0.086, 10), M.leather, { pos: [0, 0.554, -0.170] });
+  swordP.add(sph(0.026, 10, 8), K.bronze, { pos: [0, 0.606, -0.170] });
 }
 
 /* ============================================================
@@ -1139,9 +1139,9 @@ function buildKing(mp, M, K, side) {
   for (let s = -1; s <= 1; s += 2) {
     const fx = 0.160 * s;
     // 前支柱（座身前角升起）—— throne 整组不降段（见 t03 注释）
-    Pt.strutKeep(M.woodDeep, [fx, 0.140, -0.050], [fx, 0.200, -0.050], 0.018, 0.014, 8);
+    Pt.strutKeep(M.woodDeep, [fx, FOOT + 0.140, -0.050], [fx, FOOT + 0.200, -0.050], 0.018, 0.014, 8);
     // 后支柱
-    Pt.strutKeep(M.woodDeep, [fx, 0.140, 0.090], [fx, 0.200, 0.090], 0.018, 0.014, 8);
+    Pt.strutKeep(M.woodDeep, [fx, FOOT + 0.140, 0.090], [fx, FOOT + 0.200, 0.090], 0.018, 0.014, 8);
     // 扶手横杆（圆棍，前龙首 → 后座）
     Pt.add(cylKeep(0.014, 0.014, 0.160, 10), M.wood, {
       pos: [fx, FOOT + 0.200, 0.020], rot: [0, 0, s > 0 ? Math.PI / 2 : -Math.PI / 2]
@@ -1305,7 +1305,7 @@ function buildKingCrown(P, M, K, BODY_BOT) {
 /** 佩剑（右侧按剑）—— 归入 sword 子组，windUp/strike/settle 挥斩用。
  *  剑身下摆缩短至剑尖贴地（world y=0），避免去基座后插穿棋盘面。 */
 function buildKingSword(P, M, K, BODY_BOT) {
-  P.add(box(0.046, 0.218, 0.022), M.woodDeep, { pos: [0.162, BODY_BOT + 0.024, -0.018] });
+  P.add(box(0.046, 0.088, 0.022), M.woodDeep, { pos: [0.162, BODY_BOT + 0.089, -0.018] });
   P.add(box(0.052, 0.022, 0.028), M.accent, { pos: [0.162, BODY_BOT + 0.144, -0.018] });
   P.add(box(0.084, 0.018, 0.028), K.bronze, { pos: [0.162, BODY_BOT + 0.162, -0.018] });
   P.add(cyl(0.016, 0.018, 0.068, 10), M.leather, { pos: [0.162, BODY_BOT + 0.204, -0.018] });
@@ -1350,7 +1350,7 @@ const MULTI_GROUP_TYPES = new Set(['K', 'C', 'R', 'P', 'A', 'N', 'B']);
  */
 const SUBGROUP_JOINTS = {
   P: { body: [0, 0.334, 0], arm: [0, 0.348, 0], legs: [0, -0.086, 0] },
-  A: { body: [0, 0.334, 0], arms: [0, 0.378, 0], sword: [0, 0.328, -0.10] },
+  A: { body: [0, 0.334, 0], arms: [0, 0.378, 0], sword: [0, 0.328, -0.17] },
   N: { mount: [0, 0.128, 0], rider: [0, 0.328, 0] },
   B: { robe: [0, 0.368, 0], arms: [0, 0.328, -0.10] },
   R: { horses: [0, 0.168, -0.30], body: [0, 0.288, 0.02], driver: [0.05, 0.378, 0.40], spearman: [-0.05, 0.378, 0.46] },

@@ -1067,15 +1067,22 @@ function playEvent(name, opts = {}) {
   if (!ready || !ctx || !settings.enabled) return false;
   if (ctx.state === 'suspended') { ctx.resume().catch(() => {}); return false; }
 
+  // 选中音按兵种解析：优先 ${piece}.select，缺失回退通用 select
+  let eventName = name;
+  if (name === 'select' && opts && opts.piece) {
+    const pName = PIECE_NAMES[opts.piece];
+    if (pName && BEAT_RECIPES[`${pName}.select`]) eventName = `${pName}.select`;
+  }
+
   // 节流
   const now = performance.now();
-  if (lastFired.has(name) && now - lastFired.get(name) < THROTTLE_MS) return false;
-  lastFired.set(name, now);
+  if (lastFired.has(eventName) && now - lastFired.get(eventName) < THROTTLE_MS) return false;
+  lastFired.set(eventName, now);
 
   // 节点保护
   if (nodeCount > MAX_ACTIVE_NODES * 0.85) {
     // 丢弃低优先级
-    if (name.includes('idle') || name.includes('roster')) return false;
+    if (eventName.includes('idle') || eventName.includes('roster')) return false;
   }
 
   if (degradation === 'off') return false;
@@ -1088,7 +1095,7 @@ function playEvent(name, opts = {}) {
   else if (faction === 'b') actualPit *= FACTION_SHIFT.b;
 
   try {
-    return renderBeat(name, t0(), {
+    return renderBeat(eventName, t0(), {
       faction, pan: pan || 0,
       pit: actualPit * rand(0.97, 1.03),
       vol: clamp((vol || 1) * rand(0.92, 1.08), 0, 2)
@@ -1135,7 +1142,8 @@ function scheduleSequence(sequence, baseT, opts = {}) {
         if (cancelled) return;
         playEvent(beat.name, {
           ...opts,
-          pit: opts.pit || 1.0
+          pit: opts.pit || 1.0,
+          faction: beat.faction || opts.faction
         });
       }, delayMs);
     }
@@ -1243,7 +1251,18 @@ export const SFX = {
         const seq = SEQUENCES.capture[pieceName];
         if (!seq) return null;
         const impactT = impactAt || t0();
-        const handle = scheduleSequence(seq, impactT, { faction, pan: panTo });
+
+        // 受害者崩塌拍按"实际被吃方"的音色/重量/阵营播放（而非攻击方）
+        const vName = victim && victim.type ? PIECE_NAMES[victim.type] : null;
+        const vFaction = (victim && victim.side) || faction;
+        const beats = seq.beats.map(b => {
+          if (b.beat === 'victim' && vName) {
+            return { ...b, name: `${vName}.capture.victim.shake`, faction: vFaction };
+          }
+          return b;
+        });
+
+        const handle = scheduleSequence({ ...seq, beats }, impactT, { faction, pan: panTo });
 
         // 命中定格
         if (hitstop > 0) {

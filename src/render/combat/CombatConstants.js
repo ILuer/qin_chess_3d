@@ -323,20 +323,21 @@ export const IDLE_WEAPON_BIAS = {
  *   l2  [sub, axis, amp, period, phOff, gate?]  —— L2 偶发脉冲层；gate: 'phPlus'(sin(ph)>0)/'phMinus'
  *   zeroChannels    —— _busy 时幂等归零的通道（= 待机写入 ∩ 战斗未写入；绝不与 windUp/strike/settle 打架）
  *
- * 幅度硬边界：待机 rotation 峰值 ≤ 0.06（含脉冲叠加）、position.y ≤ 0.02；选中 amp≤1.8 时 ≤ 0.11。
+ * 幅度边界（P2 已适度上调辨识度）：待机 rotation 峰值（未选中）≤ 0.06、
+ *   position.y ≤ 0.02；选中 amp≤1.8 放大后 ≤ ~0.11；脉冲与 L1 同轴时注意叠加不超限。
  */
 export const IDLE_PIECE = {
   [PT.PAWN]: {
     desc: '戈叩盾：缓摆 + 叩击脉冲（P）',
     breathe: 0.012, sway: 0.014,
     l1: [
-      ['arm', 'z', 0.030, 0.30, 0],
-      ['arm', 'x', 0.020, 0.30, 0.6],
-      ['body', 'x', 0.020, 0.30, Math.PI]
+      ['arm', 'z', 0.045, 0.30, 0],
+      ['arm', 'x', 0.028, 0.30, 0.6],
+      ['body', 'x', 0.024, 0.30, Math.PI]
     ],
     l2: [
-      ['arm', 'x', 0.040, 5.0],
-      ['body', 'x', -0.020, 5.0]
+      ['arm', 'x', 0.055, 5.0],
+      ['body', 'x', -0.024, 5.0]
     ],
     // windUp 写 arm.x → 只归零 arm.z / body.x
     zeroChannels: ['arm.rotation.z', 'body.rotation.x']
@@ -345,12 +346,12 @@ export const IDLE_PIECE = {
     desc: '扬前身 + 骑手对位后仰（N）',
     breathe: 0.012, sway: 0.014,
     l1: [
-      ['mount', 'x', -0.030, 0.26, 0],
-      ['rider', 'x', 0.018, 0.26, 0],
-      ['rider', 'z', 0.015, 0.26, 1.0]
+      ['mount', 'x', -0.045, 0.26, 0],
+      ['rider', 'x', 0.024, 0.26, 0],
+      ['rider', 'z', 0.018, 0.26, 1.0]
     ],
     l2: [
-      ['mount', 'x', -0.030, 6.5]
+      ['mount', 'x', -0.040, 6.5]
     ],
     // windUp 写 mount.x / rider.x → 只归零 rider.z
     zeroChannels: ['rider.rotation.z']
@@ -359,12 +360,12 @@ export const IDLE_PIECE = {
     desc: '展卷吟诵：简牍微举复落（B）',
     breathe: 0.012, sway: 0.014,
     l1: [
-      ['arms', 'z', 0.040, 0.26, 0],
-      ['arms', 'x', 0.020, 0.26, 0.8],
-      ['robe', 'x', 0.018, 0.26, Math.PI]
+      ['arms', 'z', 0.055, 0.26, 0],
+      ['arms', 'x', 0.024, 0.26, 0.8],
+      ['robe', 'x', 0.022, 0.26, Math.PI]
     ],
     l2: [
-      ['arms', 'x', 0.040, 6.0]
+      ['arms', 'x', 0.050, 6.0]
     ],
     // windUp/strike 写 arms.z / robe.x(/z) → 只归零 arms.x
     zeroChannels: ['arms.rotation.x']
@@ -373,9 +374,9 @@ export const IDLE_PIECE = {
     desc: '蓄势警戒：全场最静、无脉冲（A）',
     breathe: 0.008, sway: 0.008,
     l1: [
-      ['body', 'z', 0.012, 0.40, 0],
-      ['sword', 'z', 0.018, 0.40, 0.5],
-      ['arms', 'x', 0.015, 0.40, Math.PI]
+      ['body', 'z', 0.014, 0.40, 0],
+      ['sword', 'z', 0.022, 0.40, 0.5],
+      ['arms', 'x', 0.016, 0.40, Math.PI]
     ],
     l2: [],
     // windUp 写 sword.z → 只归零 body.z / arms.x
@@ -385,12 +386,12 @@ export const IDLE_PIECE = {
     desc: '双马刨蹄 + 御者勒缰 + 车舆滞后（R）',
     breathe: 0.010, sway: 0.012,
     l1: [
-      ['horses', 'x', 0.028, 0.24, 0],
-      ['body', 'x', 0.012, 0.24, -0.8],
-      ['driver', 'x', 0.020, 0.24, 1.2]
+      ['horses', 'x', 0.040, 0.24, 0],
+      ['body', 'x', 0.014, 0.24, -0.8],
+      ['driver', 'x', 0.028, 0.24, 1.2]
     ],
     l2: [
-      ['horses', 'x', 0.032, 7.0]
+      ['horses', 'x', 0.045, 7.0]
     ],
     // windUp 写 spearman.x / driver.x → 只归零 horses.x / body.x
     zeroChannels: ['horses.rotation.x', 'body.rotation.x']
@@ -399,13 +400,13 @@ export const IDLE_PIECE = {
     desc: '双兵左右反相检修 + 脉冲侧向交替（C）',
     breathe: 0.010, sway: 0.012,
     l1: [
-      ['soldierL', 'x', 0.030, 0.22, 0],
-      ['soldierR', 'x', 0.030, 0.22, Math.PI],
-      ['trebuchet', 'z', 0.008, 0.22, 0.5]
+      ['soldierL', 'x', 0.045, 0.22, 0],
+      ['soldierR', 'x', 0.045, 0.22, Math.PI],
+      ['trebuchet', 'z', 0.012, 0.22, 0.5]
     ],
     l2: [
-      ['soldierL', 'x', 0.030, 6.0, 0, 'phPlus'],
-      ['soldierR', 'x', 0.030, 6.0, 0, 'phMinus']
+      ['soldierL', 'x', 0.042, 6.0, 0, 'phPlus'],
+      ['soldierR', 'x', 0.042, 6.0, 0, 'phMinus']
     ],
     // 全部通道均被 windUp/strike 覆盖 → 无需额外归零（settle 会复位）
     zeroChannels: []
@@ -414,11 +415,11 @@ export const IDLE_PIECE = {
     desc: '抚椅：rArm 抚扶手摩挲 + body 微沉肩 + 王座如磐 + 帅旗微扬（K）',
     breathe: 0.008, sway: 0.008,
     l1: [
-      ['rArm', 'z', 0.050, 0.18, 0],
-      ['rArm', 'x', 0.025, 0.18, 1.2],
-      ['body', 'x', 0.020, 0.18, 0.6],
-      ['throne', 'x', 0.005, 0.18, 0],
-      ['banner', 'z', 0.022, 0.30, 2.0]
+      ['rArm', 'z', 0.055, 0.18, 0],
+      ['rArm', 'x', 0.030, 0.18, 1.2],
+      ['body', 'x', 0.022, 0.18, 0.6],
+      ['throne', 'x', 0.006, 0.18, 0],
+      ['banner', 'z', 0.030, 0.30, 2.0]
     ],
     l2: [],
     // windUp 写 sword.z / throne.x → 只归零 rArm.z / rArm.x / body.x / banner.z

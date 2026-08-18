@@ -91,18 +91,19 @@ export function strike(piece, type, victimPos, t) {
       if (sub.arm) sub.arm.rotation.x = -0.55 * Math.sin(Math.PI * t);  // 戈直刺
       break;
     case PT.HORSE:
-      if (sub.rider) sub.rider.rotation.x = -0.7 * Math.sin(Math.PI * t); // 长戟下劈
-      if (sub.mount) sub.mount.rotation.x = -0.15 * Math.sin(Math.PI * t);
+      if (sub.rider) sub.rider.rotation.x = -0.75 * Math.sin(Math.PI * t); // 骑手长戟下劈
+      if (sub.mount) sub.mount.rotation.x = -0.35 * Math.sin(Math.PI * t);  // 马身前扑
       break;
     case PT.ELEPHANT:
-      if (sub.arms) sub.arms.rotation.z = 0.7 * Math.sin(Math.PI * t);   // 宽袖横扫
-      if (sub.robe) sub.robe.rotation.z = 0.35 * Math.sin(Math.PI * t);
+      if (sub.arms) sub.arms.rotation.z = 0.75 * Math.sin(Math.PI * t);   // 宽袖横扫
+      if (sub.robe) sub.robe.rotation.z = 0.40 * Math.sin(Math.PI * t);   // 袍角翻飞
       break;
     case PT.ADVISOR:
-      if (sub.sword) sub.sword.rotation.z = -0.8 * Math.sin(Math.PI * t); // 拔剑下斩
+      if (sub.sword) sub.sword.rotation.z = -0.85 * Math.sin(Math.PI * t); // 拔剑下斩
       break;
     case PT.ROOK:
-      if (sub.spearman) sub.spearman.rotation.x = -0.65 * Math.sin(Math.PI * t); // 长戈碾压
+      if (sub.spearman) sub.spearman.rotation.x = -0.70 * Math.sin(Math.PI * t); // 长戈碾压
+      if (sub.horses) sub.horses.rotation.x = -0.35 * Math.sin(Math.PI * t);     // 双马前冲
       if (sub.driver) sub.driver.rotation.x = -0.25 * Math.sin(Math.PI * t);
       break;
     case PT.KING:
@@ -148,6 +149,95 @@ export function settle(piece, type, t) {
     case PT.KING:
       if (sub.sword) sub.sword.rotation.z = sub.sword.rotation.z * (1 - t);
       if (sub.throne) sub.throne.rotation.x = sub.throne.rotation.x * (1 - t);
+      break;
+    default: break;
+  }
+}
+
+/**
+ * 移动巡航（M2 DASH）时的兵种子组随动：让各兵种在贴地冲锋时呈现可辨识姿态。
+ * 由 MoveAction 的 M2 onUpdate 调用；envelope 用 sin(πt)，起止归零，无缝衔接待机。
+ *
+ * ★ 通道避让约定：MoveAction 期间 piece.userData._busy=true，主循环 tickIdle 会在
+ *   updateTweens 之后把 IDLE_PIECE.zeroChannels 列出的通道每帧归零。因此本函数
+ *   绝不写那些「待机专属且被 busy 归零」的通道（如 P.body.x / N.rider.z / K.banner.z），
+ *   否则随动会被同一帧的 tickIdle 覆盖成 0，视觉无效。
+ * @param {THREE.Object3D} piece
+ * @param {string} type  PT 值
+ * @param {number} t     巡航缓动进度 0..1
+ */
+export function moveFlourish(piece, type, t) {
+  const { sub } = _getGroups(piece);
+  const k = Math.sin(Math.PI * t);   // 0 → 峰值 → 0
+  switch (type) {
+    case PT.PAWN:
+      if (sub.arm) sub.arm.rotation.x = -0.32 * k;   // 戈前指
+      if (sub.legs) sub.legs.rotation.x = 0.16 * k;  // 踏步摆腿
+      break;
+    case PT.HORSE:
+      if (sub.mount) sub.mount.rotation.x = -0.22 * k;  // 马身前扑
+      if (sub.rider) sub.rider.rotation.x = -0.25 * k;  // 骑手压身
+      break;
+    case PT.ELEPHANT:
+      if (sub.arms) sub.arms.rotation.z = 0.22 * k;     // 宽袖摆动
+      if (sub.robe) sub.robe.rotation.x = 0.15 * k;     // 袍角微扬
+      break;
+    case PT.ADVISOR:
+      if (sub.sword) sub.sword.rotation.z = -0.12 * k;  // 稳剑于前
+      break;
+    case PT.ROOK:
+      if (sub.driver) sub.driver.rotation.x = -0.20 * k;    // 御者勒缰
+      if (sub.spearman) sub.spearman.rotation.x = -0.25 * k; // 长戈前压
+      break;
+    case PT.CANNON:
+      if (sub.soldierL) sub.soldierL.rotation.x = -0.30 * k; // 双兵推车
+      if (sub.soldierR) sub.soldierR.rotation.x = -0.30 * k;
+      if (sub.trebuchet) sub.trebuchet.rotation.z = 0.15 * k; // 抛臂随车颠簸
+      break;
+    case PT.KING:
+      if (sub.throne) sub.throne.rotation.x = -0.06 * k;  // 龙椅微倾
+      if (sub.sword) sub.sword.rotation.z = -0.10 * k;    // 王剑前压
+      break;
+    default: break;
+  }
+}
+
+/**
+ * 复位移动随动的兵种子组（MoveAction M5 onComplete 调用）。
+ * 只归零 moveFlourish 写过的通道，确保子组回到待机基线，避免 tickIdle 接管时残留非零姿态。
+ * @param {THREE.Object3D} piece
+ * @param {string} type  PT 值
+ */
+export function resetMovePose(piece, type) {
+  const { sub } = _getGroups(piece);
+  switch (type) {
+    case PT.PAWN:
+      if (sub.arm) sub.arm.rotation.x = 0;
+      if (sub.legs) sub.legs.rotation.x = 0;
+      break;
+    case PT.HORSE:
+      if (sub.mount) sub.mount.rotation.x = 0;
+      if (sub.rider) sub.rider.rotation.x = 0;
+      break;
+    case PT.ELEPHANT:
+      if (sub.arms) sub.arms.rotation.z = 0;
+      if (sub.robe) sub.robe.rotation.x = 0;
+      break;
+    case PT.ADVISOR:
+      if (sub.sword) sub.sword.rotation.z = 0;
+      break;
+    case PT.ROOK:
+      if (sub.driver) sub.driver.rotation.x = 0;
+      if (sub.spearman) sub.spearman.rotation.x = 0;
+      break;
+    case PT.CANNON:
+      if (sub.soldierL) sub.soldierL.rotation.x = 0;
+      if (sub.soldierR) sub.soldierR.rotation.x = 0;
+      if (sub.trebuchet) sub.trebuchet.rotation.z = 0;
+      break;
+    case PT.KING:
+      if (sub.throne) sub.throne.rotation.x = 0;
+      if (sub.sword) sub.sword.rotation.z = 0;
       break;
     default: break;
   }

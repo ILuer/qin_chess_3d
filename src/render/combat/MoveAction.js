@@ -8,6 +8,8 @@
 
 import * as THREE from 'three';
 import { PT, PALETTE, TIMING, toWorld } from '../../core/constants.js';
+import { headingYaw } from '../animator.js';
+import { moveFlourish, resetMovePose } from './PieceChoreography.js';
 import {
   getBeatDuration, getLiftMul,
   MOVE_LEAN, M0_LEAN_BACK, M0_SQUASH,
@@ -68,6 +70,25 @@ export function execute(cd, piece, fromCell, toCell, opts = {}) {
 
     piece.position.copy(startPos);
 
+    // ── 朝向：起步阶段（M0 蓄力 + M1 起步）平滑转向移动方向 ──
+    // 黑方 orient 的 Y=180° 已烘焙进 orient，红朝 -Z / 黑朝 +Z 由 headingYaw 处理；
+    // 这里只写根 Group 的 rotation.y（相对偏航），绝不写 orient.rotation。
+    // 落地后保留最终朝向（不回正），故下一着以当前 piece.rotation.y 为起点做增量转向。
+    const moveSide = piece.userData.pieceSide;
+    const dx = endPos.x - startPos.x;
+    const dz = endPos.z - startPos.z;
+    const startYaw = piece.rotation.y;
+    let moveSpin = headingYaw(moveSide, dx, dz) - startYaw;
+    while (moveSpin > Math.PI) moveSpin -= Math.PI * 2;
+    while (moveSpin < -Math.PI) moveSpin += Math.PI * 2;
+    if (Math.abs(moveSpin) > 0.001) {
+      animator.add({
+        duration: Math.max(0.001, M0 + M1),
+        easing: animator.EASE.easeInOutCubic,
+        onUpdate: (t) => { piece.rotation.y = startYaw + moveSpin * t; }
+      });
+    }
+
     // ── 每拍回调注册 ──
     const unreg = sequencer.registerAll({
       'M1_start': () => {
@@ -123,6 +144,8 @@ export function execute(cd, piece, fromCell, toCell, opts = {}) {
         piece.position.y = liftPeak * 4 * t * (1 - t);
         // 前压 ramp
         idleGroup.rotation.x = leanVal * Math.sin(Math.PI * t);
+        // 兵种子组随动（贴地冲锋姿态：戈前指 / 马前扑 / 双兵推车等）
+        moveFlourish(piece, type, t);
 
         // 尘土拖尾 每 0.04s
         dustTimer += M2; // 微近似——实际应由帧 dt 累积，这里用总时长近似位置
@@ -196,6 +219,7 @@ export function execute(cd, piece, fromCell, toCell, opts = {}) {
         piece.position.y = 0;
         idleGroup.rotation.x = 0;
         idleGroup.scale.copy(idleBase);
+        resetMovePose(piece, type);   // 归零移动随动的兵种子组，无缝衔接待机
 
         // 清理
         unreg();
