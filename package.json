@@ -8,8 +8,8 @@
     "typecheck": "tsc --noEmit",
     "verify:pwa": "node scripts/verify-pwa.mjs",
     "verify:deploy": "npm run build && npm run verify:pwa",
-    "test": "node --test \"tests/node/*.test.js\"",
-    "test:cov": "c8 --all --include \"src/core/**\" --check-coverage --lines 90 --branches 90 --functions 90 --statements 90 --reporter text --reporter lcov node --test \"tests/node/*.test.js\"",
+    "test": "node --experimental-strip-types --test \"tests/node/*.test.js\"",
+    "test:cov": "c8 --all --include \"src/core/**\" --check-coverage --lines 90 --branches 90 --functions 90 --statements 90 --reporter text --reporter lcov node --experimental-strip-types --test \"tests/node/*.test.js\"",
     "test:browser": "echo \"请打开 tests/browser/index.html 进行浏览器冒烟验证\""
   },
   "devDependencies": {

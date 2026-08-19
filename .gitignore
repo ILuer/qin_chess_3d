@@ -3,6 +3,11 @@ node_modules/
 dist/
 build/
 *.log
+
+# ---- TS 迁移（2026-08-20）：src 全面启用 TypeScript，js 仅物理残留待清理 ----
+# 迁移完成：src/** 已 .ts 化；工作树残留 .js 因环境写保护无法物理删除，
+# 通过 git rm --cached 移出索引 + 本规则防呆，禁止任何 js 重新入库。
+src/**/*.js
 npm-debug.log*
 
 # ---- 测试工具链 ----
