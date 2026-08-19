@@ -518,10 +518,14 @@ export class Animator {
    *   L1 子组微动层（按兵种正弦摆动）
    *   L2 偶发脉冲层（确定性门控波形，无随机/无状态）
    * _busy 时对「待机专属通道」幂等归零（绝不写战斗拥有的通道/节点，见 zeroChannels）。
+   * ★ A5 farView 早退（ADR-3 / animation-spec §5.1）：远景（>12 单位）仅写 L0 呼吸，
+   *   关 L1/L2（写入 −78%）；selected=true 冻结降档（选中棋子全量，无姿态跳变）。
    * @param {THREE.Object3D} group 棋子根 Group
    * @param {number} t 当前秒（performance.now()/1000）
+   * @param {boolean} [selected] 是否选中（冻结降档保护）
+   * @param {boolean} [farView] 是否远景（>12 单位；关 L1/L2）
    */
-  tickIdle(group: any, t: number, selected?: boolean): void {
+  tickIdle(group: any, t: number, selected?: boolean, farView?: boolean): void {
     if (!group || !group.userData) return;
     const ud = group.userData;
     // 防御：_busy 卡死保险（见 IDLE_BUSY_DEADMAN_S）。基于帧时钟 t（仅主循环运行时推进），
@@ -564,15 +568,19 @@ export class Animator {
       return;
     }
     const sel = !!selected;
+    const far = !!farView;
     const amp = sel ? 1.8 : 1;   // 选中放大（Juice 选中强调 / Windex 焦点）
     const ph = ud.idlePhase || 0;
     const bAmp = ((cfg && cfg.breathe) || 0.012) * IDLE_AMP_SCALE;
     const sAmp = ((cfg && cfg.sway) || 0.014) * IDLE_AMP_SCALE;
     // L0 呼吸层（保留现公式，幅度按兵种差异化；K/A 最稳）
+    // ★ farView 早退：远景（>12 单位）且未选中时，L0 呼吸仍写（保留呼吸 + 帅旗微扬基线），
+    //   L1/L2 直接关闭 —— 把待机写入从 ~290 次/帧降到 ~64 次/帧（ADR-3）。
     idleGroup.position.y = Math.sin(t * 1.15 + ph) * bAmp * amp;
     idleGroup.rotation.z = Math.sin(t * 0.85 + ph) * sAmp * amp;
 
     if (!sg || !cfg) return;
+    if (far && !sel) return;   // ★ 远景降档：关 L1/L2（选中冻结降档保护，FAR-004）
     // L1 子组微动层（个性化主体；无每帧对象分配）
     // 数据约定：w[1] 为 'x'|'y'|'z' 单字符轴名，对应 sub.rotation[axis]。
     // ★ 原 bug：sub[w[1]] 写入伪属性（如 sub.z），THREE.Object3D 无 .x/.y/.z 直接访问器，

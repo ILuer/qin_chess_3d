@@ -12,6 +12,17 @@
 import { PT, PALETTE } from '../../core/constants.ts';
 
 // ═══════════════════════════════════════════════════════════════
+// §0 性能预算常量
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * 全盘 draw call 预算上限（Phase D4 / 验收 V8）。
+ * 依据：design/art/piece-animation-spec.md §5.2 性能预算（新增子组后总 draw call ≤155，现 141~145）。
+ * 用途：性能剖析门禁（tests/node/perf-contract.test.js PERF-001）+ 浏览器 profiling 对照基准。
+ */
+export const DRAW_CALL_BUDGET = 155;
+
+// ═══════════════════════════════════════════════════════════════
 // §1 移动节拍参数 MOVE_BEAT（替代单一 TIMING.moveDuration）
 // ═══════════════════════════════════════════════════════════════
 
@@ -394,8 +405,10 @@ export const IDLE_PIECE = {
     l2: [
       ['horses', 'x', 0.045, 7.0]
     ],
-    // windUp 写 spearman.x / driver.x → 只归零 horses.x / body.x
-    zeroChannels: ['horses.rotation.x', 'body.rotation.x']
+    // windUp/strike 写 spearman.x / driver.x / horses.x → 只归零 body.x
+    // （horses.rotation.x 是战斗通道：A2 双马前冲由 strike 写，若被 busy 每帧归零则视觉无效 —— §4.3 纪律；
+    //   body.rotation.x 仅待机 L1 写、战斗不写，仍为合法 zeroChannel）
+    zeroChannels: ['body.rotation.x']
   },
   [PT.CANNON]: {
     desc: '双兵左右反相检修 + 脉冲侧向交替（C）',
@@ -425,6 +438,147 @@ export const IDLE_PIECE = {
     l2: [],
     // windUp 写 sword.z / throne.x → 只归零 rArm.z / rArm.x / body.x / banner.z
     zeroChannels: ['rArm.rotation.z', 'rArm.rotation.x', 'body.rotation.x', 'banner.rotation.z']
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════
+// §8.5 数据驱动姿态表 POSE_TABLE（Phase A3 + B1-B5）
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * 兵种姿态四元组数据表：每兵种 × 三态（idle/move/capture）× 三段式（anticipation/action/recovery）。
+ *
+ * 来源：design/art/piece-animation-spec.md §3（每兵种关键帧/时长/缓动/子组四元组）、§4.3（子组命名）、
+ *       design/gameplay/piece-combat-action-design.md §4（节奏表，总长锚定 MOVE_TOTAL/CAPTURE_TOTAL）。
+ *
+ * 字段约定（A3 验收：姿态/时长/缓动/子组通道 四元组）：
+ *   sub        —— 子组通道峰值（rotation/position/scale，数值=峰值幅度，动画按阶段包络应用）
+ *   duration   —— 时长（秒，与现有 MOVE_BEAT/CAPTURE_BEAT/IDLE 锚点一致）
+ *   easing     —— 缓动名（引用 animator.EASE.* 键名，字符串）
+ *   channels   —— 'sub.prop.axis' 通道串（供 zeroChannels 交叉检查，§4.3 通道避让纪律）
+ *
+ * 总长硬规则（P5）：move.action.duration = MOVE_CRUISE；capture.anticipation/action/recovery
+ *   = CAPTURE_BEAT.A1/A2/A5 —— 写实只做内部时间重分配，不改拍长。
+ */
+export const POSE_TABLE: Record<string, Record<string, any>> = {
+  [PT.PAWN]: {
+    idle: {
+      anticipation: { sub: { body: { rotation: { x: 0.028 } } }, duration: 0.87, ease: 'easeOutQuad', channels: ['body.rotation.x'] },
+      action: { sub: { arm: { rotation: { x: 0.055 } } }, duration: 5.0, ease: 'easeOutQuad', channels: ['arm.rotation.x'] },
+      recovery: { sub: { arm: { rotation: { z: 0 } } }, duration: 0.5, ease: 'easeInOutQuad', channels: ['arm.rotation.z'] }
+    },
+    move: {
+      anticipation: { sub: { arm: { rotation: { x: -0.15 } } }, duration: 0.14, ease: 'easeOutQuad', channels: ['arm.rotation.x'] },
+      action: { sub: { arm: { rotation: { x: -0.32 } }, legs: { rotation: { x: 0.16 } } }, duration: 0.14, ease: 'easeInCubic', channels: ['arm.rotation.x', 'legs.rotation.x'] },
+      recovery: { sub: { arm: { rotation: { x: 0 } }, legs: { rotation: { x: 0 } } }, duration: 0.30, ease: 'easeInOutQuad', channels: ['arm.rotation.x', 'legs.rotation.x'] }
+    },
+    capture: {
+      anticipation: { sub: { arm: { rotation: { x: -0.25 } } }, duration: 0.13, ease: 'easeOutQuad', channels: ['arm.rotation.x'] },
+      action: { sub: { arm: { rotation: { x: -0.55 } } }, duration: 0.09, ease: 'easeInCubic', channels: ['arm.rotation.x'] },
+      recovery: { sub: { arm: { rotation: { x: 0 } } }, duration: 0.24, ease: 'easeInOutQuad', channels: ['arm.rotation.x'] }
+    }
+  },
+  [PT.HORSE]: {
+    idle: {
+      anticipation: { sub: { mount: { rotation: { x: -0.048 } } }, duration: 0.87, ease: 'easeOutQuad', channels: ['mount.rotation.x'] },
+      action: { sub: { mount: { rotation: { x: -0.040 } } }, duration: 6.5, ease: 'easeOutQuad', channels: ['mount.rotation.x'] },
+      recovery: { sub: { rider: { rotation: { z: 0 } } }, duration: 0.5, ease: 'easeInOutQuad', channels: ['rider.rotation.z'] }
+    },
+    move: {
+      anticipation: { sub: { rider: { rotation: { x: -0.10 } } }, duration: 0.14, ease: 'easeOutQuad', channels: ['rider.rotation.x'] },
+      action: { sub: { mount: { rotation: { x: -0.22 } }, rider: { rotation: { x: -0.25 } } }, duration: 0.08, ease: 'easeInCubic', channels: ['mount.rotation.x', 'rider.rotation.x'] },
+      recovery: { sub: { mount: { rotation: { x: 0 } }, rider: { rotation: { x: 0 } } }, duration: 0.30, ease: 'easeInOutQuad', channels: ['mount.rotation.x', 'rider.rotation.x'] }
+    },
+    capture: {
+      anticipation: { sub: { mount: { rotation: { x: 0.1 } }, rider: { rotation: { x: -0.2 } } }, duration: 0.15, ease: 'easeOutQuad', channels: ['mount.rotation.x', 'rider.rotation.x'] },
+      action: { sub: { rider: { rotation: { x: -0.75 } }, mount: { rotation: { x: -0.35 } } }, duration: 0.09, ease: 'easeInCubic', channels: ['rider.rotation.x', 'mount.rotation.x'] },
+      recovery: { sub: { rider: { rotation: { x: 0 } }, mount: { rotation: { x: 0 } } }, duration: 0.28, ease: 'easeInOutQuad', channels: ['rider.rotation.x', 'mount.rotation.x'] }
+    }
+  },
+  [PT.ELEPHANT]: {
+    idle: {
+      anticipation: { sub: { arms: { rotation: { z: 0.060 } } }, duration: 0.87, ease: 'easeOutQuad', channels: ['arms.rotation.z'] },
+      action: { sub: { arms: { rotation: { x: 0.050 } } }, duration: 6.0, ease: 'easeOutQuad', channels: ['arms.rotation.x'] },
+      recovery: { sub: { arms: { rotation: { z: 0 } } }, duration: 0.5, ease: 'easeInOutQuad', channels: ['arms.rotation.z'] }
+    },
+    move: {
+      anticipation: { sub: { arms: { rotation: { z: -0.10 } } }, duration: 0.15, ease: 'easeOutQuad', channels: ['arms.rotation.z'] },
+      action: { sub: { arms: { rotation: { z: 0.22 } }, robe: { rotation: { x: 0.15 } } }, duration: 0.16, ease: 'easeInCubic', channels: ['arms.rotation.z', 'robe.rotation.x'] },
+      recovery: { sub: { arms: { rotation: { z: 0 } }, robe: { rotation: { x: 0 } } }, duration: 0.30, ease: 'easeInOutQuad', channels: ['arms.rotation.z', 'robe.rotation.x'] }
+    },
+    capture: {
+      anticipation: { sub: { arms: { rotation: { z: -0.3 } }, robe: { rotation: { x: 0.15 } } }, duration: 0.18, ease: 'easeOutQuad', channels: ['arms.rotation.z', 'robe.rotation.x'] },
+      action: { sub: { arms: { rotation: { z: 0.75 } }, robe: { rotation: { z: 0.40 } } }, duration: 0.09, ease: 'easeInCubic', channels: ['arms.rotation.z', 'robe.rotation.z'] },
+      recovery: { sub: { arms: { rotation: { z: 0 } }, robe: { rotation: { z: 0, x: 0 } } }, duration: 0.32, ease: 'easeInOutQuad', channels: ['arms.rotation.z', 'robe.rotation.z'] }
+    }
+  },
+  [PT.ADVISOR]: {
+    idle: {
+      anticipation: { sub: { body: { rotation: { z: 0.014 } } }, duration: 0.87, ease: 'easeOutQuad', channels: ['body.rotation.z'] },
+      action: { sub: { sword: { rotation: { z: 0.024 } } }, duration: 2.5, ease: 'easeOutQuad', channels: ['sword.rotation.z'] },
+      recovery: { sub: { body: { rotation: { z: 0 } } }, duration: 0.5, ease: 'easeInOutQuad', channels: ['body.rotation.z'] }
+    },
+    move: {
+      anticipation: { sub: { sword: { rotation: { z: -0.08 } } }, duration: 0.14, ease: 'easeOutQuad', channels: ['sword.rotation.z'] },
+      action: { sub: { sword: { rotation: { z: -0.12 } }, shield: { rotation: { x: -0.10 } } }, duration: 0.08, ease: 'easeInCubic', channels: ['sword.rotation.z', 'shield.rotation.x'] },
+      recovery: { sub: { sword: { rotation: { z: 0 } }, shield: { rotation: { x: 0 } } }, duration: 0.26, ease: 'easeInOutQuad', channels: ['sword.rotation.z', 'shield.rotation.x'] }
+    },
+    capture: {
+      anticipation: { sub: { sword: { rotation: { z: -0.4 } }, shield: { rotation: { x: -0.15 } } }, duration: 0.13, ease: 'easeOutQuad', channels: ['sword.rotation.z', 'shield.rotation.x'] },
+      action: { sub: { sword: { rotation: { z: -0.85 } }, shield: { rotation: { x: -0.25 } } }, duration: 0.08, ease: 'easeInCubic', channels: ['sword.rotation.z', 'shield.rotation.x'] },
+      recovery: { sub: { sword: { rotation: { z: 0 } }, shield: { rotation: { x: 0 } } }, duration: 0.26, ease: 'easeInOutQuad', channels: ['sword.rotation.z', 'shield.rotation.x'] }
+    }
+  },
+  [PT.ROOK]: {
+    idle: {
+      anticipation: { sub: { horses: { rotation: { x: 0.040 } } }, duration: 0.87, ease: 'easeOutQuad', channels: ['horses.rotation.x'] },
+      action: { sub: { horses: { rotation: { x: 0.045 } } }, duration: 7.0, ease: 'easeOutQuad', channels: ['horses.rotation.x'] },
+      recovery: { sub: { horses: { rotation: { x: 0 } } }, duration: 0.5, ease: 'easeInOutQuad', channels: ['horses.rotation.x'] }
+    },
+    move: {
+      anticipation: { sub: { driver: { rotation: { x: -0.15 } } }, duration: 0.17, ease: 'easeOutQuad', channels: ['driver.rotation.x'] },
+      action: { sub: { driver: { rotation: { x: -0.20 } }, spearman: { rotation: { x: -0.25 } }, wheelL: { rotation: { x: 0.80 } }, wheelR: { rotation: { x: 0.80 } } }, duration: 0.22, ease: 'easeInCubic', channels: ['driver.rotation.x', 'spearman.rotation.x', 'wheelL.rotation.x', 'wheelR.rotation.x'] },
+      recovery: { sub: { driver: { rotation: { x: 0 } }, spearman: { rotation: { x: 0 } }, wheelL: { rotation: { x: 0 } }, wheelR: { rotation: { x: 0 } } }, duration: 0.32, ease: 'easeInOutQuad', channels: ['driver.rotation.x', 'spearman.rotation.x', 'wheelL.rotation.x', 'wheelR.rotation.x'] }
+    },
+    capture: {
+      anticipation: { sub: { spearman: { rotation: { x: -0.30 } }, driver: { rotation: { x: -0.15 } } }, duration: 0.16, ease: 'easeOutQuad', channels: ['spearman.rotation.x', 'driver.rotation.x'] },
+      action: { sub: { spearman: { rotation: { x: -0.70 } }, horses: { rotation: { x: -0.35 } }, driver: { rotation: { x: -0.25 } }, wheelL: { rotation: { x: 1.20 } }, wheelR: { rotation: { x: 1.20 } } }, duration: 0.09, ease: 'easeInCubic', channels: ['spearman.rotation.x', 'horses.rotation.x', 'driver.rotation.x', 'wheelL.rotation.x', 'wheelR.rotation.x'] },
+      recovery: { sub: { spearman: { rotation: { x: 0 } }, driver: { rotation: { x: 0 } }, wheelL: { rotation: { x: 0 } }, wheelR: { rotation: { x: 0 } } }, duration: 0.30, ease: 'easeInOutQuad', channels: ['spearman.rotation.x', 'driver.rotation.x', 'wheelL.rotation.x', 'wheelR.rotation.x'] }
+    }
+  },
+  [PT.CANNON]: {
+    idle: {
+      anticipation: { sub: { soldierL: { rotation: { x: 0.045 } } }, duration: 0.87, ease: 'easeOutQuad', channels: ['soldierL.rotation.x'] },
+      action: { sub: { soldierL: { rotation: { x: 0.042 } } }, duration: 6.0, ease: 'easeOutQuad', channels: ['soldierL.rotation.x'] },
+      recovery: { sub: { soldierR: { rotation: { x: 0 } } }, duration: 0.5, ease: 'easeInOutQuad', channels: ['soldierR.rotation.x'] }
+    },
+    move: {
+      anticipation: { sub: { soldierL: { rotation: { x: -0.15 } } }, duration: 0.14, ease: 'easeOutQuad', channels: ['soldierL.rotation.x'] },
+      action: { sub: { soldierL: { rotation: { x: -0.30 } }, soldierR: { rotation: { x: -0.30 } }, trebuchet: { rotation: { z: 0.15 } } }, duration: 0.18, ease: 'easeInCubic', channels: ['soldierL.rotation.x', 'soldierR.rotation.x', 'trebuchet.rotation.z'] },
+      recovery: { sub: { soldierL: { rotation: { x: 0 } }, soldierR: { rotation: { x: 0 } }, trebuchet: { rotation: { z: 0 } } }, duration: 0.31, ease: 'easeInOutQuad', channels: ['soldierL.rotation.x', 'soldierR.rotation.x', 'trebuchet.rotation.z'] }
+    },
+    capture: {
+      anticipation: { sub: { trebuchet: { rotation: { z: -0.48 } }, soldierL: { rotation: { x: -0.45 } }, soldierR: { rotation: { x: 0.35 } } }, duration: 0.22, ease: 'easeOutCubic', channels: ['trebuchet.rotation.z', 'soldierL.rotation.x', 'soldierR.rotation.x'] },
+      action: { sub: { trebuchet: { rotation: { z: 0.40 } } }, duration: 0.07, ease: 'easeInCubic', channels: ['trebuchet.rotation.z'] },
+      recovery: { sub: { trebuchet: { rotation: { z: 0 } }, cart: { rotation: { x: -0.10 } }, soldierL: { rotation: { x: -0.20 } }, soldierR: { rotation: { x: -0.20 } } }, duration: 0.36, ease: 'easeOutQuad', channels: ['trebuchet.rotation.z', 'cart.rotation.x', 'soldierL.rotation.x', 'soldierR.rotation.x'] }
+    }
+  },
+  [PT.KING]: {
+    idle: {
+      anticipation: { sub: { rArm: { rotation: { z: 0.058 } } }, duration: 0.87, ease: 'easeOutQuad', channels: ['rArm.rotation.z'] },
+      action: { sub: { banner: { rotation: { z: 0.034 } } }, duration: 2.5, ease: 'easeOutQuad', channels: ['banner.rotation.z'] },
+      recovery: { sub: { rArm: { rotation: { z: 0 } } }, duration: 0.5, ease: 'easeInOutQuad', channels: ['rArm.rotation.z'] }
+    },
+    move: {
+      anticipation: { sub: { throne: { rotation: { x: 0.06 } } }, duration: 0.14, ease: 'easeOutQuad', channels: ['throne.rotation.x'] },
+      action: { sub: { throne: { rotation: { x: -0.06 } }, sword: { rotation: { z: -0.10 } } }, duration: 0.12, ease: 'easeInCubic', channels: ['throne.rotation.x', 'sword.rotation.z'] },
+      recovery: { sub: { throne: { rotation: { x: 0 } }, sword: { rotation: { z: 0 } } }, duration: 0.30, ease: 'easeInOutQuad', channels: ['throne.rotation.x', 'sword.rotation.z'] }
+    },
+    capture: {
+      anticipation: { sub: { sword: { rotation: { z: -0.25 } }, throne: { rotation: { x: -0.10 } } }, duration: 0.17, ease: 'easeOutQuad', channels: ['sword.rotation.z', 'throne.rotation.x'] },
+      action: { sub: { sword: { rotation: { z: -0.40 } }, throne: { rotation: { x: -0.15 } } }, duration: 0.08, ease: 'easeInCubic', channels: ['sword.rotation.z', 'throne.rotation.x'] },
+      recovery: { sub: { sword: { rotation: { z: 0 } }, throne: { rotation: { x: 0 } } }, duration: 0.30, ease: 'easeInOutQuad', channels: ['sword.rotation.z', 'throne.rotation.x'] }
+    }
   }
 };
 

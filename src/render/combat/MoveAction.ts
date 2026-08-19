@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import { PT, PALETTE, TIMING, toWorld } from '../../core/constants.ts';
 import { headingYaw } from '../animator.ts';
 import { moveFlourish, resetMovePose } from './PieceChoreography.ts';
+import { cellPan } from './coords.ts';
 import {
   getBeatDuration, getLiftMul,
   MOVE_LEAN, M0_LEAN_BACK, M0_SQUASH,
@@ -92,7 +93,13 @@ export function execute(cd: any, piece: any, fromCell: { file: number, rank: num
     // ── 每拍回调注册 ──
     const unreg = sequencer.registerAll({
       'M1_start': () => {
-        try { cd.sfx && cd.sfx.move(type, { pan: _cellPan(toCell), faction: piece.userData.pieceSide }); } catch (e) { /* sfx 未就绪 */ }
+        // C2（ADR-2）：源定位通道 —— 目标格 world pos 喂给 sfx（PannerNode 3D；Safari 回退标量 pan）
+        try {
+          if (cd.sfx && cd.sfx._internals && cd.sfx._internals.updateSourceWorldPos) {
+            cd.sfx._internals.updateSourceWorldPos({ x: toW.x, y: 0, z: toW.z });
+          }
+        } catch (e) { /* sfx 未就绪 */ }
+        try { cd.sfx && cd.sfx.move(type, { pan: cellPan(toCell), faction: piece.userData.pieceSide }); } catch (e) { /* sfx 未就绪 */ }
       },
       'M4_start': () => {
         effects.spawnImpactParticles(endPos.clone(), PALETTE.liuJin, { count: 42, ripple: true });
@@ -236,10 +243,4 @@ export function execute(cd: any, piece: any, fromCell: { file: number, rank: num
 
     animator.seq(steps);
   });
-}
-
-/** 按 cell 计算 pan（−1..1） */
-function _cellPan(cell: { file: number, rank: number }): number {
-  const x = cell.file - 4;  // file 0..8 → -4..4
-  return Math.max(-0.7, Math.min(0.7, x / 4 * 0.7));
 }

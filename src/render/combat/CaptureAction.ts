@@ -12,9 +12,10 @@ import {
   getCaptureBeat, getLiftMul, clampA0,
   MOVE_LEAN, M0_LEAN_BACK, M0_SQUASH,
   M3_OVERSHOOT, M4_SQUASH,
-  HITSTOP, AI_SPEED_MUL, IMPACT_LEVELS
+  HITSTOP, AI_SPEED_MUL, IMPACT_LEVELS, CAPTURE_TOTAL, CAPTURE_BEAT
 } from './CombatConstants.ts';
 import { windUp, strike, settle, applyDissolvePose } from './PieceChoreography.ts';
+import { cellPan } from './coords.ts';
 
 /**
  * 执行吃子演出
@@ -102,7 +103,15 @@ export function execute(cd: any, attacker: any, victim: any, fromCell: { file: n
     const totalBeforeT = A0 + A1 + A2;
     const impactPerfTime = performance.now() + totalBeforeT * 1000;
 
-    // 音效：plan（若 sfx 就绪）
+    // C2（ADR-2）：松耦合 3D 源定位通道 —— 把受害者格 world pos 喂给 sfx 的 sourceWorldPos，
+    // 使本拍的 PannerNode 直接落点（render 侧不 import audio 内容；Safari 回退标量 pan 零破坏）。
+    try {
+      if (cd.sfx && cd.sfx._internals && cd.sfx._internals.updateSourceWorldPos) {
+        cd.sfx._internals.updateSourceWorldPos({ x: toW.x, y: 0, z: toW.z });
+      }
+    } catch (e) { /* sfx 未就绪，忽略 */ }
+
+    // 音效：plan（若 sfx 就绪）—— C3（ADR-4）：combat.plan 内部已改 ctx 绝对时间渲染（无 setTimeout）
     try {
       if (cd.sfx && cd.sfx.combat && cd.sfx.combat.plan) {
         const clock = cd.sfx.clock ? cd.sfx.clock() : { ctxTime: 0, perfTime: performance.now() };
@@ -112,7 +121,7 @@ export function execute(cd: any, attacker: any, victim: any, fromCell: { file: n
           faction: aSide,
           victim: { type: vType, side: victim.userData.pieceSide },
           impactAt: impactCtxTime,
-          panFrom: _cellPan(fromCell), panTo: _cellPan(toCell),
+          panFrom: cellPan(fromCell), panTo: cellPan(toCell),
           hitstop: A3, density: 'full', tension: cd._tension || 0
         });
       }
@@ -287,7 +296,13 @@ export function execute(cd: any, attacker: any, victim: any, fromCell: { file: n
 // ═══════════════════════════════════════════════════════════════
 
 /**
- * 炮远程吃子：本体不平移，弹丸飞行命中
+ * 炮远程吃子：本体不平移，显式四段 seq（装填 LOAD → 瞄准 AIM → 射击 FIRE → 后坐 RECOIL）。
+ *
+ * Phase A2 重构（docs/piece-combat-implementation-plan.md A2 + animation-spec §3.6）：
+ *   - 四段总长锚定 CAPTURE_TOTAL.C = 1.25s（P5 节奏硬规则：写实只做内部时间重分配，不拖局）
+ *   - 装填段锚定 CAPTURE_BEAT.C.A1 = 0.22（R1 指出现状未使用，本次落地）
+ *   - 保留「全程输入锁 + onLand(_busy 释放) 回调」收尾契约；命中帧 T 落 FIRE 末
+ *   - animator.cannonCapture 保留为兼容回退（标注废弃），本路径不再委托
  */
 function executeCannon(cd: any, attacker: any, victim: any, fromCell: { file: number, rank: number }, toCell: { file: number, rank: number }, opts: { aiFast?: boolean, impactLevel?: string, onComplete?: () => void } = {}): Promise<void> {
   return new Promise<void>((resolve) => {
@@ -305,50 +320,186 @@ function executeCannon(cd: any, attacker: any, victim: any, fromCell: { file: nu
     const toW = toWorld(toCell.file, toCell.rank);
     const fromVec = new THREE.Vector3(fromW.x, 0, fromW.z);
     const toVec = new THREE.Vector3(toW.x, 0, toW.z);
-
-    // 弹丸飞行时间
     const dist = fromVec.distanceTo(toVec);
     const flightTime = Math.max(0.12, Math.min(0.36, dist * 0.06 / speedMul));
 
-    // 使用旧 animator.cannonCapture，但在 onHit 中注入 SFX + hitstop
-    animator.cannonCapture(attacker, victim, fromVec, toVec, aSide, {
-      onHit: (v: any) => {
-        // SFX（炮吃子命中音）
-        try {
-          if (cd.sfx && cd.sfx.capture) {
-            cd.sfx.capture(PT.CANNON, { pan: _cellPan(toCell), faction: aSide });
-          }
-          if (cd.sfx && cd.sfx.captured) {
-            cd.sfx.captured(vType, victim.userData.pieceSide, { pan: _cellPan(toCell) });
-          }
-        } catch (e) {}
+    // ── 四段时长（总长锚定 CAPTURE_TOTAL.C；装填引用 CAPTURE_BEAT.C.A1=0.22）──
+    const totalTarget = CAPTURE_TOTAL.C;                                 // 1.25s（A2 验收锚点）
+    const distFactor = Math.max(0, Math.abs(toCell.file - fromCell.file) + Math.abs(toCell.rank - fromCell.rank)) / 8;
+    const A0 = clampA0('C', distFactor) * speedMul;                      // 冲锋接近（装填前置）
+    const A1 = CAPTURE_BEAT.C.A1 * speedMul;                             // 装填拍 0.22（CAN-003 锚点）
+    const A2 = getCaptureBeat('A2', 'C') * speedMul;                     // 射击（抛臂甩出）0.07
+    const A5 = getCaptureBeat('A5', 'C') * speedMul;                     // 后坐复位 0.36
+    const loadDur = A0 + A1;                                             // ① 装填 = 冲锋 + 装填拍
+    const fireDur = A2 + flightTime;                                     // ③ 射击 = 甩臂 + 弹道飞行
+    const recoilDur = A5;                                                // ④ 后坐复位
+    const aimDur = Math.max(0.001, totalTarget - loadDur - fireDur - recoilDur); // ② 瞄准 = 余量（总长恒定 = CAPTURE_TOTAL.C）
 
-        // 溶解受害者
+    const sg = attacker.userData.subGroups || {};
+    const orient = attacker.getObjectByName('orient') || attacker;
+    const idleGroup = orient.getObjectByName('idleGroup') || orient;
+
+    // ── 朝向：瞄准段平滑转体对准目标（只写根 Group.rotation.y，绝不写 orient）──
+    const aimSpin = headingYaw(aSide, toVec.x - fromVec.x, toVec.z - fromVec.z) - attacker.rotation.y;
+    let spin = aimSpin;
+    while (spin > Math.PI) spin -= Math.PI * 2;
+    while (spin < -Math.PI) spin += Math.PI * 2;
+    if (Math.abs(spin) > 0.001) {
+      const startYaw = attacker.rotation.y;
+      animator.add({
+        duration: Math.max(0.001, aimDur),
+        delay: Math.max(0, loadDur),
+        easing: animator.EASE.easeInOutCubic,
+        onUpdate: (t: number) => { attacker.rotation.y = startYaw + spin * t; }
+      });
+    }
+
+    // ── 命中帧集中触发（FIRE 末 = 弹丸着点；SFX/VFX/hitstop/受害者崩解全部对齐）──
+    const fireImpact = (v: any): void => {
+      const pos = toVec.clone();
+      try { cd.sequencer && cd.sequencer.fire('T_ZERO'); } catch (e) { /* sequencer 未就绪 */ }
+      // SFX（炮吃子命中音）
+      // C3（ADR-4）：命中帧 T 用 ctx 绝对时间触发 stoneImpact（playAt 无节流、帧级对齐）；
+      //   C2（ADR-2）：先喂 sourceWorldPos 通道做 PannerNode 3D 定位（受害者格）。
+      //   旧 SFX 无 playAt 时回退 capture/captured（标量 pan，行为不变）。
+      try {
+        const wPos = { x: toW.x, y: 0, z: toW.z };
+        if (cd.sfx && cd.sfx._internals && cd.sfx._internals.updateSourceWorldPos) {
+          cd.sfx._internals.updateSourceWorldPos(wPos);
+        }
+        if (cd.sfx && typeof cd.sfx.playAt === 'function') {
+          const clk = cd.sfx.clock ? cd.sfx.clock() : null;
+          const tHit = clk && clk.ctxTime != null ? clk.ctxTime + 0.002 : 0;
+          cd.sfx.playAt('cannon.capture.stoneImpact', tHit, { faction: aSide });
+        } else if (cd.sfx && cd.sfx.capture) {
+          cd.sfx.capture(PT.CANNON, { pan: cellPan(toCell), faction: aSide });
+        }
+        if (cd.sfx && cd.sfx.captured) {
+          cd.sfx.captured(vType, victim.userData.pieceSide, { pan: cellPan(toCell) });
+        }
+      } catch (e) { /* sfx 未就绪 */ }
+      // 溶解受害者
+      try {
         animator.dissolvePiece(v, {
-          delay: 0,
-          duration: 0.42,
-          onComplete: (m: any) => { try { cd.piecesGroup.remove(m); } catch (e) {} }
+          delay: 0, duration: 0.42,
+          onComplete: (m: any) => { try { cd.piecesGroup.remove(m); } catch (e) { /* 已移除 */ } }
         });
+      } catch (e) { /* 安全兜底 */ }
+      // VFX
+      effects.spawnImpactParticles(pos, PALETTE.chiHong, { count: impactParam.particleCount });
+      effects.screenShake(impactParam.shakeIntensity, impactParam.shakeDuration);
+      // hitstop
+      if (A3 > 0 && cd.hitstop) cd.hitstop.freeze(A3);
+    };
 
-        // VFX
-        effects.spawnImpactParticles(toVec.clone(), PALETTE.chiHong, { count: impactParam.particleCount });
-        effects.screenShake(impactParam.shakeIntensity, impactParam.shakeDuration);
+    // ── 弹丸（场景缺失时安全跳过 —— node 测试桩无 parent）──
+    const scene = attacker.parent;
+    let proj: any = null;
+    let arc: any = null;
+    const tmp = new THREE.Vector3();
 
-        // hitstop
-        if (A3 > 0 && cd.hitstop) {
-          cd.hitstop.freeze(A3);
+    const steps = [];
+
+    // ① LOAD · 装填（抱石 → 上弦 → 拉弦 → 就位）
+    steps.push({
+      duration: Math.max(0.001, loadDur),
+      lock: true,
+      easing: animator.EASE.easeOutCubic,
+      onUpdate: (t: number) => {
+        // 抛臂拉弦：全程累计，越拉越慢 = 蓄力感（easeOutCubic 已由 step easing 施加）
+        if (sg.trebuchet) sg.trebuchet.rotation.z = -0.48 * t;
+        // 双兵协作：前 1/3 抱石 / 中 1/3 上弦 / 后 1/3 就位警戒
+        if (sg.soldierL && sg.soldierR) {
+          if (t < 1 / 3) {
+            sg.soldierL.rotation.x = -0.45 * (t * 3);
+            sg.soldierR.rotation.x = 0;
+          } else if (t < 2 / 3) {
+            sg.soldierR.rotation.x = 0.35 * ((t - 1 / 3) * 3);
+            sg.soldierL.rotation.x = -0.45;
+          } else {
+            sg.soldierL.rotation.x = -0.15;
+            sg.soldierR.rotation.x = -0.15;
+          }
+        }
+      }
+    });
+
+    // ② AIM · 瞄准（锁定拉弦峰值 + 车架压稳 + 整体转体对准）
+    steps.push({
+      duration: Math.max(0.001, aimDur),
+      lock: true,
+      easing: animator.EASE.easeInOutCubic,
+      onUpdate: (t: number) => {
+        if (sg.trebuchet) sg.trebuchet.rotation.z = -0.48;   // 峰值锁定（瞄准期不动）
+        if (sg.cart) sg.cart.rotation.x = -0.06 * t;         // 双兵压身稳住车架
+      }
+    });
+
+    // ③ FIRE · 射击（抛臂甩出 → 石弹抛物线飞行；命中帧 T 在末）
+    const swingRatio = Math.max(0.001, A2 / fireDur);
+    steps.push({
+      duration: Math.max(0.001, fireDur),
+      lock: true,
+      easing: animator.EASE.easeInCubic,
+      onStart: () => {
+        if (scene) {
+          proj = new THREE.Mesh(
+            new THREE.SphereGeometry(0.07, 10, 8),
+            new THREE.MeshStandardMaterial({ color: 0x6f7d63, emissive: 0x241f15, emissiveIntensity: 0.45, roughness: 0.9, metalness: 0.1 })
+          );
+          proj.castShadow = true;
+          const start = fromVec.clone(); start.y = (attacker.userData.topY || 1.0) * 0.6 + 0.2;
+          proj.position.copy(start);
+          const mid = new THREE.Vector3((start.x + toVec.x) / 2, Math.max(start.y, toVec.y) + 0.95, (start.z + toVec.z) / 2);
+          arc = new THREE.CatmullRomCurve3([start, mid, toVec.clone()]);
+          scene.add(proj);
         }
       },
-      onLand: () => {
+      onUpdate: (t: number) => {
+        const swingT = Math.min(1, t / swingRatio);   // 抛臂甩出进度（前 A2 占比）
+        if (sg.trebuchet) sg.trebuchet.rotation.z = -0.48 * (1 - swingT) + 0.40 * Math.sin(Math.PI * swingT);
+        if (proj && arc) {
+          const flightT = Math.max(0, (t - swingRatio) / (1 - swingRatio));
+          arc.getPoint(Math.min(1, flightT), tmp);
+          proj.position.copy(tmp);
+        }
+      },
+      onComplete: () => {
+        if (scene && proj) {
+          scene.remove(proj);
+          if (proj.geometry && proj.geometry.dispose) proj.geometry.dispose();
+          if (proj.material && proj.material.dispose) proj.material.dispose();
+        }
+        fireImpact(victim);   // ★★★★★ 命中帧 T ★★★★★
+      }
+    });
+
+    // ④ RECOIL · 后坐（抛臂惯性过冲 +0.18 阻尼回摆；车架后坐；双兵戒备复位）
+    steps.push({
+      duration: Math.max(0.001, recoilDur),
+      lock: true,
+      easing: animator.EASE.easeOutQuad,
+      onUpdate: (t: number) => {
+        const osc = Math.sin(Math.PI * t) * (1 - t);   // 阻尼随动（随动不回弹过冲）
+        if (sg.trebuchet) sg.trebuchet.rotation.z = 0.18 * osc;
+        if (sg.cart) sg.cart.rotation.x = -0.10 * (1 - t);
+        if (sg.soldierL) sg.soldierL.rotation.x = -0.20 * (1 - t);
+        if (sg.soldierR) sg.soldierR.rotation.x = -0.20 * (1 - t);
+      },
+      onComplete: () => {
+        // 复位全部子组（幂等）
+        if (sg.trebuchet) sg.trebuchet.rotation.z = 0;
+        if (sg.cart) sg.cart.rotation.x = 0;
+        if (sg.soldierL) sg.soldierL.rotation.x = 0;
+        if (sg.soldierR) sg.soldierR.rotation.x = 0;
+        idleGroup.rotation.x = 0;
+        // 收尾契约：释放 _busy + onComplete 回调（与旧 onLand 时机一致）
         attacker.userData._busy = false;
         if (opts.onComplete) opts.onComplete();
         resolve();
       }
     });
-  });
-}
 
-function _cellPan(cell: { file: number, rank: number }): number {
-  const x = cell.file - 4;
-  return Math.max(-0.7, Math.min(0.7, x / 4 * 0.7));
+    animator.seq(steps);
+  });
 }

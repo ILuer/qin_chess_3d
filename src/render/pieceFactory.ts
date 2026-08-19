@@ -612,6 +612,7 @@ function buildAdvisor(mp: any, M: any, K: any, side: string): void {
   const Pb = mp.get('body');    // 躯干 + 腿 + 头 + 武弁（dissolvePose 整体崩姿）
   const armP = mp.get('arms');  // 双臂 + 手（按剑下压，绕肩 pivot）
   const swordP = mp.get('sword'); // 剑（挥斩，绕握把 pivot）
+  const shieldP = mp.get('shield'); // 盾（A4 新增子组：近卫剑盾的圆盾，windUp/strike 前顶格挡）
 
   // 大腿/小腿/战靴（anatomy 腿，藏于甲裙之内，仅靴底露出）
   Pb.strut(M.clothDeep, [+0.040, 0.150, 0.000], [+0.040, FOOT + 0.080, 0.000], 0.028, 0.024, 8);
@@ -667,6 +668,14 @@ function buildAdvisor(mp: any, M: any, K: any, side: string): void {
   swordP.add(box(0.094, 0.022, 0.030), K.bronze, { pos: [0, 0.500, -0.170] });
   swordP.add(cyl(0.017, 0.019, 0.086, 10), M.leather, { pos: [0, 0.554, -0.170] });
   swordP.add(sph(0.026, 10, 8), K.bronze, { pos: [0, 0.606, -0.170] });
+
+  // 圆盾（shield 组，A4 新增子组）—— 贴身前（z=-0.20，略前于甲裙前表面），
+  // 近卫剑盾的盾：木心蒙皮 + 鎏金包边 + 中心护手。绕盾心 pivot（SUBGROUP_JOINTS.A.shield），
+  // windUp/strike 前顶格挡（shield.x → -0.15/-0.25，animation-spec §3.4）。
+  shieldP.add(cyl(0.112, 0.112, 0.022, 14), M.leather, { pos: [0, 0.45, -0.20], rot: [Math.PI / 2, 0, 0] });         // 盾面（皮甲蒙皮，面朝 -Z）
+  shieldP.add(tor(0.112, 0.012, 5, 16), M.accentDim, { pos: [0, 0.45, -0.20] });          // 鎏金包边
+  shieldP.add(cyl(0.096, 0.096, 0.012, 14), M.wood, { pos: [0, 0.45, -0.194], rot: [Math.PI / 2, 0, 0] });          // 木心内层
+  shieldP.add(sph(0.030, 10, 8), K.bronze, { pos: [0, 0.45, -0.186] });                    // 中心护手凸起
 }
 
 /* ============================================================
@@ -675,28 +684,21 @@ function buildAdvisor(mp: any, M: any, K: any, side: string): void {
  * ============================================================ */
 
 function buildChariot(mp: any, M: any, K: any, side: string): void {
-  const PB = mp.base;       // 底座等公共零件
+  const PB = mp.base;       // 底座等公共零件（车轮拆出后仅剩车轴）
   const Ph = mp.get('horses'); // 双马
   const Pc = mp.get('body');   // 车体
   const Pd = mp.get('driver'); // 御马兵
   const Ps = mp.get('spearman');// 持戈兵
+  const Pwl = mp.get('wheelL'); // A4 新增子组：左轮（轮转）
+  const Pwr = mp.get('wheelR'); // A4 新增子组：右轮（轮转）
 
-  /* ======== 车轮（放在 base 组，随整体旋转）======== */
+  /* ======== 车轮（A4：拆为 wheelL/wheelR 独立子组，可绕车轴自转做轮转写实；B3 轮转随动）======== */
   const WR = 0.220, TUBE = 0.024, WX = 0.260;
   const HUB = FOOT + WR + TUBE;
 
-  for (let s = -1; s <= 1; s += 2) {
-    const x = WX * s;
-    // ★ L4b 关键剪影件「不降段」（lod-spec §3）：车轮双环 + 辐条 + 轮毂任何 LOD 保段——
-    //   「棋盘上唯一圆环轮廓」是 R 的第一辨识线索（辐条为 box 无段数，天然不受 LOD 影响）。
-    PB.add(torKeep(WR, TUBE, 8, 18), M.wood, { pos: [x, HUB, 0], rot: [0, Math.PI / 2, 0] });
-    PB.add(torKeep(WR - 0.024, 0.010, 5, 16), M.woodDeep, { pos: [x, HUB, 0], rot: [0, Math.PI / 2, 0] });
-    for (let k = 0; k < 4; k++) {
-      PB.add(box(0.018, WR * 1.88, 0.018), M.wood, { pos: [x, HUB, 0], rot: [(k * Math.PI) / 4, 0, 0] });
-    }
-    PB.add(cylKeep(0.044, 0.044, 0.068, 12), M.woodDeep, { pos: [x, HUB, 0], rot: [0, 0, Math.PI / 2] });
-    PB.add(sphKeep(0.032, 10, 8), M.accentDim, { pos: [x * 1.12, HUB, 0] });
-  }
+  buildWheel(Pwl, M, K, -WX, WR, TUBE, HUB);
+  buildWheel(Pwr, M, K, +WX, WR, TUBE, HUB);
+  // 车轴（留在 base，连接两轮，不随轮子自转）
   PB.add(cyl(0.024, 0.024, 0.540, 10), M.wood, { pos: [0, HUB, 0], rot: [0, 0, Math.PI / 2] });
 
   /* ======== 车体（body 组）======== */
@@ -746,6 +748,19 @@ function buildChariot(mp: any, M: any, K: any, side: string): void {
 
   /* ======== 持戈兵（spearman 组，站在车舆后部偏左）======== */
   buildSpearman(Ps, M, K, -0.050, 0.060, 0.88, 0.405);
+}
+
+/** 单侧车轮（A4：wheelL/wheelR 独立子组，绕车轴 HUB pivot 自转）。
+ *  ★ L4b 关键剪影件「不降段」（lod-spec §3）：车轮双环 + 辐条 + 轮毂任何 LOD 保段——
+ *    「棋盘上唯一圆环轮廓」是 R 的第一辨识线索（辐条为 box 无段数，天然不受 LOD 影响）。 */
+function buildWheel(P: any, M: any, K: any, x: number, WR: number, TUBE: number, HUB: number): void {
+  P.add(torKeep(WR, TUBE, 8, 18), M.wood, { pos: [x, HUB, 0], rot: [0, Math.PI / 2, 0] });
+  P.add(torKeep(WR - 0.024, 0.010, 5, 16), M.woodDeep, { pos: [x, HUB, 0], rot: [0, Math.PI / 2, 0] });
+  for (let k = 0; k < 4; k++) {
+    P.add(box(0.018, WR * 1.88, 0.018), M.wood, { pos: [x, HUB, 0], rot: [(k * Math.PI) / 4, 0, 0] });
+  }
+  P.add(cylKeep(0.044, 0.044, 0.068, 12), M.woodDeep, { pos: [x, HUB, 0], rot: [0, 0, Math.PI / 2] });
+  P.add(sphKeep(0.032, 10, 8), M.accentDim, { pos: [x * 1.12, HUB, 0] });
 }
 
 /** 单匹战马（复用给车用，缩放版） */
@@ -1353,10 +1368,10 @@ const MULTI_GROUP_TYPES = new Set(['K', 'C', 'R', 'P', 'A', 'N', 'B']);
  */
 const SUBGROUP_JOINTS: Record<string, Record<string, any>> = {
   P: { body: [0, 0.334, 0], arm: [0, 0.348, 0], legs: [0, -0.086, 0] },
-  A: { body: [0, 0.334, 0], arms: [0, 0.378, 0], sword: [0, 0.328, -0.17] },
+  A: { body: [0, 0.334, 0], arms: [0, 0.378, 0], sword: [0, 0.328, -0.17], shield: [0, 0.45, -0.20] },
   N: { mount: [0, 0.128, 0], rider: [0, 0.328, 0] },
   B: { robe: [0, 0.368, 0], arms: [0, 0.328, -0.10] },
-  R: { horses: [0, 0.168, -0.30], body: [0, 0.288, 0.02], driver: [0.05, 0.378, 0.40], spearman: [-0.05, 0.378, 0.46] },
+  R: { horses: [0, 0.168, -0.30], body: [0, 0.288, 0.02], driver: [0.05, 0.378, 0.40], spearman: [-0.05, 0.378, 0.46], wheelL: [-0.26, 0.330, 0], wheelR: [0.26, 0.330, 0] },
   C: { trebuchet: [0, 0.308, 0], cart: [0, 0.114, 0], soldierL: [-0.25, 0.248, 0.09], soldierR: [0.25, 0.248, 0.09] },
   K: { body: [0, 0.378, 0], throne: [0, 0.028, 0], crown: [0, 0.964, 0], sword: [0.14, 0.434, -0.02], banner: [0, 0.394, 0], rArm: [0.14, 0.46, 0] }
 };

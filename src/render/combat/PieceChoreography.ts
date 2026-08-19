@@ -12,7 +12,7 @@
  */
 
 import { PT } from '../../core/constants.ts';
-import { DISSOLVE_POSE } from './CombatConstants.ts';
+import { DISSOLVE_POSE, POSE_TABLE } from './CombatConstants.ts';
 
 // ═══════════════════════════════════════════════════════════════
 // 内部工具
@@ -30,6 +30,83 @@ function _getGroups(piece: any): { orient: any, idleGroup: any, sub: Record<stri
   return { orient, idleGroup, sub };
 }
 
+/**
+ * 查数据驱动姿态表（Phase A3 / ADR-1）：POSE_TABLE[type][state][stage]。
+ * 缺失/未知兵种/未知状态一律返回 null —— 由调用方走 switch 回退。
+ */
+function _lookupPose(type: string, state: string, stage: string): any {
+  const entry = POSE_TABLE[type];
+  if (!entry || !entry[state]) return null;
+  return entry[state][stage] || null;
+}
+
+/**
+ * 通用：按线性包络应用姿态峰值（windUp 蓄势）：v = peak * t。
+ * sub 缺失/未知子组安全跳过（§4.3 纪律 + A4 新子组单独注册）。
+ */
+function _applyPoseLinear(sub: Record<string, any>, poseSub: any, t: number): void {
+  if (!poseSub || typeof poseSub !== 'object') return;
+  for (const [subName, props] of Object.entries(poseSub)) {
+    const sg = sub[subName];
+    if (!sg) continue;
+    if (!props || typeof props !== 'object') continue;
+    for (const [prop, axes] of Object.entries(props)) {
+      if (prop !== 'rotation' && prop !== 'position' && prop !== 'scale') continue;
+      if (!sg[prop]) continue;
+      for (const [axis, peak] of Object.entries(axes)) {
+        if (typeof peak !== 'number') continue;
+        sg[prop][axis] = peak * t;
+      }
+    }
+  }
+}
+
+/**
+ * 通用：按 sin(πt) 包络应用姿态峰值（strike 挥击 / moveFlourish 巡航）：v = peak * sin(πt)。
+ * 起止归零，与待机/复位无缝衔接（设计 §3 envelope 约定）。
+ */
+function _applyPoseSin(sub: Record<string, any>, poseSub: any, t: number): void {
+  if (!poseSub || typeof poseSub !== 'object') return;
+  const k = Math.sin(Math.PI * t);
+  for (const [subName, props] of Object.entries(poseSub)) {
+    const sg = sub[subName];
+    if (!sg) continue;
+    if (!props || typeof props !== 'object') continue;
+    for (const [prop, axes] of Object.entries(props)) {
+      if (prop !== 'rotation' && prop !== 'position' && prop !== 'scale') continue;
+      if (!sg[prop]) continue;
+      for (const [axis, peak] of Object.entries(axes)) {
+        if (typeof peak !== 'number') continue;
+        sg[prop][axis] = peak * k;
+      }
+    }
+  }
+}
+
+/**
+ * B4：settle 阻尼式随动 —— 对 recovery 姿态列出的每个通道做
+ *   v = v_current * (1-t)·cos(πt/2)
+ * （t=0 保持现值，t=1 归零；带 1 次阻尼回摆，替换旧线性 (1-t) 归零，制造随动感）。
+ */
+function _applyPoseDamp(sub: Record<string, any>, poseSub: any, t: number): void {
+  if (!poseSub || typeof poseSub !== 'object') return;
+  const damp = (1 - t) * Math.cos(Math.PI * t / 2);
+  for (const [subName, props] of Object.entries(poseSub)) {
+    const sg = sub[subName];
+    if (!sg) continue;
+    if (!props || typeof props !== 'object') continue;
+    for (const [prop, axes] of Object.entries(props)) {
+      if (prop !== 'rotation' && prop !== 'position' && prop !== 'scale') continue;
+      if (!sg[prop]) continue;
+      for (const [axis] of Object.entries(axes)) {
+        if (typeof sg[prop][axis] === 'number') {
+          sg[prop][axis] = sg[prop][axis] * damp;
+        }
+      }
+    }
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════
 // 兵种编排方法
 // ═══════════════════════════════════════════════════════════════
@@ -44,7 +121,15 @@ export function windUp(piece: any, type: string, t: number): void {
   const { idleGroup, sub } = _getGroups(piece);
   // 整体由 CaptureAction 控制 idleGroup.rotation.x，这里只操作子组
 
-  // 各兵种子组收势
+  // ★ 数据驱动：查 POSE_TABLE[type].capture.anticipation（A3 / ADR-1）。
+  //   查表成功则按线性包络应用峰值（蓄势段），未知子组安全跳过；失败回退 switch。
+  const entry = _lookupPose(type, 'capture', 'anticipation');
+  if (entry && entry.sub) {
+    _applyPoseLinear(sub, entry.sub, t);
+    return;
+  }
+
+  // 各兵种子组收势（switch 回退）
   switch (type) {
     case PT.PAWN:
       if (sub.arm) sub.arm.rotation.x = -0.25 * t;  // 戈后收
@@ -85,7 +170,13 @@ export function windUp(piece: any, type: string, t: number): void {
  */
 export function strike(piece: any, type: string, victimPos: any, t: number): void {
   const { sub } = _getGroups(piece);
-  // 各兵种武器挥击
+  // ★ 数据驱动：查 POSE_TABLE[type].capture.action；sin(πt) 包络（起止归零，命中帧峰值）。
+  const entry = _lookupPose(type, 'capture', 'action');
+  if (entry && entry.sub) {
+    _applyPoseSin(sub, entry.sub, t);
+    return;
+  }
+  // 各兵种武器挥击（switch 回退）
   switch (type) {
     case PT.PAWN:
       if (sub.arm) sub.arm.rotation.x = -0.55 * Math.sin(Math.PI * t);  // 戈直刺
@@ -123,32 +214,41 @@ export function strike(piece: any, type: string, victimPos: any, t: number): voi
 export function settle(piece: any, type: string, t: number): void {
   const { idleGroup, sub } = _getGroups(piece);
   // idleGroup 由 CaptureAction 控制归零，这里复位子组
+  // ★ 数据驱动：查 POSE_TABLE[type].capture.recovery，对列出通道做阻尼式随动
+  //   v = v·(1-t)·cos(πt/2)（B4：替换线性归零，全兵种统一阻尼）。
+  const entry = _lookupPose(type, 'capture', 'recovery');
+  if (entry && entry.sub) {
+    _applyPoseDamp(sub, entry.sub, t);
+    return;
+  }
+  // switch 回退（同样使用阻尼式）
+  const damp = (1 - t) * Math.cos(Math.PI * t / 2);
   switch (type) {
     case PT.PAWN:
-      if (sub.arm) sub.arm.rotation.x = sub.arm.rotation.x * (1 - t);  // lerp 到 0
+      if (sub.arm) sub.arm.rotation.x = sub.arm.rotation.x * damp;  // 阻尼归零
       break;
     case PT.HORSE:
-      if (sub.rider) sub.rider.rotation.x = sub.rider.rotation.x * (1 - t);
-      if (sub.mount) sub.mount.rotation.x = sub.mount.rotation.x * (1 - t);
+      if (sub.rider) sub.rider.rotation.x = sub.rider.rotation.x * damp;
+      if (sub.mount) sub.mount.rotation.x = sub.mount.rotation.x * damp;
       break;
     case PT.ELEPHANT:
-      if (sub.arms) sub.arms.rotation.z = sub.arms.rotation.z * (1 - t);
-      if (sub.robe) { sub.robe.rotation.z = sub.robe.rotation.z * (1 - t); sub.robe.rotation.x = sub.robe.rotation.x * (1 - t); }
+      if (sub.arms) sub.arms.rotation.z = sub.arms.rotation.z * damp;
+      if (sub.robe) { sub.robe.rotation.z = sub.robe.rotation.z * damp; sub.robe.rotation.x = sub.robe.rotation.x * damp; }
       break;
     case PT.ADVISOR:
-      if (sub.sword) sub.sword.rotation.z = sub.sword.rotation.z * (1 - t);
+      if (sub.sword) sub.sword.rotation.z = sub.sword.rotation.z * damp;
       break;
     case PT.ROOK:
-      if (sub.spearman) sub.spearman.rotation.x = sub.spearman.rotation.x * (1 - t);
-      if (sub.driver) sub.driver.rotation.x = sub.driver.rotation.x * (1 - t);
+      if (sub.spearman) sub.spearman.rotation.x = sub.spearman.rotation.x * damp;
+      if (sub.driver) sub.driver.rotation.x = sub.driver.rotation.x * damp;
       break;
     case PT.CANNON:
-      if (sub.trebuchet) sub.trebuchet.rotation.z = sub.trebuchet.rotation.z * (1 - t);
-      if (sub.soldierL) { sub.soldierL.rotation.x = sub.soldierL.rotation.x * (1 - t); sub.soldierR.rotation.x = sub.soldierR.rotation.x * (1 - t); }
+      if (sub.trebuchet) sub.trebuchet.rotation.z = sub.trebuchet.rotation.z * damp;
+      if (sub.soldierL) { sub.soldierL.rotation.x = sub.soldierL.rotation.x * damp; sub.soldierR.rotation.x = sub.soldierR.rotation.x * damp; }
       break;
     case PT.KING:
-      if (sub.sword) sub.sword.rotation.z = sub.sword.rotation.z * (1 - t);
-      if (sub.throne) sub.throne.rotation.x = sub.throne.rotation.x * (1 - t);
+      if (sub.sword) sub.sword.rotation.z = sub.sword.rotation.z * damp;
+      if (sub.throne) sub.throne.rotation.x = sub.throne.rotation.x * damp;
       break;
     default: break;
   }
@@ -168,6 +268,12 @@ export function settle(piece: any, type: string, t: number): void {
  */
 export function moveFlourish(piece: any, type: string, t: number): void {
   const { sub } = _getGroups(piece);
+  // ★ 数据驱动：查 POSE_TABLE[type].move.action；sin(πt) 包络（0 → 峰值 → 0，无缝衔接待机）。
+  const entry = _lookupPose(type, 'move', 'action');
+  if (entry && entry.sub) {
+    _applyPoseSin(sub, entry.sub, t);
+    return;
+  }
   const k = Math.sin(Math.PI * t);   // 0 → 峰值 → 0
   switch (type) {
     case PT.PAWN:

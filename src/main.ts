@@ -60,6 +60,9 @@ let hoverMesh: any = null;     // 当前悬停浮起的棋子
 let started = false;
 let combatDirector: any = null; // CombatDirector 战场演出总调度
 
+// C2（ADR-2）：AudioListener 每帧更新用的临时前向向量（复用避免每帧分配）
+const _listenerFwd = new THREE.Vector3();
+
 // L4b · 当前应用中的几何 LOD 档位（null=尚未评估；true=低模/远景）
 let currentLodFar: boolean | null = null;
 
@@ -1056,7 +1059,8 @@ function startLoop(): void {
       if (!pieceMeshes[f]) continue;
       for (let r = 0; r < RANKS; r++) {
         const pm = pieceMeshes[f]![r];
-        if (pm) animator.tickIdle(pm, tIdle, pm === selMesh);
+        // A5：传 sceneSys.farView（>12 单位远景）——tickIdle 远景关 L1/L2 早退（ADR-3）
+        if (pm) animator.tickIdle(pm, tIdle, pm === selMesh, sceneSys ? !!sceneSys.farView : false);
       }
     }
     // OQ-6：仅对当前选中棋子播放专属待机音（被吃/移动中跳过，避免抢拍）
@@ -1082,6 +1086,15 @@ function startLoop(): void {
     applyLodByDistance();
     // 跟随相机：scene.update 之后（拿到 controls.update 后的真实相机位）、render 之前
     if (followCam && sceneSys) followCam.update(effectiveDt, sceneSys.camera, sceneSys.controls);
+    // C2（ADR-2）：每帧把相机 world pos/朝向喂给 AudioListener（PannerNode HRTF 定位）。
+    // 仅当 SFX 已就绪且 hasPanner3D 时生效；Safari 回退 StereoPanner（标量 pan）不受影响。
+    if (sceneSys && SFX && SFX._internals && SFX._internals.setListener && SFX._internals.hasPanner3D) {
+      const cam = sceneSys.camera;
+      if (cam) {
+        cam.getWorldDirection(_listenerFwd);
+        SFX._internals.setListener(cam.position, _listenerFwd, cam.up);
+      }
+    }
     if (sceneSys) sceneSys.render();
     if (hud) hud.updateTimer();
     requestAnimationFrame(frame);
