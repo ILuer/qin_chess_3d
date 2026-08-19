@@ -22,6 +22,19 @@ function _getChoreoStub(type) {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// 待机微动全局调参（P3-可见度修正）
+// ---------------------------------------------------------------------------
+// IDLE_AMP_SCALE：待机三层（L0 呼吸 / L1 子组微动 / L2 脉冲）幅度的统一倍率。
+//   原幅度过小（呼吸≈1.7% 身高、摆角<1°），默认相机距离下几乎不可见；
+//   ×2.0 使 7 种兵种待机清晰可辨且不失优雅（不改几何/锚点）。
+//   选中强调（amp 1.8）仍叠加其上；L2 脉冲按同比例放大。
+const IDLE_AMP_SCALE = 2.0;
+// IDLE_BUSY_DEADMAN_S：_busy 卡死保险阈值（渲染帧时钟秒，仅主循环推进时累积，
+//   后台标签页不误触）。若移动/吃子演出因异常序列器未收尾导致 _busy 永久为 true，
+//   超过此阈值后自动释放，避免待机被永久压制。15s ≫ 任何真实走子/吃子时长。
+const IDLE_BUSY_DEADMAN_S = 15;
+
 /**
  * 朝向：棋子绕 Y 轴转向移动方向（本地 +Z/-Z 为前，由阵营决定）。
  *   red 本地前向 = -Z，black 本地前向 = +Z（orient 已 180°）。
@@ -457,6 +470,17 @@ export class Animator {
   tickIdle(group, t, selected) {
     if (!group || !group.userData) return;
     const ud = group.userData;
+    // 防御：_busy 卡死保险（见 IDLE_BUSY_DEADMAN_S）。基于帧时钟 t（仅主循环运行时推进），
+    // 后台标签页/暂停不会误触；超过阈值即释放 _busy，使该棋子待机恢复（绝不中途清战斗通道）。
+    if (ud._busy) {
+      if (ud._busySinceT == null) ud._busySinceT = t;
+      else if (t - ud._busySinceT > IDLE_BUSY_DEADMAN_S) {
+        ud._busy = false;
+        ud._busySinceT = null;
+      }
+    } else {
+      ud._busySinceT = null;
+    }
     // H2：优先读 createPieceMesh 缓存的引用（热路径每帧 0 次 getObjectByName）；
     // 回退路径仅为未走 createPieceMesh 的旧实例/测试桩保留。
     const orient = ud._orient || group.getObjectByName('orient') || group;
@@ -488,8 +512,8 @@ export class Animator {
     const sel = !!selected;
     const amp = sel ? 1.8 : 1;   // 选中放大（Juice 选中强调 / Windex 焦点）
     const ph = ud.idlePhase || 0;
-    const bAmp = (cfg && cfg.breathe) || 0.012;
-    const sAmp = (cfg && cfg.sway) || 0.014;
+    const bAmp = ((cfg && cfg.breathe) || 0.012) * IDLE_AMP_SCALE;
+    const sAmp = ((cfg && cfg.sway) || 0.014) * IDLE_AMP_SCALE;
     // L0 呼吸层（保留现公式，幅度按兵种差异化；K/A 最稳）
     idleGroup.position.y = Math.sin(t * 1.15 + ph) * bAmp * amp;
     idleGroup.rotation.z = Math.sin(t * 0.85 + ph) * sAmp * amp;
@@ -504,7 +528,7 @@ export class Animator {
       for (const w of cfg.l1) {
         const sub = sg[w[0]];
         if (!sub) continue;
-        sub.rotation[w[1]] = w[2] * l1Amp * Math.sin(t * 2 * Math.PI * w[3] + ph + w[4]);
+        sub.rotation[w[1]] = w[2] * IDLE_AMP_SCALE * l1Amp * Math.sin(t * 2 * Math.PI * w[3] + ph + w[4]);
       }
     }
     // L2 偶发脉冲层（确定性门控；选中时脉冲幅度 ×min(amp,1.5) 防超 0.11）
@@ -520,7 +544,7 @@ export class Animator {
         const pulse = Math.pow(Math.sin(Math.PI * (u - Math.floor(u))), 2);
         // 脉冲以「加性」方式叠加在子组 rotation 上；与 L1 同轴则叠加，否则赋值覆盖。
         const ax = p[1];
-        sub.rotation[ax] += p[2] * l2Amp * pulse;
+        sub.rotation[ax] += p[2] * IDLE_AMP_SCALE * l2Amp * pulse;
       }
     }
   }
