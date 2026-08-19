@@ -1,0 +1,87 @@
+# Cloudflare Pages 部署工作流（Task #4 · CI/CD 基础设施）
+#
+# 【当前生效路径 · 决策 2 已裁定：方案 B】
+# CF Pages 原生 Git 集成（关联 main 分支自动构建发布，线上 chess.game.iluer.com）
+# 作为唯一部署源；本 workflow 仅保留 ci job 作为验证门禁，deploy job 已注释停用，
+# 避免与原生集成构成「双构建源」冲突（Actions 部署 dist/ 会覆盖 CF 原生构建，产生抖动/404）。
+#
+# 【若日后切换方案 A（Actions 部署）】：
+#   ① CF 控制台停用本项目的原生构建绑定（Production branch 置空/移除 Git 连接）；
+#   ② 取消下方 deploy job 的注释（连同 needs/if）；
+#   ③ GitHub 仓库 Settings → Secrets 配置 CF_API_TOKEN / CF_ACCOUNT_ID；
+#   ④ 核对 projectName: chess-game 与实际 CF 项目名一致。
+#
+# 【CI 测试门禁 · 决策 1 已裁定】
+# ci job 不跑 `npm test`：项目硬性规则 tests/ 不入库（QA 本地产物），
+# 全新 checkout 下无测试文件，npm test 会失败。本地开发执行 npm run test 验证。
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    # paths 过滤可选；默认所有 main push 都触发
+    # paths:
+    #   - 'src/**'
+    #   - 'build.mjs'
+    #   - 'package.json'
+    #   - 'package-lock.json'
+    #   - 'tsconfig.json'
+    #   - '_headers'
+    #   - 'index.html'
+    #   - 'sw.js'
+    #   - 'styles/**'
+    #   - 'vendor/**'
+
+jobs:
+  ci:
+    name: CI (typecheck + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript typecheck
+        run: npm run typecheck
+
+      # npm test 依赖 tests/（QA 本地产物，不入库）；本地开发执行 npm run test 验证
+
+      - name: Build (esbuild)
+        run: npm run build
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  # ==========================================================================
+  # deploy job（方案 B 停用，勿与 CF 原生 Git 集成同时启用；切换见文件顶部说明）
+  # ==========================================================================
+  # deploy:
+  #   name: Deploy to Cloudflare Pages
+  #   needs: ci
+  #   runs-on: ubuntu-latest
+  #   if: github.ref == 'refs/heads/main'
+  #   steps:
+  #     - name: Download dist artifact
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: dist
+  #         path: dist
+  #
+  #     - name: Deploy to Cloudflare Pages
+  #       uses: cloudflare/pages-action@v1
+  #       with:
+  #         apiToken: ${{ secrets.CF_API_TOKEN }}
+  #         accountId: ${{ secrets.CF_ACCOUNT_ID }}
+  #         projectName: chess-game # ← 若 CF 项目名不符请改此处
+  #         directory: dist
+  #         gitHubToken: ${{ secrets.GITHUB_TOKEN }}

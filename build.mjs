@@ -65,9 +65,22 @@ const threeVendorPlugin = {
   }
 };
 
+/**
+ * 解析源码入口：优先 .ts，其次 .js（T1.0 渐进式迁移）。
+ * esbuild 原生支持 .ts，无需插件；后续波次把 src/** 逐个改为 .ts 后，
+ * 入口自动切换到 .ts 版本，无需改动本文件。
+ * @param {string} rel 相对仓库根的 .js 入口路径（如 'src/main.js'）
+ * @returns {string} 实际存在的入口绝对路径
+ */
+function resolveEntry(rel) {
+  const tsPath = path.join(ROOT, rel.replace(/\.js$/, '.ts'));
+  const jsPath = path.join(ROOT, rel);
+  return existsSync(tsPath) ? tsPath : jsPath;
+}
+
 /** 构建参数（build 与 dev 共用，保证行为一致） */
 const common = {
-  entryPoints: [path.join(ROOT, 'src', 'main.js')],
+  entryPoints: [resolveEntry('src/main.js')],
   bundle: true,
   format: 'esm',
   splitting: true,
@@ -133,7 +146,7 @@ async function buildOnce() {
   // 必须显式把 worker 作为第二 entry。运行时 main bundle 里
   // new URL('./worker.js', import.meta.url) 相对 dist/main.js 解析 → dist/worker.js，天然命中。
   await esbuild.build({
-    entryPoints: [path.join(ROOT, 'src', 'ai', 'worker.js')],
+    entryPoints: [resolveEntry('src/ai/worker.js')],
     bundle: true,
     format: 'esm',
     outfile: path.join(OUTDIR, 'worker.js'),

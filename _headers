@@ -2,10 +2,16 @@
 # 语法：路径匹配行顶格，头部行缩进两空格
 # 参考：https://developers.cloudflare.com/pages/configuration/headers/
 
+# 最小可行 CSP（Task #7 安全基线）：无外部源，全部 'self'。
+# - script-src 需 'unsafe-inline'：importmap 与首屏兜底样式为 inline；
+# - worker-src 需 blob:：AI module worker（dist/worker.js，ESM worker）；
+# - img-src 需 data: blob:：CanvasTexture / 程序化贴图（data: 与 blob: 纹理）。
+# 后续若迁移掉 inline script（引入 nonce/hash），可收紧 script-src 移除 'unsafe-inline'。
 /*
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   X-Frame-Options: SAMEORIGIN
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; worker-src 'self' blob:; connect-src 'self'
 
 # 入口 HTML 不缓存，保证部署后立即生效
 /index.html
@@ -46,8 +52,9 @@
 /vendor/*
   Cache-Control: public, max-age=31536000, immutable
 
-# 说明：本项目未设置 CSP。
+# 说明：本项目已启用最小可行 CSP（见文件顶部 /* 块）。
 # importmap 与首屏兜底样式均为 inline，静态托管无法下发 nonce，
-# CSP 势必要放开 'unsafe-inline'，收益有限反而易误伤 Worker / CanvasTexture(data:)。
-# 若确需 CSP，最小可用版本（已无外部源，全部 'self'）：
+# 故 script-src / style-src 放开 'unsafe-inline'；worker-src 放开 blob:（AI module worker）；
+# img-src 放开 data: blob:（CanvasTexture）。无外部源，全部 'self'。
+# 已启用值：
 #   Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; worker-src 'self' blob:; connect-src 'self'

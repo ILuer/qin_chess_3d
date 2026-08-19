@@ -6,7 +6,13 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"],
     "allowJs": true,
     "checkJs": false,
-    "strict": false,
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "useUnknownInCatchVariables": true,
+    "noFallthroughCasesInSwitch": true,
     "noEmit": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -15,6 +21,6 @@
     "isolatedModules": true,
     "types": []
   },
-  "include": ["src/**/*.js", "src/**/*.ts", "build.mjs"],
+  "include": ["src/**/*.js", "src/**/*.ts"],
   "exclude": ["node_modules", "dist", "vendor"]
 }
