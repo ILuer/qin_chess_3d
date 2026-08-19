@@ -331,9 +331,9 @@ export const IDLE_PIECE = {
     desc: '戈叩盾：缓摆 + 叩击脉冲（P）',
     breathe: 0.012, sway: 0.014,
     l1: [
-      ['arm', 'z', 0.045, 0.30, 0],
-      ['arm', 'x', 0.028, 0.30, 0.6],
-      ['body', 'x', 0.024, 0.30, Math.PI]
+      ['arm', 'z', 0.052, 0.30, 0],
+      ['arm', 'x', 0.034, 0.30, 0.6],
+      ['body', 'x', 0.028, 0.30, Math.PI]
     ],
     l2: [
       ['arm', 'x', 0.055, 5.0],
@@ -346,9 +346,9 @@ export const IDLE_PIECE = {
     desc: '扬前身 + 骑手对位后仰（N）',
     breathe: 0.012, sway: 0.014,
     l1: [
-      ['mount', 'x', -0.045, 0.26, 0],
-      ['rider', 'x', 0.024, 0.26, 0],
-      ['rider', 'z', 0.018, 0.26, 1.0]
+      ['mount', 'x', -0.048, 0.26, 0],
+      ['rider', 'x', 0.030, 0.26, 0],
+      ['rider', 'z', 0.022, 0.26, 1.0]
     ],
     l2: [
       ['mount', 'x', -0.040, 6.5]
@@ -360,9 +360,9 @@ export const IDLE_PIECE = {
     desc: '展卷吟诵：简牍微举复落（B）',
     breathe: 0.012, sway: 0.014,
     l1: [
-      ['arms', 'z', 0.055, 0.26, 0],
-      ['arms', 'x', 0.024, 0.26, 0.8],
-      ['robe', 'x', 0.022, 0.26, Math.PI]
+      ['arms', 'z', 0.060, 0.26, 0],
+      ['arms', 'x', 0.028, 0.26, 0.8],
+      ['robe', 'x', 0.026, 0.26, Math.PI]
     ],
     l2: [
       ['arms', 'x', 0.050, 6.0]
@@ -375,7 +375,7 @@ export const IDLE_PIECE = {
     breathe: 0.008, sway: 0.008,
     l1: [
       ['body', 'z', 0.014, 0.40, 0],
-      ['sword', 'z', 0.022, 0.40, 0.5],
+      ['sword', 'z', 0.024, 0.40, 0.5],
       ['arms', 'x', 0.016, 0.40, Math.PI]
     ],
     l2: [],
@@ -387,8 +387,8 @@ export const IDLE_PIECE = {
     breathe: 0.010, sway: 0.012,
     l1: [
       ['horses', 'x', 0.040, 0.24, 0],
-      ['body', 'x', 0.014, 0.24, -0.8],
-      ['driver', 'x', 0.028, 0.24, 1.2]
+      ['body', 'x', 0.018, 0.24, -0.8],
+      ['driver', 'x', 0.034, 0.24, 1.2]
     ],
     l2: [
       ['horses', 'x', 0.045, 7.0]
@@ -402,7 +402,7 @@ export const IDLE_PIECE = {
     l1: [
       ['soldierL', 'x', 0.045, 0.22, 0],
       ['soldierR', 'x', 0.045, 0.22, Math.PI],
-      ['trebuchet', 'z', 0.012, 0.22, 0.5]
+      ['trebuchet', 'z', 0.018, 0.22, 0.5]
     ],
     l2: [
       ['soldierL', 'x', 0.042, 6.0, 0, 'phPlus'],
@@ -415,11 +415,11 @@ export const IDLE_PIECE = {
     desc: '抚椅：rArm 抚扶手摩挲 + body 微沉肩 + 王座如磐 + 帅旗微扬（K）',
     breathe: 0.008, sway: 0.008,
     l1: [
-      ['rArm', 'z', 0.055, 0.18, 0],
-      ['rArm', 'x', 0.030, 0.18, 1.2],
-      ['body', 'x', 0.022, 0.18, 0.6],
-      ['throne', 'x', 0.006, 0.18, 0],
-      ['banner', 'z', 0.030, 0.30, 2.0]
+      ['rArm', 'z', 0.058, 0.18, 0],
+      ['rArm', 'x', 0.034, 0.18, 1.2],
+      ['body', 'x', 0.026, 0.18, 0.6],
+      ['throne', 'x', 0.008, 0.18, 0],
+      ['banner', 'z', 0.034, 0.30, 2.0]
     ],
     l2: [],
     // windUp 写 sword.z / throne.x → 只归零 rArm.z / rArm.x / body.x / banner.z

@@ -60,9 +60,6 @@ export function execute(cd, attacker, victim, fromCell, toCell, opts = {}) {
     const A3 = impactParam.hitstop;  // hitstop 不用 speedMul
     const A4 = getCaptureBeat('A4', aTypeKey) * speedMul;
     const A5 = getCaptureBeat('A5', aTypeKey) * speedMul;
-    const M0f = 0.09 * speedMul;
-    const M1f = 0.05 * speedMul;
-    const M3f = 0.05 * speedMul;
 
     const leanBackA1 = (M0_LEAN_BACK[aType] || 0.08) * 1.3; // 蓄势后仰略大于 M0
     const leanForwardA2 = -(MOVE_LEAN[aType] || -0.12) * 1.2;
@@ -93,8 +90,9 @@ export function execute(cd, attacker, victim, fromCell, toCell, opts = {}) {
     while (capSpin > Math.PI) capSpin -= Math.PI * 2;
     while (capSpin < -Math.PI) capSpin += Math.PI * 2;
     if (Math.abs(capSpin) > 0.001) {
+      // 转向时长对齐整段 A0 冲锋：旋转与平移在 A0 末同时到位，攻方恰好面向 victim 落定。
       animator.add({
-        duration: Math.max(0.001, M0f + M1f),
+        duration: Math.max(0.001, A0),
         easing: animator.EASE.easeInOutCubic,
         onUpdate: (t) => { attacker.rotation.y = capStartYaw + capSpin * t; }
       });
@@ -168,12 +166,19 @@ export function execute(cd, attacker, victim, fromCell, toCell, opts = {}) {
     const liftPeak = TIMING.liftHeight * liftMul;
     const leanVal = MOVE_LEAN[aType] || -0.12;
 
-    // A0 sub-beats
+    // A0 sub-beats（贴地冲锋：朝向已在 A0 前段旋至 victim 方向，这里只做平移 + 微前压）
+    // 关键修复：原实现仅在 i===2(巡航) 拍写位置且 totalT 只覆盖 0.5~0.75，
+    //   又因 A0-M0f-M1f-M3f 常为负导致巡航拍≈0，攻方停在路径 75% 处，
+    //   最终由 A5 的 position.copy(endPos) 瞬移补完 —— 形成可见跳变(违反 A4)。
+    // 现改为四拍占比固定(A0*0.30/0.20/0.35/0.15)，总时长===A0 保证命中时刻对齐；
+    //   位置/弧高/前压在四拍连续推进 totalT=(i+t)/4，A0 末攻方恰好抵达 victim 格，
+    //   后续 A1~A5 不再瞬移（贴地弧高 liftPeak 仍受 liftMul 约束）。
+    const a0b0 = A0 * 0.30, a0b1 = A0 * 0.20, a0b2 = A0 * 0.35, a0b3 = A0 * 0.15;
     [
-      { dur: M0f, id: 'A0_M0' },
-      { dur: M1f, id: 'A0_M1' },
-      { dur: A0 - M0f - M1f - M3f, id: 'A0_M2' },
-      { dur: M3f, id: 'A0_M3' }
+      { dur: a0b0, id: 'A0_M0' },
+      { dur: a0b1, id: 'A0_M1' },
+      { dur: a0b2, id: 'A0_M2' },
+      { dur: a0b3, id: 'A0_M3' }
     ].forEach((sub, i) => {
       const isLast = i === 3;
       steps.push({
@@ -182,16 +187,13 @@ export function execute(cd, attacker, victim, fromCell, toCell, opts = {}) {
         easing: i === 2 ? animator.EASE.easeInCubic : animator.EASE.easeOutQuad,
         onStart: () => { if (i === 0) sequencer.fire('A0_start'); },
         onUpdate: (t) => {
-          if (i === 2) {
-            const totalT = (i + t) / 4;
-            attacker.position.lerpVectors(startPos, endPos, totalT);
-            attacker.position.y = liftPeak * 4 * totalT * (1 - totalT);
-            aIdle.rotation.x = leanVal * Math.sin(Math.PI * totalT);
-          } else if (isLast) {
-            const totalT = (i + t) / 4;
+          const totalT = (i + t) / 4;
+          attacker.position.lerpVectors(startPos, endPos, totalT);
+          attacker.position.y = liftPeak * 4 * totalT * (1 - totalT);
+          aIdle.rotation.x = leanVal * Math.sin(Math.PI * totalT);
+          if (isLast) {
             aIdle.scale.x = aIdleBase.x * (1 + 0.04 * (1 - t) * Math.sin(Math.PI * t));
             aIdle.scale.y = aIdleBase.y * (1 - 0.02 * (1 - t) * Math.sin(Math.PI * t));
-            aIdle.rotation.x = leanVal;
           }
         }
       });

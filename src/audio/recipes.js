@@ -355,13 +355,13 @@ BEAT_RECIPES['cannon.select'] = {
 };
 
 BEAT_RECIPES['king.select'] = {
-  // 帅·王剑：剑鸣 + 编钟尾韵（王者）
+  // 帅·王剑：剑鸣（上移与兵·戈 620 拉开音程）+ 编钟尾韵（王者）
   layers: {
     C: [
-      { type: 'bronzeBody', freq: 700, peak: 0.26, decayScale: 1.1, partials: 'BAR', vibHz: 0 },
-      { type: 'bronzeBody', freq: 466, peak: 0.14, decayScale: 1.2, partials: 'BELL', vibHz: 0, offset: 0.01 }
+      { type: 'bronzeBody', freq: 740, peak: 0.26, decayScale: 1.1, partials: 'BAR', vibHz: 0 },
+      { type: 'bronzeBody', freq: 523.25, peak: 0.17, decayScale: 1.3, partials: 'BELL', vibHz: 0, offset: 0.01 }
     ],
-    T: [{ type: 'transient', freq: 4000, q: 1.6, peak: 0.10, dur: 0.012, rate: 1.3 }]
+    T: [{ type: 'transient', freq: 4200, q: 1.6, peak: 0.11, dur: 0.012, rate: 1.3 }]
   },
   opts: { wet: 0.18, life: 1.1 }
 };
@@ -664,14 +664,18 @@ function buildM4(p) {
   const recipe = { layers: { B: [], T: [], C: [], S: [] }, opts: {} };
   const wetVals = { P: 0.09, N: 0.10, B: 0.14, A: 0.11, R: 0.11, C: 0.11, K: 0.16 };
 
-  // B 层：落位重击
+  // B 层：落位重击（炮=木石砸地，其余=战鼓）
   if (p === 'C') {
+    // 炮·石弹砸地：木撞 + 木/石低频 + 石屑迸裂（不走战鼓皮膜）
     recipe.layers.B.push({ type: 'woodKnock', f: 300, peak: 0.18, dur: 0.05 });
+    recipe.layers.B.push({ type: 'woodKnock', f: 118, peak: 0.16, dur: 0.09 });
+    recipe.layers.C.push({ type: 'dustScuff', f0: 2400, f1: 520, q: 1.2, peak: 0.30, dur: 0.20 });
+  } else {
+    recipe.layers.B.push({
+      type: 'warDrum', f0: dr.f0, f1: dr.f1, peak: dr.peak, dur: dr.dur,
+      attack: dr.attack, noSnap: dr.noSnap || false
+    });
   }
-  recipe.layers.B.push({
-    type: 'warDrum', f0: dr.f0, f1: dr.f1, peak: dr.peak, dur: dr.dur,
-    attack: dr.attack, noSnap: dr.noSnap || false
-  });
 
   // T 层：接触瞬态（除士外）
   if (p !== 'A') {
