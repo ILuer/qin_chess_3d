@@ -25,6 +25,24 @@ const FLOOR = 0.0001;
 const TENSION_SMOOTH_TAU = 2.5;     // 一阶低通时间常数（秒）
 const TENSION_CHECK_TAU = 0.35;     // 将军事件快速响应
 
+/**
+ * D2 战局强度事件脉冲（piece-sfx-design §2.2）
+ * 原则：只升「密度」不升「音量」——靠鼓/号角/喊杀的间隔加密与层级叠加制造压迫，
+ * 不推大 master；ambLimit 压缩器兜底。
+ * 阈值供 PERF-004 断言：残局 pieceCount<12 / 连杀 recentCaptures>=2。
+ */
+export const EVENT_PULSE = {
+  KILL_STREAK_MIN: 2,        // 连杀阈值（recentCaptures >= 2）
+  KILL_STREAK_HOLD_S: 3.0,   // 连杀脉冲持续（~3s）
+  ENDGAME_PIECE_MAX: 12,     // 残局阈值（pieceCount < 12）
+  SHOUT_PEAK_MUL: 1.5,       // 连杀：人群喊杀峰值 ×1.5
+  DRUM_INTERVAL_MUL: 0.7,    // 连杀：远鼓间隔 ×0.7
+  ENDGAME_HORN_MUL: 0.55,    // 残局：号角间隔 ×0.55（加密）
+  ENDGAME_DRUM_MUL: 0.8,     // 残局：远鼓间隔 ×0.8
+  DRUM_DOUBLE_GAP_S: 0.16,   // 将军：远鼓双连击间隔
+  HEARTBEAT_GAP_S: 1.6       // 将军：元帅心跳节流（避免每帧触发）
+};
+
 /* --------------------------------------------------------------------------
  * 1. 小工具
  * ------------------------------------------------------------------------ */
@@ -70,6 +88,9 @@ export class AmbienceSystem {
   _drumInterval?: number;
   _drumPeak?: number;
   _crowdPeak?: number;
+  _pulse: any;
+  _killStreakUntil: number;
+  _lastHeartbeatAt: number;
 
   constructor() {
     this._active = false;       // 是否已启动
@@ -81,6 +102,9 @@ export class AmbienceSystem {
     this._tensionRaw = 0.12;
     this._lastUpdate = 0;
     this._gameState = null;     // 游戏状态引用（用于计算张力）
+    this._pulse = null;         // D2：事件脉冲（连杀/残局/将军）
+    this._killStreakUntil = 0;
+    this._lastHeartbeatAt = 0;
 
     // 抗疲劳
     this._breathTimer = 0;
@@ -169,7 +193,49 @@ export class AmbienceSystem {
     // 映射到环境参数
     this._applyTensionMap();
 
+    // D2：事件级脉冲（连杀/残局/将军 —— 只升密度不升音量）
+    this._applyEventPulses(gs);
+
     return this._tension;
+  }
+
+  /**
+   * D2 战局强度事件脉冲（piece-sfx-design §2.2）
+   * - 连杀：recentCaptures >= 2 → 人群喊杀峰值 ×1.5 / 远鼓间隔 ×0.7，持续 ~3s
+   * - 残局：pieceCount < 12 → 号角进入循环（间隔加密）、远鼓更密
+   * - 将军：inCheck → 号角强拍 + 远鼓双连击 + 元帅心跳（king.heartbeat 复用）
+   * 阈值常量见 EVENT_PULSE（PERF-004 断言）。
+   */
+  _applyEventPulses(gs: any): void {
+    const pulse: any = { shoutMul: 1, drumMul: 1, hornMul: 1, hornStrong: false, doubleDrum: false };
+    const now = performance.now();
+
+    // 连杀：2 连及以上
+    if (gs.recentCaptures != null && gs.recentCaptures >= 2 /* EVENT_PULSE.KILL_STREAK_MIN */) {
+      this._killStreakUntil = now + EVENT_PULSE.KILL_STREAK_HOLD_S * 1000;
+    }
+    if (this._killStreakUntil && now < this._killStreakUntil) {
+      pulse.shoutMul = EVENT_PULSE.SHOUT_PEAK_MUL;        // 人群喊杀峰值 ×1.5
+      pulse.drumMul = EVENT_PULSE.DRUM_INTERVAL_MUL;      // 远鼓间隔 ×0.7
+    }
+
+    // 残局：子力 <12
+    if (gs.pieceCount != null && gs.pieceCount < 12 /* EVENT_PULSE.ENDGAME_PIECE_MAX */) {
+      pulse.hornMul = EVENT_PULSE.ENDGAME_HORN_MUL;       // 号角间隔 ×0.55（进入循环）
+      pulse.drumMul = Math.min(pulse.drumMul, EVENT_PULSE.ENDGAME_DRUM_MUL); // 远鼓 ×0.8
+    }
+
+    // 将军：号角强拍 + 远鼓双连击 + 元帅心跳
+    if (gs.inCheck) {
+      pulse.hornStrong = true;
+      pulse.doubleDrum = true;
+      if (now - this._lastHeartbeatAt > EVENT_PULSE.HEARTBEAT_GAP_S * 1000) {
+        this._lastHeartbeatAt = now;
+        try { SFX.play('king.heartbeat'); } catch (e) { /* 忽略 */ }
+      }
+    }
+
+    this._pulse = pulse;
   }
 
   /** 直接设置张力（用于 manually 触发将军等） */
@@ -194,10 +260,13 @@ export class AmbienceSystem {
     // A-WIND: 连续风 (8s loop buffer + LFO)
     this._layers.wind = this._buildWindLayer(ambBus, t);
 
-    // B-BANNER & C-DRUM & E-HORSE: 阵发（由 timer 触发）
+    // B-BANNER & C-DRUM & E-HORSE & F-HORN & G-DUST & H-SHOUT: 阵发（由 timer 触发）
     this._layers.banner = null;
     this._layers.drum = null;
     this._layers.horse = null;
+    this._layers.horn = null;
+    this._layers.dust = null;
+    this._layers.shout = null;
 
     // D-CROWD: 连续人群
     this._layers.crowd = this._buildCrowdLayer(ambBus, t);
@@ -401,16 +470,16 @@ export class AmbienceSystem {
     this._scheduleNext('banner');
   }
 
-  _playDrum(): void {
+  _playDrum(tOverride?: number, f0Override?: number, durOverride?: number): void {
     const i = _int();
     if (!i.ready || !i.ambientBus) return;
 
     const layer = AMBIENT_LAYERS.drum;
-    const t = i.ctx.currentTime + 0.002;
+    const t = tOverride || (i.ctx.currentTime + 0.002);
     const ambBus = i.ambientBus;
 
-    const f0 = rand(layer.params.f0Min, layer.params.f0Max);
-    const dur = layer.params.dur;
+    const f0 = f0Override || rand(layer.params.f0Min, layer.params.f0Max);
+    const dur = durOverride || layer.params.dur;
 
     // 低频正弦下滑
     const osc = i.ctx.createOscillator();
@@ -449,6 +518,13 @@ export class AmbienceSystem {
     send.connect(i.convolver || ambBus);
 
     this._nodes.push(osc, lp, g, ls, send);
+
+    if (tOverride) return; // 双连击第二击：不重排定时器
+
+    // D2 将军：远鼓双连击（第二击紧跟）
+    if (this._pulse && this._pulse.doubleDrum) {
+      this._playDrum(t + EVENT_PULSE.DRUM_DOUBLE_GAP_S, f0 * 1.1, dur * 0.8);
+    }
 
     this._scheduleNext('drum');
   }
@@ -525,20 +601,24 @@ export class AmbienceSystem {
     this._scheduleNext('horse');
   }
 
-  _playCrowdShout(): void {
+  /** 远处喊杀（D1 新增层：crowdBed 变体，更宽更远；连杀时峰值 ×1.5） */
+  _playShout(): void {
     const i = _int();
     if (!i.ready || !i.ambientBus) return;
 
-    const layer = AMBIENT_LAYERS.crowd;
+    const layer = AMBIENT_LAYERS.shout;
     const t = i.ctx.currentTime + 0.002;
     const ambBus = i.ambientBus;
+    const p = layer.params;
 
-    // 偶发呼喝: 短噪声爆发
+    // 偶发呼喝: 短噪声爆发（peak 受连杀脉冲 ×1.5；ambLimit 兜底不爆音）
+    const peak = p.peak * ((this._pulse && this._pulse.shoutMul) || 1);
+
     const src = i.ctx.createBufferSource();
     src.buffer = i.noiseBuf;
     src.loop = true;
     src.start(t, rand(0, 1.4));
-    src.stop(t + 0.15);
+    src.stop(t + p.dur);
 
     const bp = i.ctx.createBiquadFilter();
     bp.type = 'bandpass';
@@ -547,8 +627,8 @@ export class AmbienceSystem {
 
     const g = i.ctx.createGain();
     g.gain.setValueAtTime(FLOOR, t);
-    g.gain.exponentialRampToValueAtTime(layer.peak.hi * 1.5, t + 0.01);
-    g.gain.exponentialRampToValueAtTime(FLOOR, t + 0.14);
+    g.gain.exponentialRampToValueAtTime(peak, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(FLOOR, t + p.dur * 0.8);
 
     src.connect(bp);
     bp.connect(g);
@@ -559,6 +639,125 @@ export class AmbienceSystem {
     this._scheduleNext('shout');
   }
 
+  /** 号角（D1 新增层：双锯齿微失谐 + 低通吹口扫频 + 低八度垫 + 气声；残局/将军加密） */
+  _playHorn(): void {
+    const i = _int();
+    if (!i.ready || !i.ambientBus) return;
+
+    const layer = AMBIENT_LAYERS.horn;
+    const t = i.ctx.currentTime + 0.002;
+    const ambBus = i.ambientBus;
+    const f = rand(layer.params.freqMin, layer.params.freqMax);
+    const dur = layer.params.dur;
+    // 将军强拍：仅轻微抬峰（×1.25），主要靠 hornMul 加密 —— 只升密度不升音量
+    const peakMul = (this._pulse && this._pulse.hornStrong) ? 1.25 : 1;
+    const peak = layer.params.peak * peakMul;
+
+    // 双锯齿微失谐 + 低通吹口扫频
+    const o1 = i.ctx.createOscillator();
+    o1.type = 'sawtooth';
+    o1.frequency.setValueAtTime(f, t);
+    const o2 = i.ctx.createOscillator();
+    o2.type = 'sawtooth';
+    o2.frequency.setValueAtTime(f * 1.004, t);
+    o2.detune.setValueAtTime(8, t);
+
+    const lp = i.ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(420, t);
+    lp.frequency.linearRampToValueAtTime(f * 5.5, t + Math.min(0.12, dur * 0.4));
+    lp.frequency.linearRampToValueAtTime(f * 2.2, t + dur);
+    lp.Q.setValueAtTime(3.2, t);
+
+    const mix = i.ctx.createGain();
+    mix.gain.setValueAtTime(0.5, t);
+    o1.connect(mix); o2.connect(mix); mix.connect(lp);
+
+    const g = i.ctx.createGain();
+    g.gain.setValueAtTime(FLOOR, t);
+    g.gain.exponentialRampToValueAtTime(peak, t + 0.05);
+    g.gain.setValueAtTime(peak, t + 0.05 + dur * 0.4);
+    g.gain.exponentialRampToValueAtTime(FLOOR, t + dur);
+    lp.connect(g);
+    g.connect(ambBus);
+
+    // 低八度垫
+    const sub = i.ctx.createOscillator();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(f * 0.5, t);
+    const sg = i.ctx.createGain();
+    sg.gain.setValueAtTime(FLOOR, t);
+    sg.gain.exponentialRampToValueAtTime(peak * 0.45, t + 0.05);
+    sg.gain.exponentialRampToValueAtTime(FLOOR, t + dur);
+    sub.connect(sg); sg.connect(ambBus);
+
+    // 气声
+    const air = i.ctx.createBufferSource();
+    air.buffer = i.noiseBuf;
+    air.loop = true;
+    air.playbackRate.setValueAtTime(1, t);
+    air.start(t, rand(0, 1.4));
+    air.stop(t + dur + 0.05);
+    const abp = i.ctx.createBiquadFilter();
+    abp.type = 'bandpass';
+    abp.frequency.setValueAtTime(f * 3, t);
+    abp.Q.setValueAtTime(1.1, t);
+    const ag = i.ctx.createGain();
+    ag.gain.setValueAtTime(FLOOR, t);
+    ag.gain.exponentialRampToValueAtTime(peak * 0.09, t + 0.03);
+    ag.gain.exponentialRampToValueAtTime(FLOOR, t + dur);
+    air.connect(abp); abp.connect(ag); ag.connect(ambBus);
+
+    // 湿声
+    const send = i.ctx.createGain();
+    send.gain.setValueAtTime(layer.wet, t);
+    g.connect(send);
+    send.connect(i.convolver || ambBus);
+
+    this._nodes.push(o1, o2, lp, mix, g, sub, sg, air, abp, ag, send);
+  }
+
+  /** 尘土滚地（D1 新增层：远场低通噪声缓慢扫频） */
+  _playDust(): void {
+    const i = _int();
+    if (!i.ready || !i.ambientBus) return;
+
+    const layer = AMBIENT_LAYERS.dust;
+    const t = i.ctx.currentTime + 0.002;
+    const ambBus = i.ambientBus;
+    const p = layer.params;
+
+    const src = i.ctx.createBufferSource();
+    src.buffer = i.noiseBuf;
+    src.loop = true;
+    src.playbackRate.setValueAtTime(rand(0.92, 1.05), t);
+    src.start(t, rand(0, 1.4));
+    src.stop(t + p.dur + 0.05);
+
+    const bp = i.ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(p.f0, t);
+    bp.Q.setValueAtTime(p.q, t);
+    bp.frequency.exponentialRampToValueAtTime(Math.max(p.f1, 40), t + p.dur);
+
+    const g = i.ctx.createGain();
+    g.gain.setValueAtTime(FLOOR, t);
+    g.gain.exponentialRampToValueAtTime(p.peak, t + p.attack);
+    g.gain.exponentialRampToValueAtTime(FLOOR, t + p.dur);
+
+    src.connect(bp);
+    bp.connect(g);
+    g.connect(ambBus);
+
+    // 湿声
+    const send = i.ctx.createGain();
+    send.gain.setValueAtTime(layer.wet, t);
+    g.connect(send);
+    send.connect(i.convolver || ambBus);
+
+    this._nodes.push(src, bp, g, send);
+  }
+
   /* ---- 定时器管理 ---- */
 
   _startTimers(): void {
@@ -566,6 +765,8 @@ export class AmbienceSystem {
     this._scheduleNext('banner');
     this._scheduleNext('drum');
     this._scheduleNext('horse');
+    this._scheduleNext('horn');
+    this._scheduleNext('dust');
     this._scheduleNext('shout');
     this._startBreathCycle();
   }
@@ -587,17 +788,30 @@ export class AmbienceSystem {
         delayMs = rand(layer.interval.lo, layer.interval.hi) * 1000;
         break;
       case 'drum': {
-        // 张力驱动间隔
+        // 张力驱动间隔 + D2 事件脉冲（连杀/残局加密）
         const t0 = TENSION_MAP[0.0].drumInterval;
         const t1 = TENSION_MAP[1.0].drumInterval;
-        delayMs = geomLerp(t0, t1, tension) * 1000;
+        let iv = geomLerp(t0, t1, tension);
+        if (this._pulse && this._pulse.drumMul != null) iv *= this._pulse.drumMul;
+        delayMs = iv * 1000;
         break;
       }
       case 'horse':
         delayMs = rand(layer.interval.lo, layer.interval.hi) * 1000;
         break;
+      case 'horn': {
+        // 张力驱动 + D2 事件脉冲（残局/将军：号角加密 → 接近循环）
+        const base = geomLerp(60.0, 26.0, tension);
+        let iv = base;
+        if (this._pulse && this._pulse.hornMul != null) iv *= this._pulse.hornMul;
+        delayMs = iv * 1000;
+        break;
+      }
+      case 'dust':
+        delayMs = rand(layer.interval.lo, layer.interval.hi) * 1000;
+        break;
       case 'shout':
-        delayMs = rand(layer.shoutInterval.lo, layer.shoutInterval.hi) * 1000;
+        delayMs = rand(layer.interval.lo, layer.interval.hi) * 1000;
         break;
       default:
         return;
@@ -608,7 +822,9 @@ export class AmbienceSystem {
       if (event === 'banner') this._playBanner();
       else if (event === 'drum') this._playDrum();
       else if (event === 'horse') this._playHorse();
-      else if (event === 'shout') this._playCrowdShout();
+      else if (event === 'horn') this._playHorn();
+      else if (event === 'dust') this._playDust();
+      else if (event === 'shout') this._playShout();
     }, delayMs);
 
     this._timers.push(timer);

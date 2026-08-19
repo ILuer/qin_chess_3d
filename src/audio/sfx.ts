@@ -20,6 +20,7 @@ import {
   THUD_PARAMS, VICTIM_WEIGHTS, VICTIM_COLLAPSE,
   PENTA, BEAT_RECIPES, SEQUENCES
 } from './recipes.ts';
+import { getSample, bindSampleContext } from './sampleBank.ts';
 
 /* --------------------------------------------------------------------------
  * 0. 常量与模块级状态
@@ -46,7 +47,11 @@ const IMPACT_PEAKS = {
 let ctx: any = null;
 let ready = false;
 let hasPanner = false;
+let hasPanner3D = false;
 let activeNodeCount = 0;
+
+/* --- 3D 定位状态（C2：松耦合，坐标由调用方传入，不 import render） --- */
+let sourceWorldPos: { x: number, y: number, z: number } | null = null;
 
 /* --- 总线节点 --- */
 let hitBus: any = null;
@@ -255,6 +260,8 @@ function buildGraph(): void {
   noiseBuf = buildNoiseBuffer();
   irBuf = convolver.buffer;
   hasPanner = typeof ctx.createStereoPanner === 'function';
+  // C2：PannerNode 3D 能力检测（Safari/WebKit 受限环境 → StereoPanner 回退）
+  hasPanner3D = typeof ctx.createPanner === 'function';
 }
 
 /* --------------------------------------------------------------------------
@@ -262,9 +269,60 @@ function buildGraph(): void {
  *
  *    为一次发声创建: voiceBus → (panner) → dryBus / send → convolver → wetBus
  *    按阵营插入滤波: 红 highshelf(+8dB@3.4kHz) / 黑 lowpass(2.4kHz, Q0.7)
+ *
+ *    C2 升级：hasPanner3D 且提供 worldPos 时走 PannerNode（HRTF/inverse/
+ *    refDistance=1格/maxDistance=10格/rolloff=1.5）；否则回退 StereoPanner
+ *    （标量 pan）—— 全平台可玩，零破坏。
  * ------------------------------------------------------------------------ */
 
-function makeBus(wet: number, pan: number, life: number, faction: string, busTarget?: string): any {
+/** 设置 PannerNode 位置（兼容 positionX AudioParam 与旧 setPosition 两代 API） */
+function setPannerPosition(p: any, pos: { x: number, y: number, z: number }): void {
+  if (!ctx || !pos) return;
+  const t = ctx.currentTime;
+  try {
+    if (p.positionX && typeof p.positionX.setValueAtTime === 'function') {
+      p.positionX.setValueAtTime(pos.x, t);
+      p.positionY.setValueAtTime(pos.y, t);
+      p.positionZ.setValueAtTime(pos.z, t);
+    } else if (typeof p.setPosition === 'function') {
+      p.setPosition(pos.x, pos.y, pos.z);
+    }
+  } catch (e) { /* 静默：位置设置失败不影响发声 */ }
+}
+
+/** 更新 AudioListener 位置与朝向（由 main.js 每帧传相机 world pos；Safari 回退无操作） */
+function setListener(position: { x: number, y: number, z: number },
+                     forward?: { x: number, y: number, z: number },
+                     up?: { x: number, y: number, z: number }): void {
+  if (!ctx || !hasPanner3D) return;
+  const l = ctx.listener;
+  if (!l) return;
+  const t = ctx.currentTime;
+  try {
+    if (l.positionX && typeof l.positionX.setValueAtTime === 'function') {
+      l.positionX.setValueAtTime(position.x, t);
+      l.positionY.setValueAtTime(position.y, t);
+      l.positionZ.setValueAtTime(position.z, t);
+      if (forward && l.forwardX && typeof l.forwardX.setValueAtTime === 'function') {
+        l.forwardX.setValueAtTime(forward.x, t);
+        l.forwardY.setValueAtTime(forward.y, t);
+        l.forwardZ.setValueAtTime(forward.z, t);
+      }
+      if (up && l.upX && typeof l.upX.setValueAtTime === 'function') {
+        l.upX.setValueAtTime(up.x, t);
+        l.upY.setValueAtTime(up.y, t);
+        l.upZ.setValueAtTime(up.z, t);
+      }
+    } else if (typeof l.setPosition === 'function') {
+      l.setPosition(position.x, position.y, position.z);
+      if (forward && up && typeof l.setOrientation === 'function') {
+        l.setOrientation(forward.x, forward.y, forward.z, up.x, up.y, up.z);
+      }
+    }
+  } catch (e) { /* 静默 */ }
+}
+
+function makeBus(wet: number, pan: number, life: number, faction: string, busTarget?: string, worldPos?: { x: number, y: number, z: number } | null): any {
   const bus = ctx.createGain();
   bus.gain.setValueAtTime(1.0, ctx.currentTime);
   trackNodes(1);
@@ -294,7 +352,20 @@ function makeBus(wet: number, pan: number, life: number, faction: string, busTar
 
   let tail = bus;
 
-  if (hasPanner && pan) {
+  // C2：PannerNode 3D 定位（HRTF / inverse / refDistance=1格 / maxDistance=10格 / rolloff=1.5）
+  // 仅当 hasPanner3D 且提供世界坐标时启用；否则回退 StereoPanner（标量 pan）—— 零破坏
+  if (hasPanner3D && worldPos) {
+    const p = ctx.createPanner();
+    p.panningModel = 'HRTF';
+    p.distanceModel = 'inverse';
+    p.refDistance = 1;
+    p.maxDistance = 10;
+    p.rolloffFactor = 1.5;
+    setPannerPosition(p, worldPos);
+    bus.connect(p);
+    tail = p;
+    trackNodes(1);
+  } else if (hasPanner && pan) {
     const p = ctx.createStereoPanner();
     p.pan.setValueAtTime(clamp(pan, -1, 1), ctx.currentTime);
     bus.connect(p);
@@ -750,6 +821,9 @@ function renderBeat(eventName: string, t: number, opts: any = {}): boolean {
 
   const { faction = null, pan = 0, pit = 1.0, vol = 1.0 } = opts;
 
+  // C2：世界坐标优先取 opts.worldPos，其次取 _internals.updateSourceWorldPos 设置的通道值
+  const wPos: { x: number, y: number, z: number } | null = (opts && opts.worldPos) || sourceWorldPos || null;
+
   // 阵营音色预处理
   const savedTone = currentTone;
   const savedFaction = currentFaction;
@@ -775,7 +849,7 @@ function renderBeat(eventName: string, t: number, opts: any = {}): boolean {
     const busTarget = (layerName === 'B' && synthInsts.some(si => si.busTarget === 'hitBus'))
       ? 'hitBus' : undefined;
 
-    const dest = makeBus(recipeWet, pan, life, faction, busTarget);
+    const dest = makeBus(recipeWet, pan, life, faction, busTarget, wPos);
 
     // 应用层滤波
     let layerTail = dest.input;
@@ -991,6 +1065,44 @@ function executeInst(inst: any, dest: any, t: number, pit: number, vol: number):
         whoosh(dest, t + dt, inst.f0, inst.f1, inst.q, pk, inst.dur, p);
         return;
 
+      case 'sample':
+      case 'sampleLoop': {
+        // C4：采样指令（{ type:'sample', key, rate, gain, attack, decay, loop, offset }）
+        // 采样已加载 → one-shot/loop 源 + 包络；未加载 → Foley 回退程序化积木、
+        // Vocal 静默跳过（不降级为合成）。清单当前为空 → 全程序化可玩。
+        const key = String(inst.key || '');
+        const buf = getSample(key);
+        if (buf) {
+          const src = ctx.createBufferSource();
+          src.buffer = buf;
+          src.loop = !!inst.loop || inst.type === 'sampleLoop';
+          if (inst.rate != null) src.playbackRate.setValueAtTime(Number(inst.rate), t + dt);
+          const g = ctx.createGain();
+          const gPeak = inst.gain != null ? Number(inst.gain) : 1.0;
+          const gAttack = inst.attack != null ? Number(inst.attack) : 0.002;
+          const off = Number(inst.offset) || 0;
+          const remain = Math.max(0.05, buf.duration - off);
+          const gDecay = inst.decay != null ? Number(inst.decay) : remain * 0.6;
+          if (src.loop) {
+            // 常驻声：起音后保持（不主动释放，由调用方 stop / ambience 清理）
+            g.gain.setValueAtTime(FLOOR, t + dt);
+            g.gain.exponentialRampToValueAtTime(gPeak, t + dt + gAttack);
+          } else {
+            envAD(g.gain, t + dt, gPeak, gAttack, gDecay);
+          }
+          src.connect(g);
+          g.connect(dest.input);
+          src.start(t + dt, off);
+          trackNodes(2);
+          if (!src.loop) scheduleRelease([src, g], (gDecay + 0.35) * 1000);
+        } else if (inst.fallback) {
+          // Foley 回退：采样未加载 → 现有程序化积木
+          executeInst(inst.fallback, dest, t + dt, pit, vol);
+        }
+        // Vocal 无 fallback：静默跳过（不降级为合成）
+        return;
+      }
+
       case 'tail': {
         // 尾韵：独立调度子指令
         if (inst.children) {
@@ -1079,6 +1191,13 @@ function playEvent(name: string, opts: any = {}): boolean {
   if (lastFired.has(eventName) && now - lastFired.get(eventName) < THROTTLE_MS) return false;
   lastFired.set(eventName, now);
 
+  return renderEventAt(eventName, t0(), opts);
+}
+
+/** 在指定 ctx 绝对时间渲染单个事件（C3：ADR-4 时间锚定；无节流 —— 拍点由帧回调驱动） */
+function renderEventAt(eventName: string, t: number, opts: any = {}): boolean {
+  if (!ready || !ctx || !settings.enabled) return false;
+
   // 节点保护
   if (nodeCount > MAX_ACTIVE_NODES * 0.85) {
     // 丢弃低优先级
@@ -1095,10 +1214,11 @@ function playEvent(name: string, opts: any = {}): boolean {
   else if (faction === 'b') actualPit *= FACTION_SHIFT.b;
 
   try {
-    return renderBeat(eventName, t0(), {
+    return renderBeat(eventName, t, {
       faction, pan: pan || 0,
       pit: actualPit * rand(0.97, 1.03),
-      vol: clamp((vol || 1) * rand(0.92, 1.08), 0, 2)
+      vol: clamp((vol || 1) * rand(0.92, 1.08), 0, 2),
+      worldPos: opts.worldPos
     });
   } catch (e) {
     return false;
@@ -1135,26 +1255,32 @@ function scheduleSequence(sequence: any, baseT: number, opts: any = {}): Sequenc
     cancelled = true;
   };
 
-  for (const beat of sequence.beats) {
-    if (beat.name && BEAT_RECIPES[beat.name]) {
-      const t = baseT + beat.offset;
-      if (t < ctx.currentTime) continue; // 跳过已过去的时间点
-
-      const delayMs = Math.max(0, (t - ctx.currentTime) * 1000);
-      setTimeout(() => {
-        if (cancelled) return;
-        playEvent(beat.name, {
-          ...opts,
-          pit: opts.pit || 1.0,
-          faction: beat.faction || opts.faction
-        });
-      }, delayMs);
-    }
+  if (!ctx || !sequence || !Array.isArray(sequence.beats)) {
+    return new SequenceHandle(id, cancel);
   }
 
-  // 序列结束清理
-  const cleanupMs = ((baseT + (sequence.totalDur || 1.0)) - ctx.currentTime) * 1000 + 350;
-  setTimeout(() => { cancel(); }, Math.max(0, cleanupMs));
+  // C3（ADR-4）：弃 setTimeout —— 调用瞬间即按 ctx 绝对时间渲染全部拍点。
+  // 在帧回调（BeatSequencer fire / 命中帧 T）内调用时，AudioNode 以 startAt/impactAt
+  // 精确排程，音画帧级对齐，无 setTimeout 漂移。cancel 在渲染完成后主要释放引用
+  // （已排程节点由 WebAudio 时钟驱动，与 raf 无关）。
+  if (ctx.state === 'suspended') {
+    // 边界：currentTime 不前进 → 尝试恢复，并把锚点钳到当前（ADR-4 后果）
+    ctx.resume().catch(() => {});
+    baseT = Math.max(baseT, ctx.currentTime + 0.002);
+  }
+
+  const now = ctx.currentTime;
+  for (const beat of sequence.beats) {
+    if (!beat || !beat.name || !BEAT_RECIPES[beat.name]) continue;
+    if (cancelled) break;
+    const t = baseT + (beat.offset || 0);
+    if (t < now - 0.002) continue; // 已过去的时间点跳过（与原 setTimeout 语义一致）
+    renderEventAt(beat.name, t, {
+      ...opts,
+      pit: opts.pit || 1.0,
+      faction: beat.faction || opts.faction
+    });
+  }
 
   return new SequenceHandle(id, cancel);
 }
@@ -1185,6 +1311,9 @@ export const SFX = {
       buildGraph();
       ready = true;
       if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+
+      // C4：采样加载管线绑定 AudioContext（清单当前为空 → 全程序化可玩）
+      bindSampleContext(ctx);
 
       // iOS: visibilitychange 兜底
       document.addEventListener('visibilitychange', () => {
@@ -1276,6 +1405,20 @@ export const SFX = {
       }
 
       return null;
+    },
+
+    /**
+     * C3（ADR-4）扩展 API：在帧回调内以 ctx 绝对时间渲染任意序列。
+     * 签名: schedule(sequence, baseT, opts)
+     *   sequence — 与 SEQUENCES.move/capture 同构: { beats: [{ name, offset, faction? }] }
+     *   baseT    — ctx 秒（clock().ctxTime 的绝对时间锚点）
+     *   opts     — { faction, pan, worldPos, victim? }
+     * 返回 SequenceHandle（cancel 主要释放引用；已排程节点由 WebAudio 时钟驱动）。
+     */
+    schedule(sequence: any, baseT: number, opts: any = {}) {
+      if (!ready || !ctx) return null;
+      if (degradation === 'off') return null;
+      return scheduleSequence(sequence, baseT, opts);
     }
   },
 
@@ -1283,6 +1426,12 @@ export const SFX = {
 
   play(eventName: string, opts?: any) {
     return playEvent(eventName, opts || {});
+  },
+
+  /** C3（ADR-4）：在指定 ctx 绝对时间播放单个事件（供 BeatSequencer 帧回调注册） */
+  playAt(eventName: string, t: number, opts?: any) {
+    if (!ready || !ctx) return false;
+    return renderEventAt(eventName, t, opts || {});
   },
 
   /* ------ 移动音效（按兵种）------ */
@@ -1430,7 +1579,20 @@ export const SFX = {
     get settings() { return settings; },
     get t0() { return t0(); },
     get FLOOR() { return FLOOR; },
-    get FACTION_SHIFT() { return FACTION_SHIFT; }
+    get FACTION_SHIFT() { return FACTION_SHIFT; },
+
+    /* C2：3D 定位通道（松耦合 —— 坐标由调用方传入，不 import render 内容） */
+    get hasPanner3D() { return hasPanner3D; },
+    /** 每帧更新 AudioListener 位置/朝向（main.js 传 camera.position / forward / up） */
+    setListener(position: { x: number, y: number, z: number },
+                forward?: { x: number, y: number, z: number },
+                up?: { x: number, y: number, z: number }): void {
+      setListener(position, forward, up);
+    },
+    /** 更新棋子世界坐标通道（吃子/走子前调用；后续 makeBus 自动走 PannerNode） */
+    updateSourceWorldPos(pos: { x: number, y: number, z: number }): void {
+      if (pos) sourceWorldPos = pos;
+    }
   }
 };
 

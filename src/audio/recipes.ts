@@ -199,7 +199,8 @@ export const WEAPON_PARAMS: Record<string, any> = {
   B: { type: '铜钺', base: 330, grind: 0.10, partials: 'BELL', whoosh: { f0: 1200, f1: 480 } },
   A: { type: '短剑', base: 880, grind: 0.30, partials: 'BAR', whoosh: { f0: 900, f1: 3200 } },
   R: { type: '车戈铁箍', base: 1660, grind: 0.42, partials: 'IRON', whoosh: { f0: 700, f1: 2600 } },
-  C: { type: '石弹', base: 0, grind: 0, partials: null, whoosh: null, isStone: true },
+  // 炮·石弹：isStone 纯木石（无金属/无火药）。whoosh = 抛石破空（低频呼啸 下行）
+  C: { type: '石弹', base: 0, grind: 0, partials: null, whoosh: { f0: 480, f1: 190 }, isStone: true },
   K: { type: '王剑', base: 700, grind: 0.26, partials: 'BAR', whoosh: { f0: 800, f1: 2900 }, extraBell: true }
 };
 
@@ -803,12 +804,56 @@ function makeCaptureRecipes() {
     },
     opts: { wet: 0.14, life: 1.6 }
   };
+
+  // 炮·装填（C1：抬石弹上抛兜 + 绞盘收紧）—— 纯木石，无金属/火药
+  BEAT_RECIPES['cannon.capture.load'] = {
+    layers: {
+      C: [
+        { type: 'leatherCreak', cf: 172, q: 1.9, peak: 0.16, dur: 0.22, grain: 4 },
+        { type: 'woodKnock', f: 520, peak: 0.13, dur: 0.05, offset: 0.04 }
+      ],
+      B: [
+        { type: 'woodKnock', f: 138, peak: 0.15, dur: 0.07 },
+        { type: 'woodKnock', f: 118, peak: 0.10, dur: 0.06, offset: 0.10 }
+      ]
+    },
+    opts: { wet: 0.16, life: 0.9 }
+  };
+
+  // 炮·瞄准（C1：抛臂后拉 + 抛石破空 低频呼啸下行）—— 纯木石
+  BEAT_RECIPES['cannon.capture.aim'] = {
+    layers: {
+      C: [
+        { type: 'whoosh', f0: 480, f1: 190, q: 1.1, peak: 0.22, dur: 0.30 },
+        { type: 'leatherCreak', cf: 190, q: 1.8, peak: 0.11, dur: 0.26, grain: 3 }
+      ],
+      B: [
+        { type: 'osc', oscType: 'sine', freq: 84, peak: 0.14, attack: 0.05, decay: 0.22, dur: 0.28,
+          sweep: { end: 52, ramp: 'exp', rampTime: 0.24 } }
+      ]
+    },
+    opts: { wet: 0.18, life: 1.0 }
+  };
+
+  // 炮·后坐（C1：抛臂复位 + 木架后坐）—— 纯木石
+  BEAT_RECIPES['cannon.capture.recoil'] = {
+    layers: {
+      C: [
+        { type: 'woodKnock', f: 460, peak: 0.12, dur: 0.05 },
+        { type: 'dustScuff', f0: 2200, f1: 600, q: 1.3, peak: 0.18, dur: 0.22 }
+      ],
+      B: [
+        { type: 'woodKnock', f: 96, peak: 0.16, dur: 0.10 }
+      ]
+    },
+    opts: { wet: 0.14, life: 0.9 }
+  };
 }
 
 function buildA0(p: string): Recipe {
   const w = WEAPON_PARAMS[p];
   if (!w || !w.whoosh) return { layers: {}, opts: {} };
-  return {
+  const recipe: Recipe = {
     layers: {
       C: [{
         type: 'whoosh', f0: w.whoosh.f0, f1: w.whoosh.f1,
@@ -817,6 +862,21 @@ function buildA0(p: string): Recipe {
     },
     opts: { wet: 0.22 }
   };
+  // 车·双马前冲低频（设计 §1.5 进攻：双马前冲低频）
+  if (p === 'R') {
+    recipe.layers.B = [{
+      type: 'osc', oscType: 'sine', freq: 90, peak: 0.16,
+      attack: 0.02, decay: 0.20, dur: 0.24,
+      sweep: { end: 58, ramp: 'exp', rampTime: 0.18 }
+    }];
+  }
+  // 象·宽袖横扫下扫（设计 §1.3 进攻：宽袖布帛扫风；whoosh 1200→480 已为下扫）
+  if (p === 'B') {
+    recipe.layers.C.push({
+      type: 'clothRustle', cf: 1600, q: 1.2, peak: 0.10, dur: 0.34, attack: 0.03
+    });
+  }
+  return recipe;
 }
 
 function buildA1(p: string): Recipe {
@@ -1073,12 +1133,14 @@ for (const p of ALL_PIECES) {
   SEQUENCES.capture[PIECE_NAMES[p]!] = makeCaptureSequence(p);
 }
 
-/* 炮吃子特殊序列 */
+/* 炮吃子特殊序列 —— C1：装填→瞄准→射击→后坐 四段语义（对应 A2 executeCannon 的 LOAD/AIM/FIRE/RECOIL） */
 SEQUENCES.capture['cannon'] = {
   beats: [
-    { beat: 'stoneImpact', offset: 0.000, name: 'cannon.capture.stoneImpact' },
+    { beat: 'load', offset: -0.63, name: 'cannon.capture.load' },
+    { beat: 'aim', offset: -0.235, name: 'cannon.capture.aim' },
+    { beat: 'fire', offset: 0.000, name: 'cannon.capture.stoneImpact' },
     { beat: 'victim', offset: 0.045, name: 'cannon.capture.victim.shake' },
-    { beat: 'settle', offset: 0.43, name: 'cannon.capture.settle' }
+    { beat: 'recoil', offset: 0.43, name: 'cannon.capture.recoil' }
   ]
 };
 
@@ -1127,6 +1189,26 @@ export const AMBIENT_LAYERS = {
     params: { fMin: 340, fMax: 460, peak: 0.012, durMin: 0.18, durMax: 0.26 },
     snortProb: 0.6,
     peak: 0.012, wet: 0.66
+  },
+  // ── D1 新增三层（piece-sfx-design §2.1：号角/尘土/远处喊杀）——
+  // 只升密度不升音量：张力走高时靠「间隔加密 + 层级叠加」，ambLimit 兜底
+  horn: {
+    type: 'horn',
+    interval: { lo: 26.0, hi: 60.0 },
+    params: { freqMin: 164.81, freqMax: 196.00, dur: 0.9, peak: 0.040 },
+    peak: 0.040, wet: 0.66
+  },
+  dust: {
+    type: 'dustScuff',
+    interval: { lo: 9.0, hi: 24.0 },
+    params: { f0: 900, f1: 240, q: 1.3, dur: 1.4, attack: 0.45, peak: 0.018 },
+    peak: 0.018, wet: 0.58
+  },
+  shout: {
+    type: 'crowdBed',
+    interval: { lo: 6.0, hi: 18.0 },
+    params: { peak: 0.026, lp: 1700, dur: 1.1 },
+    peak: 0.026, wet: 0.66
   }
 };
 

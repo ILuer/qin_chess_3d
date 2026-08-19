@@ -1,8 +1,14 @@
 # ---- 依赖与构建产物 ----
 node_modules/
 dist/
+dist-*/
 build/
 *.log
+
+# ---- 会话内验证残留（沙箱禁删临时 txt，gitignore 防呆；由有权限者物理清理）----
+# 仅忽略仓库根的下划线 txt（如 _probe_*.txt / _tc_out.txt 等调试重定向产物）；
+# _headers 无扩展名不受影响，仍须入库（Cloudflare Pages 响应头）。
+/_*.txt
 
 # ---- TS 迁移（2026-08-20）：src 全面启用 TypeScript，js 仅物理残留待清理 ----
 # 迁移完成：src/** 已 .ts 化；工作树残留 .js 因环境写保护无法物理删除，
