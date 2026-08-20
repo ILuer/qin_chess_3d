@@ -510,12 +510,16 @@ function bladeClash(dest: any, t: number, base: number, peak: number, dur: numbe
   for (let i = 0; i < partials.length; i++) {
     const [ratio, w, dw] = partials[i]!;
     const d = dw * 0.8 + grind * 0.6;
-    const o = mkOsc('sine', base * ratio * pit * rand(0.997, 1.003), t, d + 0.05, rand(-6, 6));
-    const g = ctx.createGain();
-    envAD(g.gain, t, peak * w, 0.004, d);
-    o.connect(g); g.connect(dest.input);
-    trackNodes(2);
-    scheduleRelease([o, g], (d + 0.35) * 1000);
+    // 每个泛音叠一对微失谐孪生，增加金属"厚度"与 beating
+    const dets = [-5, 6];
+    for (let j = 0; j < dets.length; j++) {
+      const o = mkOsc('sine', base * ratio * pit * rand(0.997, 1.003), t, d + 0.05, dets[j]!);
+      const g = ctx.createGain();
+      envAD(g.gain, t, peak * w * 0.6, 0.004, d);
+      o.connect(g); g.connect(dest.input);
+      trackNodes(2);
+      scheduleRelease([o, g], (d + 0.35) * 1000);
+    }
   }
 
   // 摩擦刮擦噪声
@@ -528,6 +532,15 @@ function bladeClash(dest: any, t: number, base: number, peak: number, dur: numbe
     trackNodes(3);
     scheduleRelease([n, bp, ng], (dur + 0.35) * 1000);
   }
+
+  // 金属磨砂"grit"：更亮更高 Q 的带通噪声，让交击有颗粒感
+  const gn = mkNoise(t, dur * 1.4, rand(0.9, 1.1));
+  const gbp = mkFilter('bandpass', base * 3.2 * pit, 3.6);
+  const gng = ctx.createGain();
+  envAD(gng.gain, t, peak * (0.12 + grind * 0.5), 0.004, dur);
+  gn.connect(gbp); gbp.connect(gng); gng.connect(dest.input);
+  trackNodes(3);
+  scheduleRelease([gn, gbp, gng], (dur + 0.35) * 1000);
 }
 
 /**
@@ -566,6 +579,15 @@ function armorClink(dest: any, t: number, n: number, f0: number, f1: number, pea
     o.connect(bp); bp.connect(g);
     trackNodes(3);
     scheduleRelease([o, bp, g], (dur + 0.35) * 1000);
+
+    // 金属"沙"瞬态：增加甲片碰响的颗粒感
+    const cn = mkNoise(dt, 0.03, rand(0.95, 1.05));
+    const cbp = mkFilter('bandpass', f * pit * 2.2, 4);
+    const cg = ctx.createGain();
+    envAD(cg.gain, dt, pk * 0.3, 0.001, 0.025);
+    cn.connect(cbp); cbp.connect(cg); cg.connect(dest.input);
+    trackNodes(3);
+    scheduleRelease([cn, cbp, cg], (0.06 + 0.35) * 1000);
   }
 }
 
@@ -606,6 +628,16 @@ function horseSnort(dest: any, t: number, f: number, peak: number, dur: number, 
  * dustScuff —— 土/沙擦地（粉红噪声 + 带通扫频）
  */
 function dustScuff(dest: any, t: number, f0: number, f1: number, q: number, peak: number, dur: number, attack: number, pit: number): void {
+  // 低频"土"体腔：把擦地声从'嘶嘶'变成'闷扫'
+  const lo = mkOsc('sine', 90 * pit, t, dur + 0.05);
+  lo.frequency.setValueAtTime(90 * pit, t);
+  lo.frequency.exponentialRampToValueAtTime(50 * pit, t + dur * 0.8);
+  const loG = ctx.createGain();
+  envAD(loG.gain, t, peak * 0.3, attack || 0.003, dur);
+  lo.connect(loG); loG.connect(dest.input);
+  trackNodes(2);
+  scheduleRelease([lo, loG], (dur + 0.35) * 1000);
+
   const n = mkNoise(t, dur + 0.05, rand(0.95, 1.05));
   const bp = mkFilter('bandpass', f0 * pit, q);
   bp.frequency.setValueAtTime(f0 * pit, t);
@@ -700,17 +732,41 @@ function stoneCrush(dest: any, t: number, pit: number): void {
  */
 function warDrum(dest: any, t: number, f0: number, f1: number, peak: number, dur: number, noSnap: boolean, attack: number, pit: number): void {
   if (f0 <= 0) return;
-  const o = mkOsc('sine', f0 * pit, t, dur + 0.05);
-  o.frequency.setValueAtTime(f0 * pit, t);
-  o.frequency.exponentialRampToValueAtTime(Math.max(f1 * pit, 20), t + dur * 0.55);
-  const g = ctx.createGain();
-  envAD(g.gain, t, peak, attack || 0.004, dur);
-  o.connect(g); g.connect(dest.input);
-  trackNodes(2);
-  scheduleRelease([o, g], (dur + 0.35) * 1000);
+  const atk = attack || 0.004;
+  const bodyFreq = Math.max(f0 * pit, 24);
 
+  // ① 膜振主体：2~3 个微失谐振荡（正弦 + 三角），构成"鼓皮"厚度与泛音
+  const oscDefs = [
+    { type: 'sine', mul: 1.0, det: -4, w: 1.0 },
+    { type: 'triangle', mul: 1.5, det: 5, w: 0.5 },
+    { type: 'sine', mul: 0.5, det: 9, w: 0.32 }
+  ];
+  for (let i = 0; i < oscDefs.length; i++) {
+    const od = oscDefs[i]!;
+    const f = bodyFreq * od.mul;
+    const o = mkOsc(od.type, f, t, dur + 0.05, od.det);
+    o.frequency.setValueAtTime(f, t);
+    o.frequency.exponentialRampToValueAtTime(Math.max((f1 * pit) * od.mul, 16), t + dur * 0.6);
+    const g = ctx.createGain();
+    envAD(g.gain, t, peak * od.w, atk, dur);
+    o.connect(g); g.connect(dest.input);
+    trackNodes(2);
+    scheduleRelease([o, g], (dur + 0.35) * 1000);
+  }
+
+  // ② 低频体腔共振：主体再过一道低通，营造"空腔"轰鸣
+  const o2 = mkOsc('sine', bodyFreq * 0.5, t, dur + 0.08);
+  o2.frequency.setValueAtTime(bodyFreq * 0.5, t);
+  o2.frequency.exponentialRampToValueAtTime(Math.max((f1 * pit) * 0.5, 14), t + dur * 0.7);
+  const lp = mkFilter('lowpass', Math.max(bodyFreq * 2.4, 240), 0.9);
+  const g2 = ctx.createGain();
+  envAD(g2.gain, t, peak * 0.5, atk, dur * 1.05);
+  o2.connect(lp); lp.connect(g2); g2.connect(dest.input);
+  trackNodes(3);
+  scheduleRelease([o2, lp, g2], (dur + 0.35) * 1000);
+
+  // ③ 鼓皮瞬态（保留）
   if (!noSnap) {
-    // 鼓皮瞬态
     transient(dest, t, 320, 0.9, peak * 0.42, 0.05, 0.85, pit);
     transient(dest, t, 1800, 1.4, peak * 0.14, 0.025, 1.2, pit);
   }
@@ -727,6 +783,14 @@ function transient(dest: any, t: number, freq: number, q: number, peak: number, 
   n.connect(bp); bp.connect(g); g.connect(dest.input);
   trackNodes(3);
   scheduleRelease([n, bp, g], (dur + 0.35) * 1000);
+
+  // 低频"体"：让瞬态从'电子咔哒'变成'实体敲击点'
+  const o = mkOsc('sine', freq * 0.25 * pit, t, dur * 1.6 + 0.02);
+  const og = ctx.createGain();
+  envAD(og.gain, t, peak * 0.32, 0.001, dur * 1.2);
+  o.connect(og); og.connect(dest.input);
+  trackNodes(2);
+  scheduleRelease([o, og], (dur * 1.6 + 0.35) * 1000);
 }
 
 /**
@@ -735,6 +799,26 @@ function transient(dest: any, t: number, freq: number, q: number, peak: number, 
 function bronzeBody(dest: any, t: number, base: number, peak: number, decayScale: number, partialsKey: string, vibHz: number, pit: number): void {
   const partials = PARTIALS[partialsKey];
   if (!partials) return;
+
+  // 低频体腔"咚"：让钟体更有重量（高频钟自然被低通听感吃掉，不显浑浊）
+  const thumpF = Math.max(base * 0.5, 72) * pit;
+  const to = mkOsc('sine', thumpF, t, 0.18 * decayScale + 0.05);
+  to.frequency.setValueAtTime(thumpF, t);
+  to.frequency.exponentialRampToValueAtTime(Math.max(thumpF * 0.6, 46), t + 0.12 * decayScale);
+  const tg = ctx.createGain();
+  envAD(tg.gain, t, peak * 0.22, 0.002, 0.16 * decayScale);
+  to.connect(tg); tg.connect(dest.input);
+  trackNodes(2);
+  scheduleRelease([to, tg], (0.25 * decayScale + 0.35) * 1000);
+
+  // 金属"沙"噪声（带通，快速衰减）：增加青铜的颗粒感
+  const nn = mkNoise(t, 0.06 * decayScale + 0.02, rand(0.95, 1.05));
+  const nbp = mkFilter('bandpass', Math.max(base * pit * 2.4, 1200), 3.0);
+  const ng = ctx.createGain();
+  envAD(ng.gain, t, peak * 0.12, 0.001, 0.05 * decayScale);
+  nn.connect(nbp); nbp.connect(ng); ng.connect(dest.input);
+  trackNodes(3);
+  scheduleRelease([nn, nbp, ng], (0.06 * decayScale + 0.35) * 1000);
 
   let vibGain = null, vibOsc = null;
   if (vibHz > 0) {

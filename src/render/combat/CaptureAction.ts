@@ -134,6 +134,9 @@ export function execute(cd: any, attacker: any, victim: any, fromCell: { file: n
 
       // ★ 粒子
       effects.spawnImpactParticles(pos, PALETTE.chiHong, { count: impactParam.particleCount, ripple: true });
+      // ★ 尘土迸发 + 地面裂闪（T3 · 战场 VFX）
+      effects.spawnImpactDust(pos, { count: Math.max(12, Math.round(impactParam.particleCount * 0.6)) });
+      effects.spawnGroundFlash(pos, { color: PALETTE.liuJinLight });
       // ★ 震屏
       effects.screenShake(impactParam.shakeIntensity, impactParam.shakeDuration);
       // ★ 武器拖痕 stub（Phase 3c 实现）
@@ -387,6 +390,8 @@ function executeCannon(cd: any, attacker: any, victim: any, fromCell: { file: nu
       } catch (e) { /* 安全兜底 */ }
       // VFX
       effects.spawnImpactParticles(pos, PALETTE.chiHong, { count: impactParam.particleCount });
+      effects.spawnImpactDust(pos, { count: Math.max(12, Math.round(impactParam.particleCount * 0.6)) });
+      effects.spawnGroundFlash(pos, { color: PALETTE.liuJinLight });
       effects.screenShake(impactParam.shakeIntensity, impactParam.shakeDuration);
       // hitstop
       if (A3 > 0 && cd.hitstop) cd.hitstop.freeze(A3);

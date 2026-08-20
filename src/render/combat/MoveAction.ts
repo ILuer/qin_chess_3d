@@ -104,6 +104,8 @@ export function execute(cd: any, piece: any, fromCell: { file: number, rank: num
       'M4_start': () => {
         effects.spawnImpactParticles(endPos.clone(), PALETTE.liuJin, { count: 42, ripple: true });
         effects.screenShake(0.03, 0.18);
+        effects.spawnImpactDust(endPos.clone(), { count: 14, life: 0.7 });
+        effects.spawnGroundFlash(endPos.clone(), { color: PALETTE.liuJinLight, life: 0.34 });
         try { animator.boardImpact(cd.boardGroup, 0.055, 0.34); } catch (e) { /* no board */ }
       }
     });

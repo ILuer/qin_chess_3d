@@ -29,6 +29,7 @@ import { createPieceMesh, disposePieceFactory, setPieceLod } from './render/piec
 import { createBoard, createEnvironment } from './render/boardMesh.ts';
 import { getMaterials, disposeMaterials } from './render/materials.ts';
 import { SFX } from './audio/sfx.ts';
+import { AmbienceSystem } from './audio/ambience.ts';
 import { CombatDirector } from './render/combat/CombatDirector.ts';
 import { trackEvent, trackError, flush as flushTelemetry, tickFps, elapsedMs } from './telemetry.ts';
 
@@ -59,6 +60,7 @@ let gameOver = false;
 let hoverMesh: any = null;     // 当前悬停浮起的棋子
 let started = false;
 let combatDirector: any = null; // CombatDirector 战场演出总调度
+let ambience: any = null;       // AmbienceSystem · 8 层战场环境音（T1 · 死代码复活）
 
 // C2（ADR-2）：AudioListener 每帧更新用的临时前向向量（复用避免每帧分配）
 const _listenerFwd = new THREE.Vector3();
@@ -428,6 +430,7 @@ function setDifficulty(level: number): void {
 function toggleSound(): void {
   const on = !SFX.isEnabled();
   SFX.setEnabled(on);
+  if (ambience) ambience.setEnabled(on);   // T1 · 静音开关同时控制战场环境音
   if (on) SFX.play('select');
   syncControls();
   hud.showToast(on ? '音效已开启' : '音效已静音', 'info', 1.6);
@@ -851,7 +854,13 @@ async function boot(): Promise<void> {
   window.addEventListener('error', onFatal);
   window.addEventListener('unhandledrejection', onFatalRejection);
   // 音频：首个用户手势初始化（SFX 未 init 时 play 静默返回）
-  const audioInit = () => SFX.init();
+  const audioInit = () => {
+    SFX.init();
+    // T1 · 点亮 8 层战场环境音（死代码复活）：手势后立即实例化并 start。
+    // 若 SFX 底层尚未 ready（AudioContext 恢复竞态），主循环每帧会重试 start()。
+    if (!ambience) ambience = new AmbienceSystem();
+    if (!ambience._active) ambience.start();
+  };
   window.addEventListener('pointerdown', audioInit, { once: true });
   window.addEventListener('keydown', audioInit, { once: true });
 
@@ -1038,6 +1047,44 @@ async function boot(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// T1 · 战场环境音张力五因子（每帧计算，喂给 AmbienceSystem.updateTension）
+// 注意：ambience 的 materialAdv 以 /18 归一，故此处用「独立归一子力表」而非
+// constants.PIECE_VALUE（后者 KING=100000 会直接打爆归一尺度）。归一后：
+//   兵=1 / 士象=1.5 / 炮=3 / 马=3.5 / 车=5 / 将=0（将不计入，避免被吃瞬间异常）
+// ---------------------------------------------------------------------------
+
+const _TENSION_MAT: Record<string, number> = {
+  [PT.KING]: 0, [PT.ADVISOR]: 1.5, [PT.ELEPHANT]: 1.5,
+  [PT.CANNON]: 3, [PT.HORSE]: 3.5, [PT.ROOK]: 5, [PT.PAWN]: 1
+};
+
+function computeTensionState(): any {
+  const g: any = renderGs || gs;
+  if (!g || !g.board) return null;
+  let redMat = 0, blackMat = 0, pieceCount = 0, enemyAdv = 0;
+  const enemySide = g.sideToMove === RED ? BLACK : RED;
+  g.board.forEach((p: any, _f: number, r: number) => {
+    pieceCount++;
+    redMat += p.side === RED ? (_TENSION_MAT[p.type] || 0) : 0;
+    blackMat += p.side === BLACK ? (_TENSION_MAT[p.type] || 0) : 0;
+    // 敌方推进度：敌方棋子越过河界越深越高（0..1，河在 rank 4/5 之间）
+    if (p.side === enemySide) {
+      const adv = enemySide === RED ? r : (9 - r);
+      if (adv > enemyAdv) enemyAdv = adv;
+    }
+  });
+  const recent = g.history.slice(-6).filter((h: any) => h && h.captured).length;
+  const inCheck = g.status === 'check' || g.status === 'checkmate';
+  return {
+    materialAdv: redMat - blackMat,
+    pieceCount,
+    inCheck,
+    recentCaptures: recent,
+    enemyAdvancement: enemyAdv / 9
+  };
+}
+
+// ---------------------------------------------------------------------------
 // 主循环
 // ---------------------------------------------------------------------------
 
@@ -1094,6 +1141,12 @@ function startLoop(): void {
         cam.getWorldDirection(_listenerFwd);
         SFX._internals.setListener(cam.position, _listenerFwd, cam.up);
       }
+    }
+    // T1 · 战场环境音：每帧喂养张力五因子（首个手势后才存在）。
+    // 若 start() 因 AudioContext 恢复竞态未成功，这里每帧重试直到 _active。
+    if (ambience) {
+      if (!ambience._active && SFX._internals && SFX._internals.ready) ambience.start();
+      if (ambience._active) ambience.updateTension(computeTensionState(), dt);
     }
     if (sceneSys) sceneSys.render();
     if (hud) hud.updateTimer();

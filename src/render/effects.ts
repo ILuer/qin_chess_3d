@@ -136,6 +136,180 @@ class ParticleBurst {
 }
 
 // ---------------------------------------------------------------------------
+// 尘土迸发（吃子 / 落地）：贴地沙尘，受重力 + 风偏，不发光
+// ---------------------------------------------------------------------------
+
+class DustBurst {
+  count: number;
+  life: number;
+  t: number;
+  gravity: number;
+  wind: { x: number, z: number };
+  vel: Float32Array;
+  geometry: any;
+  material: any;
+  points: any;
+  baseSize: number;
+
+  constructor(origin: any, opts: Record<string, any> = {}) {
+    const count = opts.count || 26;
+    this.count = count;
+    this.life = opts.life || 0.9;
+    this.t = 0;
+    this.gravity = opts.gravity != null ? opts.gravity : -3.6;
+    this.wind = opts.wind || { x: (Math.random() - 0.5) * 0.5, z: (Math.random() - 0.5) * 0.5 };
+    this.baseSize = opts.size || 0.14;
+
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    this.vel = new Float32Array(count * 3);
+
+    const cA = new THREE.Color(0xC8B088);   // 扬尘亮部
+    const cB = new THREE.Color(0x9A8358);   // 扬尘暗部
+    const spread = opts.spread || 0.5;
+    const power = opts.power || 1.6;
+
+    for (let i = 0; i < count; i++) {
+      const i3 = i * 3;
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.random() * 0.12;
+      positions[i3] = origin.x + Math.cos(a) * r;
+      positions[i3 + 1] = origin.y + 0.04 + Math.random() * 0.06;
+      positions[i3 + 2] = origin.z + Math.sin(a) * r;
+
+      const out = (0.4 + Math.random()) * spread;
+      this.vel[i3] = Math.cos(a) * out * power * 0.6;
+      this.vel[i3 + 1] = (0.6 + Math.random() * 1.1) * power * 0.7;
+      this.vel[i3 + 2] = Math.sin(a) * out * power * 0.6;
+
+      const c = cA.clone().lerp(cB, Math.random());
+      colors[i3] = c.r; colors[i3 + 1] = c.g; colors[i3 + 2] = c.b;
+    }
+
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    this.geometry = g;
+
+    this.material = new THREE.PointsMaterial({
+      size: this.baseSize,
+      vertexColors: true,
+      transparent: true,
+      opacity: 1,
+      depthWrite: false,
+      blending: THREE.NormalBlending,   // 尘土不发光
+      sizeAttenuation: true
+    });
+
+    this.points = new THREE.Points(g, this.material);
+    this.points.frustumCulled = false;
+    this.points.renderOrder = 5;
+  }
+
+  update(dt: number): boolean {
+    this.t += dt;
+    const k = this.t / this.life;
+    if (k >= 1) return true;
+    const pos = this.geometry.attributes.position.array;
+    for (let i = 0; i < this.count; i++) {
+      const i3 = i * 3;
+      this.vel[i3 + 1]! += this.gravity * dt;
+      this.vel[i3]! += this.wind.x * dt;
+      this.vel[i3 + 2]! += this.wind.z * dt;
+      pos[i3] += this.vel[i3]! * dt;
+      pos[i3 + 1] += this.vel[i3 + 1]! * dt;
+      pos[i3 + 2] += this.vel[i3 + 2]! * dt;
+      if (pos[i3 + 1]! < 0.02) {
+        pos[i3 + 1] = 0.02;
+        this.vel[i3 + 1]! *= -0.2;
+        this.vel[i3]! *= 0.6;
+        this.vel[i3 + 2]! *= 0.6;
+      }
+    }
+    this.geometry.attributes.position.needsUpdate = true;
+    this.material.opacity = Math.max(0, Math.pow(1 - k, 1.4));
+    this.material.size = this.baseSize * (1 + k * 1.4);   // 尘土扩散变大
+    return false;
+  }
+
+  dispose(): void {
+    this.geometry.dispose();
+    this.material.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 地面裂闪（吃子 / 落地）：快速衰减亮斑 + 外扩裂环（零外部贴图）
+// ---------------------------------------------------------------------------
+
+class GroundFlash {
+  t: number;
+  life: number;
+  meshes: any[];
+  mats: any[];
+
+  constructor(origin: any, opts: Record<string, any> = {}) {
+    this.t = 0;
+    this.life = opts.life || 0.42;
+    this.meshes = [];
+    this.mats = [];
+
+    const color = opts.color != null ? opts.color : PALETTE.liuJinLight;
+    const y = opts.y != null ? opts.y : 0.018;
+
+    const discGeo = new THREE.CircleGeometry(0.34, 28);
+    const discMat = new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.85,
+      depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide
+    });
+    const disc = new THREE.Mesh(discGeo, discMat);
+    disc.rotation.x = -Math.PI / 2;
+    disc.position.set(origin.x, y, origin.z);
+    disc.renderOrder = 4;
+    this.meshes.push(disc); this.mats.push(discMat);
+
+    const ringGeo = new THREE.RingGeometry(0.30, 0.40, 32);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.3),
+      transparent: true, opacity: 0.7,
+      depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(origin.x, y + 0.002, origin.z);
+    ring.renderOrder = 4;
+    this.meshes.push(ring); this.mats.push(ringMat);
+  }
+
+  update(dt: number): boolean {
+    this.t += dt;
+    const k = this.t / this.life;
+    if (k >= 1) return true;
+    const disc = this.meshes[0];
+    if (disc) {
+      const dk = Math.min(1, k / 0.35);
+      disc.material.opacity = 0.85 * (1 - dk);
+      const ds = 0.7 + dk * 0.6;
+      disc.scale.set(ds, ds, 1);
+    }
+    const ring = this.meshes[1];
+    if (ring) {
+      const rs = 0.6 + k * 2.4;
+      ring.scale.set(rs, rs, 1);
+      ring.material.opacity = 0.7 * (1 - k);
+    }
+    return false;
+  }
+
+  dispose(): void {
+    for (let i = 0; i < this.meshes.length; i++) {
+      if (this.meshes[i] && this.meshes[i].geometry) this.meshes[i].geometry.dispose();
+      if (this.mats[i]) this.mats[i].dispose();
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Effects
 // ---------------------------------------------------------------------------
 
@@ -152,6 +326,8 @@ export class Effects {
   dustGroup: any;
   afterimageGroup: any;
   weaponTrailGroup: any;
+  flashGroup: any;
+  flashes: any[];
   bursts: ParticleBurst[];
   ripples: Array<{ mesh: any, mat: any, t: number, life: number }>;
   _time: number;
@@ -197,11 +373,15 @@ export class Effects {
     this.dustGroup = new THREE.Group(); this.dustGroup.name = 'fx-dust';
     this.afterimageGroup = new THREE.Group(); this.afterimageGroup.name = 'fx-afterimage';
     this.weaponTrailGroup = new THREE.Group(); this.weaponTrailGroup.name = 'fx-weapontrail';
+    this.flashGroup = new THREE.Group(); this.flashGroup.name = 'fx-groundflash';
     this.root.add(
       this.markerGroup, this.hintGroup, this.blockedGroup,
       this.selectionGroup, this.checkGroup, this.particleGroup, this.rippleGroup,
-      this.dustGroup, this.afterimageGroup, this.weaponTrailGroup
+      this.dustGroup, this.afterimageGroup, this.weaponTrailGroup, this.flashGroup
     );
+
+    /** @type {GroundFlash[]} */
+    this.flashes = [];
 
     /** @type {ParticleBurst[]} */
     this.bursts = [];
@@ -507,6 +687,33 @@ export class Effects {
     return burst;
   }
 
+  /**
+   * 吃子 / 落地尘土迸发（贴地沙尘，受重力 + 风偏，不发光）
+   * 复用 bursts 数组与 particleGroup，与火花同生命周期管理。
+   * @param {THREE.Vector3|{x:number,y:number,z:number}} position
+   * @param {Object} [opts]
+   */
+  spawnImpactDust(position: any, opts: Record<string, any> = {}): any {
+    const origin = position.isVector3 ? position : new THREE.Vector3(position.x, position.y || 0, position.z);
+    const burst = new DustBurst(origin, opts);
+    this.particleGroup.add(burst.points);
+    this.bursts.push(burst);
+    return burst;
+  }
+
+  /**
+   * 吃子 / 落地地面裂闪（快速衰减亮斑 + 外扩裂环，零外部贴图）
+   * @param {THREE.Vector3|{x:number,y:number,z:number}} position
+   * @param {Object} [opts]
+   */
+  spawnGroundFlash(position: any, opts: Record<string, any> = {}): any {
+    const origin = position.isVector3 ? position : new THREE.Vector3(position.x, position.y || 0, position.z);
+    const flash = new GroundFlash(origin, opts);
+    for (let i = 0; i < flash.meshes.length; i++) this.flashGroup.add(flash.meshes[i]);
+    this.flashes.push(flash);
+    return flash;
+  }
+
   /** 扩散涟漪圆环 */
   spawnRipple(position: any, color: number = PALETTE.liuJinLight, life = 0.6): any {
     const mat = this.matRipple.clone();
@@ -659,6 +866,16 @@ export class Effects {
       const s = 0.6 + k * 2.6;
       r.mesh.scale.set(s, s, 1);
       r.mat.opacity = 0.85 * (1 - k) * (1 - k);
+    }
+
+    // 地面裂闪
+    for (let i = this.flashes.length - 1; i >= 0; i--) {
+      const f = this.flashes[i]!;
+      if (f.update(dt)) {
+        for (let j = 0; j < f.meshes.length; j++) this.flashGroup.remove(f.meshes[j]);
+        f.dispose();
+        this.flashes.splice(i, 1);
+      }
     }
 
     // 全屏脉冲

@@ -12,15 +12,9 @@ import * as THREE from 'three';
 import { TIMING, PT } from '../core/constants.ts';
 import { applyDissolvePose } from './combat/PieceChoreography.ts';
 import { IDLE_PIECE } from './combat/CombatConstants.ts';
-// getChoreo 已被 CombatDirector/PieceChoreography 替代。
-// 保留本地 stub 接口，供 dissolvePiece/tickIdle/movePiece/captureStrike 回退到通用姿态。
-// 旧的 choreography/ 目录完全弃用，不再 import。
-function _getChoreoStub(type: string): any {
-  // 所有兵种姿态现在由 PieceChoreography.js 驱动；
-  // animator 的 dissolvePiece / captureStrike / tickIdle / movePiece
-  // 在 choreography 缺失时走 pure-generic 回退路径（见各方法内部）。
-  return null;
-}
+// 战斗姿态现由 CombatDirector → CaptureAction/MoveAction → PieceChoreography 统一驱动；
+// animator 仅保留纯通用回退（点头 / 前压 / 消散），不再依赖任何外部编排 stub。
+// （历史 _getChoreoStub 已删除：其恒返回 null，真实编排走 CombatDirector 实时路径。）
 
 // ---------------------------------------------------------------------------
 // 待机微动全局调参（P3-可见度修正）
@@ -444,9 +438,8 @@ export class Animator {
     const startY = mesh.position.y;
     const startRotY = mesh.rotation.y;
     const tmp = new THREE.Vector3();
-    // 被吃方专属附加（BK-14 等）：分兵种消散风味，由编排提供
-    const dissolveCh = _getChoreoStub(mesh.userData.pieceType);
-    const dissolveSub = mesh.userData.subGroups || {};
+    // 被吃方专属附加（BK-14 等）：分兵种消散风味，由 PieceChoreography 的
+    // applyDissolvePose 驱动（见下方 onUpdate），不再依赖外部编排 stub。
 
     return this.add({
       duration,
@@ -463,9 +456,6 @@ export class Animator {
         // 分兵种崩解姿态（DISSOLVE_POSE）：驱动 idleGroup + 命名子组
         // （K.crown 冕落 / C.cart 散架 / 各兵种整体倾倒等）。subGroup 缺失时内部安全跳过。
         try { applyDissolvePose(mesh, mesh.userData.pieceType, t); } catch (e) { /* 安全兜底 */ }
-        if (dissolveCh && dissolveCh.capturedFlourish) {
-          try { dissolveCh.capturedFlourish(this, mesh, dissolveSub, t, raw); } catch (e) { /* 安全兜底 */ }
-        }
       },
       onComplete: () => { if (opts.onComplete) opts.onComplete(mesh, backup); }
     });
@@ -626,8 +616,6 @@ export class Animator {
     const dx = target.x - piece.position.x;
     const dz = target.z - piece.position.z;
     const spin = headingYaw(side, dx, dz) - piece.rotation.y;
-    const ch = _getChoreoStub(type);
-    const sub = piece.userData.subGroups || {};
     return this.arcMove(piece, target, {
       duration: opts.duration,
       lift,
@@ -636,9 +624,6 @@ export class Animator {
       easing: opts.easing,
       onFlourish: (t, raw, mesh) => {
         try { this._moveFlourish(mesh, type, t, raw); } catch (e) { /* 安全兜底 */ }
-        if (ch && ch.moveFlourish) {
-          try { ch.moveFlourish(this, mesh, sub, t, raw); } catch (e) { /* 编排异常不影响移动 */ }
-        }
       },
       onComplete: () => { if (opts.onLand) opts.onLand(); }
     });
@@ -661,11 +646,8 @@ export class Animator {
    * @returns {Object} 主补间句柄
    */
   captureStrike(piece: any, type: string, side: string, opts: any = {}): TweenHandle {
-    const ch = _getChoreoStub(type);
     const sub = piece.userData.subGroups || {};
-    // 分兵种编排优先：attack() 返回主句柄，由调用方接 _busy 释放
-    if (ch && ch.attack) return ch.attack(this, piece, sub, side, opts);
-    // —— 回退：通用点头 + 有可动子组则挥击 ——
+    // —— 通用斩杀点头 + 有可动子组则挥击（分兵种编排由 CombatDirector/PieceChoreography 统一驱动）——
     const ud = piece.userData;
     // H2：读缓存引用（热路径），回退为旧查找
     const orient = ud._orient || piece.getObjectByName('orient') || piece;
