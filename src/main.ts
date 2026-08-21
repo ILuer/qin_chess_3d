@@ -431,10 +431,25 @@ function setDifficulty(level: number): void {
 function toggleSound(): void {
   const on = !SFX.isEnabled();
   SFX.setEnabled(on);
-  if (ambience) ambience.setEnabled(on);   // T1 · 静音开关同时控制战场环境音
-  if (on) SFX.play('select');
+  if (on) {
+    // 修复：开启后 AudioContext 可能仍 suspended，playEvent 当帧会早返回吞掉声音；
+    // 先 resume（setEnabled 内已处理）再延迟一帧播放，确保选子音能发声。
+    try { if (SFX._internals && SFX._internals.ctx && SFX._internals.ctx.state === 'suspended') SFX._internals.ctx.resume().catch(() => {}); } catch (e) { /* 忽略 */ }
+    requestAnimationFrame(() => { try { SFX.play('select'); } catch (e) { /* 忽略 */ } });
+  }
   syncControls();
-  hud.showToast(on ? '音效已开启' : '音效已静音', 'info', 1.6);
+  hud.showToast(on ? '棋子音效已开启' : '棋子音效已静音', 'info', 1.6);
+}
+
+/** 环境音（战场氛围）独立开关 —— A+B+C 改造：与棋子音效解耦，不绑快捷键 */
+function toggleAmbient(): void {
+  const on = !ambience.isEnabled();
+  // 注意：不要在此预调 ambience.start()。setEnabled(true) 内部已对「未激活」分支
+  // 惰性 start()（ambience.ts:157），若此处先 start() 再 setEnabled 会触发 _startTimers
+  // 二次排程（banner/drum 定时器重复）。交给 setEnabled 统一拉起即可。
+  ambience.setEnabled(on);
+  syncControls();
+  hud.showToast(on ? '环境音效已开启' : '环境音效已静音', 'info', 1.6);
 }
 
 /** 切换跟随相机模式（T 键；调试辅助：跟随 ↔ 固定对比） */
@@ -666,6 +681,7 @@ function syncControls(): void {
   controls.setUndoEnabled(canUndo);
   controls.setAIState(aiEnabled, difficulty);
   controls.setSoundState(SFX.isEnabled());
+  if (ambience) controls.setAmbientState(ambience.isEnabled());
   if (sceneSys) {
     controls.setFlipState(sceneSys.viewSide);
     controls.setTopViewState(sceneSys.isTopView);
@@ -972,6 +988,7 @@ async function boot(): Promise<void> {
       flipView: () => { sceneSys.flipView(); syncControls(); },
       toggleTopView: () => { sceneSys.toggleTopView(); syncControls(); },
       toggleSound,
+      toggleAmbient,
       toggleAI,
       setDifficulty,
       toggleFollowCamera,

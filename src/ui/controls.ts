@@ -23,6 +23,7 @@ export class Controls {
   btnFlip: any;
   btnTop: any;
   btnSound: any;
+  btnAmbient: any;
   btnAI: any;
   btnResign: any;
   selDifficulty: any;
@@ -34,8 +35,9 @@ export class Controls {
    * @param {Function} actions.resetView
    * @param {Function} actions.flipView
    * @param {Function} actions.toggleTopView
-   * @param {Function} actions.toggleSound
-   * @param {Function} actions.toggleAI
+ * @param {Function} actions.toggleSound
+ * @param {Function} actions.toggleAmbient
+ * @param {Function} actions.toggleAI
    * @param {Function} actions.setDifficulty
    * @param {Function} actions.toggleFollowCamera
    * @param {Function} actions.resign
@@ -60,6 +62,7 @@ export class Controls {
     this.btnFlip = $('#btn-flip');
     this.btnTop = $('#btn-top');
     this.btnSound = $('#btn-sound');
+    this.btnAmbient = $('#btn-ambient');
     this.btnAI = $('#btn-ai');
     this.btnResign = $('#btn-resign');
     this.selDifficulty = $('#select-difficulty');
@@ -135,6 +138,7 @@ export class Controls {
     this._on(this.btnFlip, 'click', () => this._call('flipView'));
     this._on(this.btnTop, 'click', () => this._call('toggleTopView'));
     this._on(this.btnSound, 'click', () => this._call('toggleSound'));
+    this._on(this.btnAmbient, 'click', () => this._call('toggleAmbient'));
     this._on(this.btnAI, 'click', () => this._call('toggleAI'));
 
     this._on(this.selDifficulty, 'change', (ev: Event) => {
@@ -235,6 +239,14 @@ export class Controls {
     this.btnSound.setAttribute('aria-pressed', on ? 'true' : 'false');
     const label = this.btnSound.querySelector('.btn-label') || this.btnSound;
     label.textContent = on ? '音效 开' : '音效 关';
+  }
+
+  setAmbientState(on: boolean): void {
+    if (!this.btnAmbient) return;
+    this.btnAmbient.classList.toggle('is-off', !on);
+    this.btnAmbient.setAttribute('aria-pressed', on ? 'true' : 'false');
+    const label = this.btnAmbient.querySelector('.btn-label') || this.btnAmbient;
+    label.textContent = on ? '环境 开' : '环境 关';
   }
 
   setAIState(on: boolean, difficulty?: number): void {

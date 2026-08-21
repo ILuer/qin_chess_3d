@@ -151,9 +151,11 @@ export class AmbienceSystem {
 
   setEnabled(v: unknown): boolean {
     this._enabled = !!v;
-    if (v && this._active) {
-      this._fadeIn();
-      this._startTimers();
+    // 修复：开启时若环境系统尚未激活（首启惰性），先 start() 真正拉起氛围床与
+    // 定时器，避免「开了开关却不出声」的死分支（start() 内部有 _active 幂等守卫）。
+    if (v) {
+      if (!this._active) this.start();
+      else { this._fadeIn(); this._startTimers(); }
     } else if (this._active) {
       this._stopTimers();
       this._fadeOut();

@@ -1614,6 +1614,11 @@ export const SFX = {
 
   setEnabled(v: unknown): boolean {
     settings.enabled = !!v;
+    // 修复：开启时若 AudioContext 处于 suspended（浏览器自动暂停策略），先 resume
+    // 再返回，避免后续 play() 当帧被 playEvent() 的 suspended 早返回吞掉声音。
+    if (v && ctx && ctx.state === 'suspended') {
+      try { ctx.resume().catch(() => {}); } catch (e) { /* 忽略 */ }
+    }
     saveSettings();
     return settings.enabled;
   },
