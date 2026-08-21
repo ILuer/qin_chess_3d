@@ -559,7 +559,10 @@ export class Animator {
     }
     const sel = !!selected;
     const far = !!farView;
-    const amp = sel ? 1.8 : 1;   // 选中放大（Juice 选中强调 / Windex 焦点）
+    // 选中放大（Juice 选中强调 / Windex 焦点）
+    // ★ P3：IDLE_PIECE 基数已上调 ~2x（修「棋子呆呆的」），选中系数由 1.8 降到 1.4 补偿，
+    //   使选中峰值 ≤ ~0.18 rad，防手臂/剑穿模。
+    const amp = sel ? 1.4 : 1;
     const ph = ud.idlePhase || 0;
     const bAmp = ((cfg && cfg.breathe) || 0.012) * IDLE_AMP_SCALE;
     const sAmp = ((cfg && cfg.sway) || 0.014) * IDLE_AMP_SCALE;

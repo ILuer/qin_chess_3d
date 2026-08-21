@@ -46,6 +46,13 @@
 /dist/*
   Cache-Control: public, max-age=0, must-revalidate
 
+# 战场音频采样（assets/audio/**，29 个 WAV / 磁盘 1.85MB）。
+# 文件名不带内容哈希（用户可用同名真实录音热替换），因此**不能** immutable ——
+# 否则替换后的录音一年内到不了用户耳朵（与 /vendor/* 的 immutable 纪律形成对照）。
+# 走 must-revalidate + ETag：未变更命中 304，替换后立刻生效。
+/assets/*
+  Cache-Control: public, max-age=0, must-revalidate
+
 # vendor 是版本锁定的第三方库（three@0.185.0 / r185），内容永不变更。
 # 升级走「改目录名 + 改 importmap」，不会原地覆盖，故可安全 immutable 长缓存。
 # 1.27MB 的 three.module.js 只在首访下载一次，回访零请求。

@@ -9,7 +9,10 @@
 import * as THREE from 'three';
 import { PT, PALETTE, TIMING, toWorld } from '../../core/constants.ts';
 import { headingYaw } from '../animator.ts';
-import { moveFlourish, resetMovePose } from './PieceChoreography.ts';
+import {
+  moveFlourish, resetMovePose,
+  moveCharge, snapshotMovePose, settleMovePose
+} from './PieceChoreography.ts';
 import { cellPan } from './coords.ts';
 import {
   getBeatDuration, getLiftMul,
@@ -114,6 +117,17 @@ export function execute(cd: any, piece: any, fromCell: { file: number, rank: num
     let dustTimer = 0;
     let afterTimer = 0;
 
+    // ★ P3 跨拍进度换算（设计 §4.2 三段式映射）：
+    //   anticipation = M0+M1，recovery = M3+M4+M5。子组姿态必须在**合并时间轴**上
+    //   连续推进，否则每拍各自 0→1 会造成姿态反复重置（视觉抖动/静止）。
+    const antTot = Math.max(1e-6, M0 + M1);
+    const wM0 = M0 / antTot;
+    const recTot = Math.max(1e-6, M3 + M4 + M5);
+    const wM3 = M3 / recTot;
+    const wM4 = M4 / recTot;
+    /** M2 落点姿态快照（M3 onStart 采样），供 M3~M5 阻尼收势用 */
+    let movePoseSnap: Record<string, number> | null = null;
+
     // ── 用 seq 串联六拍 ──
     const steps = [];
 
@@ -126,6 +140,7 @@ export function execute(cd: any, piece: any, fromCell: { file: number, rank: num
         idleGroup.rotation.x = leanBack * t;
         idleGroup.scale.y = idleBase.y * (1 - (1 - m0Squash) * t);
         idleGroup.scale.x = idleBase.x * (1 + (1 - m0Squash) * t * 0.4);
+        moveCharge(piece, type, t * wM0);   // ★ P3：起步蓄势子组随动（原缺失）
       }
     });
 
@@ -137,6 +152,7 @@ export function execute(cd: any, piece: any, fromCell: { file: number, rank: num
       onUpdate: (t: number) => {
         idleGroup.rotation.x = leanBack * (1 - t);  // 后仰 → 0
         idleGroup.scale.copy(idleBase);             // 回弹（保留 K 预缩放）
+        moveCharge(piece, type, wM0 + (1 - wM0) * t);  // ★ P3：蓄势推进到峰值
       }
     });
 
@@ -173,7 +189,11 @@ export function execute(cd: any, piece: any, fromCell: { file: number, rank: num
       duration: M3,
       lock: true,
       easing: animator.EASE.easeOutBack,
-      onStart: () => { sequencer.fire('M3_start'); },
+      onStart: () => {
+        sequencer.fire('M3_start');
+        // ★ P3：在落点刹那快照冲锋极限姿态，M3~M5 由此做帧率无关的阻尼收势
+        movePoseSnap = snapshotMovePose(piece, type);
+      },
       onUpdate: (t: number) => {
         // 过冲
         const k = 1 - t;
@@ -182,6 +202,7 @@ export function execute(cd: any, piece: any, fromCell: { file: number, rank: num
         idleGroup.scale.y = idleBase.y * (1 - (m3Over - 1) * 0.5 * osc);
         idleGroup.scale.z = idleBase.z * (1 + (m3Over - 1) * osc);
         idleGroup.rotation.x = leanVal;
+        settleMovePose(piece, type, movePoseSnap, t * wM3);   // ★ P3：子组阻尼回摆
       }
     });
 
@@ -207,6 +228,7 @@ export function execute(cd: any, piece: any, fromCell: { file: number, rank: num
           idleGroup.scale.z = idleBase.z * ((1 + m4Squash * 0.6) - m4Squash * 0.6 * s);
         }
         idleGroup.rotation.x = leanVal * (1 - t);
+        settleMovePose(piece, type, movePoseSnap, wM3 + wM4 * t);   // ★ P3 收势续接
       }
     });
 
@@ -220,6 +242,7 @@ export function execute(cd: any, piece: any, fromCell: { file: number, rank: num
         piece.position.y = 0;
         idleGroup.rotation.x = leanVal * (1 - t);
         idleGroup.scale.copy(idleBase);
+        settleMovePose(piece, type, movePoseSnap, wM3 + wM4 + (1 - wM3 - wM4) * t); // ★ P3 收势归零
       },
       onComplete: () => {
         // 释放 busy

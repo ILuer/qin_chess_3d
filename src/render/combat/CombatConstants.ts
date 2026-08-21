@@ -335,60 +335,66 @@ export const IDLE_WEAPON_BIAS = {
  *   l2  [sub, axis, amp, period, phOff, gate?]  —— L2 偶发脉冲层；gate: 'phPlus'(sin(ph)>0)/'phMinus'
  *   zeroChannels    —— _busy 时幂等归零的通道（= 待机写入 ∩ 战斗未写入；绝不与 windUp/strike/settle 打架）
  *
- * 幅度边界（P2 已适度上调辨识度）：待机 rotation 峰值（未选中）≤ 0.06、
- *   position.y ≤ 0.02；选中 amp≤1.8 放大后 ≤ ~0.11；脉冲与 L1 同轴时注意叠加不超限。
+ * 幅度边界（P3 「战场活气」上调 —— 修复用户实机反馈「棋子呆呆的」）：
+ *   ★ 根因：原表 L1 峰值 ≤0.06 rad（≈3.4°）、频率 0.18~0.40Hz（周期 2.5~5.6s），
+ *     在正常观战距离下人眼几乎无法察觉 → 视觉上等同静止（「呆」）。
+ *   ★ 修法：L1 幅度整体 ×1.9~2.2、频率 ×2.0~2.3（设计稿 §120 明确要求马摆频 ≥0.45Hz，
+ *     原实现 0.26 违规）；L2 脉冲周期从 5~7s 压到 3~3.8s（叩击/刨蹄要成为可感知节律）。
+ *   新边界：待机 rotation 峰值（未选中）≤ 0.13、position.y ≤ 0.026；
+ *     选中放大系数由 1.8 降到 1.4（补偿基数上调，选中峰值 ≤ ~0.18 防穿模）。
  */
 export const IDLE_PIECE = {
   [PT.PAWN]: {
     desc: '戈叩盾：缓摆 + 叩击脉冲（P）',
-    breathe: 0.012, sway: 0.014,
+    breathe: 0.020, sway: 0.026,
     l1: [
-      ['arm', 'z', 0.052, 0.30, 0],
-      ['arm', 'x', 0.034, 0.30, 0.6],
-      ['body', 'x', 0.028, 0.30, Math.PI]
+      ['arm', 'z', 0.115, 0.62, 0],
+      ['arm', 'x', 0.075, 0.62, 0.6],
+      ['body', 'x', 0.052, 0.62, Math.PI]
     ],
     l2: [
-      ['arm', 'x', 0.055, 5.0],
-      ['body', 'x', -0.024, 5.0]
+      ['arm', 'x', 0.130, 3.2],
+      ['body', 'x', -0.050, 3.2]
     ],
     // windUp 写 arm.x → 只归零 arm.z / body.x
     zeroChannels: ['arm.rotation.z', 'body.rotation.x']
   },
   [PT.HORSE]: {
     desc: '扬前身 + 骑手对位后仰（N）',
-    breathe: 0.012, sway: 0.014,
+    breathe: 0.020, sway: 0.026,
     l1: [
-      ['mount', 'x', -0.048, 0.26, 0],
-      ['rider', 'x', 0.030, 0.26, 0],
-      ['rider', 'z', 0.022, 0.26, 1.0]
+      // 设计稿 §120：mount.x 摆频须提升至 0.45Hz 以上近似奔跑感（原 0.26 违规）
+      ['mount', 'x', -0.105, 0.58, 0],
+      ['rider', 'x', 0.062, 0.58, 0],
+      ['rider', 'z', 0.048, 0.58, 1.0]
     ],
     l2: [
-      ['mount', 'x', -0.040, 6.5]
+      ['mount', 'x', -0.090, 3.6]
     ],
     // windUp 写 mount.x / rider.x → 只归零 rider.z
     zeroChannels: ['rider.rotation.z']
   },
   [PT.ELEPHANT]: {
     desc: '展卷吟诵：简牍微举复落（B）',
-    breathe: 0.012, sway: 0.014,
+    breathe: 0.020, sway: 0.024,
     l1: [
-      ['arms', 'z', 0.060, 0.26, 0],
-      ['arms', 'x', 0.028, 0.26, 0.8],
-      ['robe', 'x', 0.026, 0.26, Math.PI]
+      ['arms', 'z', 0.125, 0.54, 0],
+      ['arms', 'x', 0.058, 0.54, 0.8],
+      ['robe', 'x', 0.050, 0.54, Math.PI]
     ],
     l2: [
-      ['arms', 'x', 0.050, 6.0]
+      ['arms', 'x', 0.110, 3.8]
     ],
     // windUp/strike 写 arms.z / robe.x(/z) → 只归零 arms.x
     zeroChannels: ['arms.rotation.x']
   },
   [PT.ADVISOR]: {
     desc: '蓄势警戒：全场最静、无脉冲（A）',
-    breathe: 0.008, sway: 0.008,
+    breathe: 0.015, sway: 0.016,
     l1: [
-      ['body', 'z', 0.014, 0.40, 0],
-      ['sword', 'z', 0.024, 0.40, 0.5],
-      ['arms', 'x', 0.016, 0.40, Math.PI]
+      ['body', 'z', 0.030, 0.72, 0],
+      ['sword', 'z', 0.055, 0.72, 0.5],
+      ['arms', 'x', 0.035, 0.72, Math.PI]
     ],
     l2: [],
     // windUp 写 sword.z → 只归零 body.z / arms.x
@@ -396,14 +402,14 @@ export const IDLE_PIECE = {
   },
   [PT.ROOK]: {
     desc: '双马刨蹄 + 御者勒缰 + 车舆滞后（R）',
-    breathe: 0.010, sway: 0.012,
+    breathe: 0.018, sway: 0.022,
     l1: [
-      ['horses', 'x', 0.040, 0.24, 0],
-      ['body', 'x', 0.018, 0.24, -0.8],
-      ['driver', 'x', 0.034, 0.24, 1.2]
+      ['horses', 'x', 0.095, 0.56, 0],
+      ['body', 'x', 0.040, 0.56, -0.8],
+      ['driver', 'x', 0.070, 0.56, 1.2]
     ],
     l2: [
-      ['horses', 'x', 0.045, 7.0]
+      ['horses', 'x', 0.100, 3.0]
     ],
     // windUp/strike 写 spearman.x / driver.x / horses.x → 只归零 body.x
     // （horses.rotation.x 是战斗通道：A2 双马前冲由 strike 写，若被 busy 每帧归零则视觉无效 —— §4.3 纪律；
@@ -412,28 +418,29 @@ export const IDLE_PIECE = {
   },
   [PT.CANNON]: {
     desc: '双兵左右反相检修 + 脉冲侧向交替（C）',
-    breathe: 0.010, sway: 0.012,
+    breathe: 0.018, sway: 0.022,
     l1: [
-      ['soldierL', 'x', 0.045, 0.22, 0],
-      ['soldierR', 'x', 0.045, 0.22, Math.PI],
-      ['trebuchet', 'z', 0.018, 0.22, 0.5]
+      ['soldierL', 'x', 0.100, 0.52, 0],
+      ['soldierR', 'x', 0.100, 0.52, Math.PI],
+      ['trebuchet', 'z', 0.040, 0.52, 0.5]
     ],
     l2: [
-      ['soldierL', 'x', 0.042, 6.0, 0, 'phPlus'],
-      ['soldierR', 'x', 0.042, 6.0, 0, 'phMinus']
+      ['soldierL', 'x', 0.095, 3.4, 0, 'phPlus'],
+      ['soldierR', 'x', 0.095, 3.4, 0, 'phMinus']
     ],
     // 全部通道均被 windUp/strike 覆盖 → 无需额外归零（settle 会复位）
     zeroChannels: []
   },
   [PT.KING]: {
     desc: '抚椅：rArm 抚扶手摩挲 + body 微沉肩 + 王座如磐 + 帅旗微扬（K）',
-    breathe: 0.008, sway: 0.008,
+    breathe: 0.015, sway: 0.016,
     l1: [
-      ['rArm', 'z', 0.058, 0.18, 0],
-      ['rArm', 'x', 0.034, 0.18, 1.2],
-      ['body', 'x', 0.026, 0.18, 0.6],
-      ['throne', 'x', 0.008, 0.18, 0],
-      ['banner', 'z', 0.034, 0.30, 2.0]
+      ['rArm', 'z', 0.115, 0.40, 0],
+      ['rArm', 'x', 0.070, 0.40, 1.2],
+      ['body', 'x', 0.050, 0.40, 0.6],
+      ['throne', 'x', 0.014, 0.40, 0],
+      // 设计稿 §224：帅旗用最低频制造「风吹旗角」而非「摆动」→ 频率保持 0.30，只加幅度
+      ['banner', 'z', 0.095, 0.30, 2.0]
     ],
     l2: [],
     // windUp 写 sword.z / throne.x → 只归零 rArm.z / rArm.x / body.x / banner.z

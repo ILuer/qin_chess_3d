@@ -15,7 +15,8 @@
  * ========================================================================== */
 
 import { SFX } from './sfx.ts';
-import { AMBIENT_LAYERS, TENSION_WEIGHTS, TENSION_MAP } from './recipes.ts';
+import { AMBIENT_LAYERS, TENSION_WEIGHTS, TENSION_MAP, AMBIENT_BEDS } from './recipes.ts';
+import { getSample, loadSample } from './sampleBank.ts';
 
 /* --------------------------------------------------------------------------
  * 0. 常量
@@ -77,6 +78,8 @@ export class AmbienceSystem {
   _active: boolean;
   _enabled: boolean;
   _layers: Record<string, any>;
+  /** 采样环境床（风沙/远处军阵/行军鼓），解码完成后异步挂载 */
+  _beds: Record<string, any>;
   _timers: Array<ReturnType<typeof setTimeout>>;
   _nodes: any[];
   _tension: number;
@@ -96,6 +99,7 @@ export class AmbienceSystem {
     this._active = false;       // 是否已启动
     this._enabled = true;       // 独立静音
     this._layers = {};          // 五层运行时状态
+    this._beds = {};            // 采样环境床运行时状态（异步挂载）
     this._timers = [];          // 定时器 ID
     this._nodes = [];           // 音频节点引用
     this._tension = 0.12;       // 当前张力（平滑后）
@@ -270,6 +274,134 @@ export class AmbienceSystem {
 
     // D-CROWD: 连续人群
     this._layers.crowd = this._buildCrowdLayer(ambBus, t);
+
+    // I-BEDS: 采样环境床（风沙 / 远处军阵 / 行军鼓）—— 解码到位后交叉淡化接管
+    this._beds = {};
+    for (const name of Object.keys(AMBIENT_BEDS)) {
+      this._mountSampleBed(name);
+    }
+  }
+
+  /* ---- 采样环境床（8s 无缝循环）---- */
+
+  /**
+   * 挂载一条采样环境床。采样已解码 → 立即建；未解码 → 后台等 loadSample 完成再建，
+   * 期间程序化层照常发声，绝不出现静默空窗。
+   */
+  _mountSampleBed(name: string): void {
+    const cfg = AMBIENT_BEDS[name];
+    if (!cfg) return;
+    const buf = getSample(cfg.key);
+    if (buf) {
+      this._beds[name] = this._buildSampleBed(name, cfg, buf, 0.6);
+      return;
+    }
+    loadSample(cfg.key).then(b => {
+      // 加载期间可能已经 stop()，或用户关了环境音 —— 都要老实退出
+      if (!b || !this._active || this._beds[name]) return;
+      this._beds[name] = this._buildSampleBed(name, cfg, b, cfg.crossfade);
+    }).catch(() => {});
+  }
+
+  /** 建一条循环床并把被它取代的程序化层淡出（等功率交叉淡化） */
+  _buildSampleBed(name: string, cfg: any, buf: AudioBuffer, fadeIn: number): any {
+    const i = _int();
+    if (!i.ready || !i.ambientBus || !i.ctx) return null;
+    const t = i.ctx.currentTime + 0.03;
+    const ambBus = i.ambientBus;
+
+    const src = i.ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    src.playbackRate.setValueAtTime(cfg.rate || 1, t);
+
+    let tail: any = src;
+    if (cfg.highpass) {
+      const hp = i.ctx.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.setValueAtTime(cfg.highpass, t);
+      hp.Q.setValueAtTime(0.7, t);
+      tail.connect(hp); tail = hp; this._nodes.push(hp);
+    }
+    if (cfg.lowpass) {
+      const lp = i.ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.setValueAtTime(cfg.lowpass, t);
+      lp.Q.setValueAtTime(0.8, t);
+      tail.connect(lp); tail = lp; this._nodes.push(lp);
+    }
+
+    // 电平 + 缓慢起伏 LFO（抗听觉疲劳：8s 循环靠 LFO 打散周期性）
+    const g = i.ctx.createGain();
+    const target = cfg.gain * this._bedTensionMul(cfg);
+    g.gain.setValueAtTime(FLOOR, t);
+    g.gain.linearRampToValueAtTime(target, t + Math.max(0.05, fadeIn));
+    tail.connect(g);
+
+    let lfo: any = null, lfoG: any = null;
+    if (cfg.lfo) {
+      lfo = i.ctx.createOscillator();
+      lfo.type = 'sine';
+      lfo.frequency.setValueAtTime(cfg.lfo.freq, t);
+      lfoG = i.ctx.createGain();
+      lfoG.gain.setValueAtTime(cfg.gain * cfg.lfo.amp, t);
+      lfo.connect(lfoG);
+      lfoG.connect(g.gain);
+      lfo.start(t);
+      this._nodes.push(lfo, lfoG);
+    }
+
+    g.connect(ambBus);
+
+    // 石殿混响发送（design §0.1：室内战场，房间感统一由 Convolver 给）
+    const send = i.ctx.createGain();
+    send.gain.setValueAtTime(cfg.wet, t);
+    g.connect(send);
+    send.connect(i.convolver || ambBus);
+
+    src.start(t, rand(0, Math.max(0.1, buf.duration - 0.1)));
+    this._nodes.push(src, g, send);
+
+    // 交叉淡化：被取代的程序化层等时长淡出到静默（不是硬切，避免可闻断点）
+    if (cfg.replaces) {
+      const old = this._layers[cfg.replaces];
+      if (old && old.g && old.g.gain) {
+        try {
+          old.g.gain.cancelScheduledValues(t);
+          old.g.gain.setValueAtTime(old.g.gain.value, t);
+          old.g.gain.linearRampToValueAtTime(FLOOR, t + Math.max(0.05, fadeIn));
+        } catch (e) { /* 老层已回收，忽略 */ }
+      }
+      if (old && old.send && old.send.gain) {
+        try { old.send.gain.linearRampToValueAtTime(FLOOR, t + Math.max(0.05, fadeIn)); } catch (e) { /* noop */ }
+      }
+    }
+
+    return { name, cfg, src, g, send, lfo, lfoG, baseGain: cfg.gain };
+  }
+
+  /** 张力 → 该床的电平倍率（tensionMul 两端线性插值） */
+  _bedTensionMul(cfg: any): number {
+    const m = cfg.tensionMul || [1, 1];
+    return linLerp(m[0], m[1], clamp(this._tension, 0, 1));
+  }
+
+  /** 张力变化时平滑重定标各采样床电平（1.2s 斜坡，不做突变） */
+  _applyBedTension(): void {
+    const i = _int();
+    if (!i.ready || !i.ctx) return;
+    const ct = i.ctx.currentTime;
+    for (const name of Object.keys(this._beds)) {
+      const bed = this._beds[name];
+      if (!bed || !bed.g) continue;
+      const target = bed.baseGain * this._bedTensionMul(bed.cfg);
+      try {
+        bed.g.gain.cancelScheduledValues(ct);
+        bed.g.gain.setValueAtTime(bed.g.gain.value, ct);
+        bed.g.gain.linearRampToValueAtTime(Math.max(FLOOR, target), ct + 1.2);
+        if (bed.lfoG) bed.lfoG.gain.linearRampToValueAtTime(target * (bed.cfg.lfo?.amp || 0), ct + 1.2);
+      } catch (e) { /* noop */ }
+    }
   }
 
   _buildWindLayer(ambBus: any, t: number): any {
@@ -926,13 +1058,17 @@ export class AmbienceSystem {
     this._drumPeak = drumPeak;
     this._crowdPeak = crowdPeak;
 
-    // 更新人群层增益
-    if (this._layers.crowd && this._layers.crowd.g) {
+    // 更新人群层增益。注意：若采样床已接管人群层，这里必须让位 ——
+    // 否则会把交叉淡化中的程序化层重新推回来，变成「采样 + 合成」双层嗡鸣。
+    if (this._layers.crowd && this._layers.crowd.g && !(this._beds && this._beds.crowd)) {
       this._layers.crowd.g.gain.cancelScheduledValues(ct);
       this._layers.crowd.g.gain.setValueAtTime(this._layers.crowd.g.gain.value || 0, ct);
       this._layers.crowd.g.gain.linearRampToValueAtTime(
         envWet * crowdPeak * 0.05, ct + 1.0);
     }
+
+    // 采样环境床随张力重定标（风沙/军阵/行军鼓）
+    this._applyBedTension();
   }
 
   /* ---- 清理 ---- */
@@ -944,6 +1080,7 @@ export class AmbienceSystem {
     }
     this._nodes = [];
     this._layers = {};
+    this._beds = {};
   }
 }
 

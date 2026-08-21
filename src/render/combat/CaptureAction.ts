@@ -16,6 +16,7 @@ import {
 } from './CombatConstants.ts';
 import { windUp, strike, settle, applyDissolvePose } from './PieceChoreography.ts';
 import { cellPan } from './coords.ts';
+import { cloneMaterialsForFade, setTreeOpacity, restoreMaterials } from '../animator.ts';
 
 /**
  * 执行吃子演出
@@ -337,6 +338,12 @@ function executeCannon(cd: any, attacker: any, victim: any, fromCell: { file: nu
     const fireDur = A2 + flightTime;                                     // ③ 射击 = 甩臂 + 弹道飞行
     const recoilDur = A5;                                                // ④ 后坐复位
     const aimDur = Math.max(0.001, totalTarget - loadDur - fireDur - recoilDur); // ② 瞄准 = 余量（总长恒定 = CAPTURE_TOTAL.C）
+    // ⑤/⑥ 换位拍（不参与 totalTarget 锚定 —— 命中帧 T 仍在 FIRE 末，验收锚点不变）
+    const VANISH_OUT = 0.16 * speedMul;   // 原位淡出
+    const VANISH_IN = 0.20 * speedMul;    // 目标位淡入
+
+    // 起始落位（保证淡出发生在原格；防上游未同步 position）
+    attacker.position.copy(fromVec);
 
     const sg = attacker.userData.subGroups || {};
     const orient = attacker.getObjectByName('orient') || attacker;
@@ -498,6 +505,52 @@ function executeCannon(cd: any, attacker: any, victim: any, fromCell: { file: nu
         if (sg.soldierL) sg.soldierL.rotation.x = 0;
         if (sg.soldierR) sg.soldierR.rotation.x = 0;
         idleGroup.rotation.x = 0;
+        // ★ 不在此释放 _busy —— 炮还要走 ⑤/⑥ 换位（隔山打牛：原位淡出 → 目标位淡入）
+      }
+    });
+
+    // ⑤ VANISH · 原位淡出（设计稿 §3.6「本体原位淡出」）
+    // 炮吃子后必须落到目标格（中国象棋规则），但炮不是走过去的 —— 隔山打牛，
+    // 所以用「原位淡出 → 目标位淡入」表达换位，而非平移穿越挡子。
+    // ★ 这是上一轮重构丢失的动作（旧 animator.cannonCapture 有，executeCannon 漏了），
+    //   导致画面里炮停在原格、与棋局状态脱节。此处复原。
+    let fadeBackup: Array<{ mesh: any, orig: any }> | null = null;
+    steps.push({
+      duration: VANISH_OUT,
+      lock: true,
+      easing: animator.EASE.easeInQuad,
+      onStart: () => {
+        fadeBackup = cloneMaterialsForFade(attacker);
+        // 消散尘：原位炸开一蓬尘土，掩护「消失」的突兀感
+        try { effects.spawnImpactDust(fromVec.clone(), { count: 14 }); } catch (e) { /* effects 桩 */ }
+      },
+      onUpdate: (t: number) => { setTreeOpacity(attacker, 1 - t); },
+      onComplete: () => { attacker.position.copy(toVec); }
+    });
+
+    // ⑥ EMERGE · 目标位淡入 + 落定警戒
+    steps.push({
+      duration: VANISH_IN,
+      lock: true,
+      easing: animator.EASE.easeOutQuad,
+      onStart: () => {
+        try { effects.spawnImpactDust(toVec.clone(), { count: 10 }); } catch (e) { /* effects 桩 */ }
+      },
+      onUpdate: (t: number) => {
+        setTreeOpacity(attacker, t);
+        // 落定警戒：抛臂随动一次 + 双兵戒备（淡入同步，避免「凭空出现」的僵硬）
+        const k = Math.sin(Math.PI * t);
+        if (sg.trebuchet) sg.trebuchet.rotation.z = 0.14 * k;
+        if (sg.soldierL) sg.soldierL.rotation.x = -0.18 * k;
+        if (sg.soldierR) sg.soldierR.rotation.x = -0.18 * k;
+      },
+      onComplete: () => {
+        setTreeOpacity(attacker, 1);
+        restoreMaterials(fadeBackup);
+        fadeBackup = null;
+        if (sg.trebuchet) sg.trebuchet.rotation.z = 0;
+        if (sg.soldierL) sg.soldierL.rotation.x = 0;
+        if (sg.soldierR) sg.soldierR.rotation.x = 0;
         // 收尾契约：释放 _busy + onComplete 回调（与旧 onLand 时机一致）
         attacker.userData._busy = false;
         if (opts.onComplete) opts.onComplete();

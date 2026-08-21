@@ -30,6 +30,7 @@ import { createBoard, createEnvironment } from './render/boardMesh.ts';
 import { getMaterials, disposeMaterials } from './render/materials.ts';
 import { SFX } from './audio/sfx.ts';
 import { AmbienceSystem } from './audio/ambience.ts';
+import * as recipes from './audio/recipes.ts';
 import { CombatDirector } from './render/combat/CombatDirector.ts';
 import { trackEvent, trackError, flush as flushTelemetry, tickFps, elapsedMs } from './telemetry.ts';
 
@@ -1029,6 +1030,10 @@ async function boot(): Promise<void> {
     // 调试句柄
     (window as any).__game = {
       THREE, gs, sceneSys, effects, animator, aiEngine, input, hud, controls, SFX,
+      // ambience 由首个用户手势惰性创建（audioInit），此处用 getter 实时反映，
+      // 避免 __game 在 boot 时快照到 null 后永远读不到实例。
+      get ambience() { return ambience; },
+      recipes,
       combatDirector, followCam, computeFollowFitRadius,
       applyMove, rebuildPieces, doReset, doUndo, doResign, toggleAI, setDifficulty, previewMove,
       toggleFollowCamera, saveGame, clearGameSave,   // M4：QA 调试存档读写

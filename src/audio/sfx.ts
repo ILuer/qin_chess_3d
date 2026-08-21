@@ -20,7 +20,7 @@ import {
   THUD_PARAMS, VICTIM_WEIGHTS, VICTIM_COLLAPSE,
   PENTA, BEAT_RECIPES, SEQUENCES
 } from './recipes.ts';
-import { getSample, bindSampleContext } from './sampleBank.ts';
+import { getSample, bindSampleContext, preloadSamples, sampleStats, SAMPLE_MANIFEST } from './sampleBank.ts';
 
 /* --------------------------------------------------------------------------
  * 0. 常量与模块级状态
@@ -32,6 +32,17 @@ const HEADROOM = 0.9;
 const IR_SECONDS = 1.5;
 const FLOOR = 0.0001;
 const MAX_ACTIVE_NODES = 140;
+
+/** 数值消毒：非有限（NaN/Infinity）或缺失 → 回退默认值。
+ *  包络/exponentialRamp 对 NaN/0/负值零容忍，必须先把峰值/音高夹成有限正值。 */
+function finite(v: any, d: number): number {
+  return typeof v === 'number' && Number.isFinite(v) ? v : d;
+}
+/** 夹成有限正值（exponentialRampToValueAtTime 要求严格 >0） */
+function pos(v: any, d: number): number {
+  const n = finite(v, d);
+  return n > 0 ? n : d;
+}
 
 /** 冲击级对应的线性峰值上限 */
 const IMPACT_PEAKS = {
@@ -407,25 +418,32 @@ function scheduleRelease(nodes: any, lifeMs: number): void {
  * 5. 包络原语（全部用 setValueAtTime + ramp）--- */
 
 function envAD(param: any, t: number, peak: number, attack: number, decay: number): void {
-  const p = Math.max(peak, FLOOR * 2);
+  const p = Math.max(Number.isFinite(peak) ? peak : FLOOR * 2, FLOOR * 2);
+  const a = Math.max(finite(attack, 0.005), 0.001);
+  const d = Math.max(finite(decay, 0.05), 0.001);
   param.setValueAtTime(FLOOR, t);
-  param.exponentialRampToValueAtTime(p, t + attack);
-  param.exponentialRampToValueAtTime(FLOOR, t + attack + decay);
+  param.exponentialRampToValueAtTime(p, t + a);
+  param.exponentialRampToValueAtTime(FLOOR, t + a + d);
 }
 
 function envASR(param: any, t: number, peak: number, attack: number, hold: number, release: number): void {
-  const p = Math.max(peak, FLOOR * 2);
+  const p = Math.max(Number.isFinite(peak) ? peak : FLOOR * 2, FLOOR * 2);
+  const a = Math.max(finite(attack, 0.005), 0.001);
+  const h = Math.max(finite(hold, 0.05), 0.001);
+  const r = Math.max(finite(release, 0.05), 0.001);
   param.setValueAtTime(FLOOR, t);
-  param.exponentialRampToValueAtTime(p, t + attack);
-  param.setValueAtTime(p, t + attack + hold);
-  param.exponentialRampToValueAtTime(FLOOR, t + attack + hold + release);
+  param.exponentialRampToValueAtTime(p, t + a);
+  param.setValueAtTime(p, t + a + h);
+  param.exponentialRampToValueAtTime(FLOOR, t + a + h + r);
 }
 
 function envReverse(param: any, t: number, peak: number, attack: number, decay: number): void {
-  const p = Math.max(peak, FLOOR * 2);
+  const p = Math.max(Number.isFinite(peak) ? peak : FLOOR * 2, FLOOR * 2);
+  const a = Math.max(finite(attack, 0.005), 0.001);
+  const d = Math.max(finite(decay, 0.05), 0.001);
   param.setValueAtTime(FLOOR, t);
-  param.exponentialRampToValueAtTime(p, t + attack);
-  param.exponentialRampToValueAtTime(FLOOR, t + attack + decay);
+  param.exponentialRampToValueAtTime(p, t + a);
+  param.exponentialRampToValueAtTime(FLOOR, t + a + d);
 }
 
 /* --------------------------------------------------------------------------
@@ -434,8 +452,8 @@ function envReverse(param: any, t: number, peak: number, attack: number, decay: 
 function mkOsc(type: string, freq: number, t: number, dur: number, detune?: number): any {
   const o = ctx.createOscillator();
   o.type = type;
-  o.frequency.setValueAtTime(freq, t);
-  if (detune != null) o.detune.setValueAtTime(detune, t);
+  o.frequency.setValueAtTime(pos(freq, 220), t);
+  if (detune != null) o.detune.setValueAtTime(finite(detune, 0), t);
   o.start(t);
   o.stop(t + dur + 0.05);
   trackNodes(1);
@@ -446,7 +464,7 @@ function mkNoise(t: number, dur: number, rate?: number): any {
   const s = ctx.createBufferSource();
   s.buffer = noiseBuf;
   s.loop = true;
-  s.playbackRate.setValueAtTime(rate || 1, t);
+  s.playbackRate.setValueAtTime(pos(rate, 1), t);
   s.start(t, rand(0, 1.4));
   s.stop(t + dur + 0.02);
   trackNodes(1);
@@ -456,8 +474,8 @@ function mkNoise(t: number, dur: number, rate?: number): any {
 function mkFilter(type: string, freq: number, q?: number): any {
   const f = ctx.createBiquadFilter();
   f.type = type;
-  f.frequency.setValueAtTime(freq, ctx.currentTime);
-  if (q != null) f.Q.setValueAtTime(q, ctx.currentTime);
+  f.frequency.setValueAtTime(pos(freq, 1000), ctx.currentTime);
+  if (q != null) f.Q.setValueAtTime(finite(q, 0.7), ctx.currentTime);
   trackNodes(1);
   return f;
 }
@@ -968,8 +986,13 @@ function renderBeat(eventName: string, t: number, opts: any = {}): boolean {
 /** 执行单条合成指令 */
 function executeInst(inst: any, dest: any, t: number, pit: number, vol: number): void {
   const dt = (inst.offset || 0);
-  const p = pit * (inst.pitScale || 1);
-  const pk = inst.peak * vol;
+  const p = pos(pit * (inst.pitScale || 1), 1);
+  const pk = Math.max(Number.isFinite(inst.peak * vol) ? inst.peak * vol : 0, FLOOR * 2);
+
+  // C4：程序化积木的「采样让位」闸门。多条程序化指令共同模拟一个物理事件时
+  // （如马蹄三连拍 = 3×transient + 3×osc、木轮辚辚 = 4×transient），对应采样
+  // 一旦到位就由单个采样整体接管，这些指令自动让位，避免叠加成双重蹄声。
+  if (inst.muteIfSample && getSample(inst.muteIfSample)) return;
 
   try {
     switch (inst.type) {
@@ -979,15 +1002,15 @@ function executeInst(inst: any, dest: any, t: number, pit: number, vol: number):
         if (inst.sweep) {
           if (inst.sweep.ramp === 'exp') {
             o.frequency.exponentialRampToValueAtTime(
-              inst.sweep.end * p, t + dt + inst.sweep.rampTime);
+              pos(inst.sweep.end * p, 220), t + dt + inst.sweep.rampTime);
           } else {
             o.frequency.linearRampToValueAtTime(
-              inst.sweep.end * p, t + dt + inst.sweep.rampTime);
+              pos(inst.sweep.end * p, 220), t + dt + inst.sweep.rampTime);
           }
           // 第二段扫频（上弧）
           if (inst.sweep.sweep2) {
             o.frequency.linearRampToValueAtTime(
-              inst.sweep.sweep2.end * p, t + dt + inst.sweep.sweep2.rampTime);
+              pos(inst.sweep.sweep2.end * p, 220), t + dt + inst.sweep.sweep2.rampTime);
           }
         }
         const g = ctx.createGain();
@@ -1063,15 +1086,15 @@ function executeInst(inst: any, dest: any, t: number, pit: number, vol: number):
             const sw = inst.filter.sweep;
             if (sw.ramp === 'arc') {
               // 弧形扫频: f0 → f1 → f2
-              f.frequency.setValueAtTime(sw.f0 * p, t + dt);
-              f.frequency.linearRampToValueAtTime(sw.f1 * p, t + dt + sw.rampTime * 0.5);
-              f.frequency.linearRampToValueAtTime(sw.f2 * p, t + dt + sw.rampTime);
+              f.frequency.setValueAtTime(pos(sw.f0 * p, 1000), t + dt);
+              f.frequency.linearRampToValueAtTime(pos(sw.f1 * p, 1000), t + dt + sw.rampTime * 0.5);
+              f.frequency.linearRampToValueAtTime(pos(sw.f2 * p, 1000), t + dt + sw.rampTime);
             } else if (sw.ramp === 'linear') {
-              f.frequency.setValueAtTime(sw.f0 * p, t + dt);
-              f.frequency.linearRampToValueAtTime(sw.f1 * p, t + dt + sw.rampTime);
+              f.frequency.setValueAtTime(pos(sw.f0 * p, 1000), t + dt);
+              f.frequency.linearRampToValueAtTime(pos(sw.f1 * p, 1000), t + dt + sw.rampTime);
             } else if (sw.ramp === 'exp') {
-              f.frequency.setValueAtTime(sw.f0 || inst.filter.freq * p, t + dt);
-              f.frequency.exponentialRampToValueAtTime(sw.end * p, t + dt + sw.rampTime);
+              f.frequency.setValueAtTime(pos(sw.f0 || inst.filter.freq * p, 1000), t + dt);
+              f.frequency.exponentialRampToValueAtTime(pos(sw.end * p, 1000), t + dt + sw.rampTime);
             }
           }
         }
@@ -1151,22 +1174,35 @@ function executeInst(inst: any, dest: any, t: number, pit: number, vol: number):
 
       case 'sample':
       case 'sampleLoop': {
-        // C4：采样指令（{ type:'sample', key, rate, gain, attack, decay, loop, offset }）
+        // C4：采样指令
+        //   { type:'sample', key, rate, gain, attack, decay, loop, offset, seek,
+        //     pitchTrack, detune, pan }
+        //   · offset  = 调度延迟（与其它指令语义一致，由上方 dt 承接）
+        //   · seek    = buffer 内读取起点（原先与 offset 混用，会「延迟 + 跳头」双扣）
+        //   · gain    = 线性峰值，与程序化积木一样受 vol（LEVEL 表 + 主音量）缩放
+        //   · rate    = 播放速率；默认随阵营音高偏移 p（design §1.0：foley/vocal
+        //               同样过阵营滤波与音高偏移），pitchTrack:false 可关闭
         // 采样已加载 → one-shot/loop 源 + 包络；未加载 → Foley 回退程序化积木、
-        // Vocal 静默跳过（不降级为合成）。清单当前为空 → 全程序化可玩。
+        // Vocal 静默跳过（不降级为合成，避免电子音破功）。
+        if (inst.probability != null && Math.random() > Number(inst.probability)) return;
         const key = String(inst.key || '');
         const buf = getSample(key);
         if (buf) {
           const src = ctx.createBufferSource();
           src.buffer = buf;
           src.loop = !!inst.loop || inst.type === 'sampleLoop';
-          if (inst.rate != null) src.playbackRate.setValueAtTime(Number(inst.rate), t + dt);
+          const baseRate = inst.rate != null ? Number(inst.rate) : 1.0;
+          const rate = inst.pitchTrack === false ? baseRate : baseRate * p;
+          if (Math.abs(rate - 1) > 1e-4) src.playbackRate.setValueAtTime(rate, t + dt);
+          if (inst.detune != null && src.detune) {
+            src.detune.setValueAtTime(Number(inst.detune), t + dt);
+          }
           const g = ctx.createGain();
-          const gPeak = inst.gain != null ? Number(inst.gain) : 1.0;
+          const gPeak = Math.max(FLOOR, (inst.gain != null ? Number(inst.gain) : 1.0) * vol);
           const gAttack = inst.attack != null ? Number(inst.attack) : 0.002;
-          const off = Number(inst.offset) || 0;
-          const remain = Math.max(0.05, buf.duration - off);
-          const gDecay = inst.decay != null ? Number(inst.decay) : remain * 0.6;
+          const seek = Number(inst.seek) || 0;
+          const remain = Math.max(0.05, (buf.duration - seek) / Math.max(0.05, rate));
+          const gDecay = inst.decay != null ? Number(inst.decay) : remain * 0.92;
           if (src.loop) {
             // 常驻声：起音后保持（不主动释放，由调用方 stop / ambience 清理）
             g.gain.setValueAtTime(FLOOR, t + dt);
@@ -1174,14 +1210,23 @@ function executeInst(inst: any, dest: any, t: number, pit: number, vol: number):
           } else {
             envAD(g.gain, t + dt, gPeak, gAttack, gDecay);
           }
+          let tail: any = g;
+          if (inst.pan != null && typeof ctx.createStereoPanner === 'function') {
+            const pn = ctx.createStereoPanner();
+            pn.pan.setValueAtTime(Math.max(-1, Math.min(1, Number(inst.pan))), t + dt);
+            g.connect(pn);
+            tail = pn;
+            trackNodes(1);
+          }
           src.connect(g);
-          g.connect(dest.input);
-          src.start(t + dt, off);
+          tail.connect(dest.input);
+          src.start(t + dt, seek);
           trackNodes(2);
           if (!src.loop) scheduleRelease([src, g], (gDecay + 0.35) * 1000);
         } else if (inst.fallback) {
-          // Foley 回退：采样未加载 → 现有程序化积木
-          executeInst(inst.fallback, dest, t + dt, pit, vol);
+          // Foley 回退：采样未加载 → 现有程序化积木（offset 已在 dt 生效，
+          // 子指令不再重复偏移，避免二次延迟）
+          executeInst({ ...inst.fallback, offset: 0 }, dest, t + dt, pit, vol);
         }
         // Vocal 无 fallback：静默跳过（不降级为合成）
         return;
@@ -1396,8 +1441,16 @@ export const SFX = {
       ready = true;
       if (ctx.state === 'suspended') ctx.resume().catch(() => {});
 
-      // C4：采样加载管线绑定 AudioContext（清单当前为空 → 全程序化可玩）
+      // C4：采样加载管线绑定 AudioContext + 立即后台预载全清单。
+      // 关键：不 await —— 采样未到位期间 Foley 走程序化 fallback、Vocal 静默，
+      // 到位后自动接管（getSample 命中即用），全程不阻塞首次交互与首帧。
       bindSampleContext(ctx);
+      preloadSamples()
+        .then(() => {
+          const s = sampleStats();
+          console.info(`[SFX] 战场采样就位 ${s.loaded}/${s.total} · ${(s.bytes / 1048576).toFixed(2)}MB`);
+        })
+        .catch(() => {});
 
       // iOS: visibilitychange 兜底
       document.addEventListener('visibilitychange', () => {
@@ -1645,6 +1698,23 @@ export const SFX = {
     masterGain.gain.setValueAtTime(masterGain.gain.value, t);
     masterGain.gain.linearRampToValueAtTime(FLOOR, t + 0.02);
     masterGain.gain.linearRampToValueAtTime(settings.volume * HEADROOM, t + 0.24);
+  },
+
+  /* ------ 采样管线诊断/控制（QA 探针用）------ */
+
+  /** 触发一次全清单预载（幂等；已加载的会被缓存命中跳过）。返回完成 Promise。 */
+  preloadSamples(keys?: string[]): Promise<void> {
+    return preloadSamples(keys);
+  },
+
+  /** 采样加载统计：{ total, loaded, failed, bytes } */
+  sampleStats(): { total: number; loaded: number; failed: number; bytes: number } {
+    return sampleStats();
+  },
+
+  /** 采样清单 key 总数（探针校验用） */
+  sampleManifestCount(): number {
+    return Object.keys(SAMPLE_MANIFEST).length;
   },
 
   /** 内部使用：获取上下文/节点（供 ambience.js 使用） */

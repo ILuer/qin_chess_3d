@@ -1075,6 +1075,230 @@ BEAT_RECIPES['king.heartbeat'] = {
 };
 
 /* --------------------------------------------------------------------------
+ * 9.5 采样叠加层（design §1 Foley/Vocal 分层 · §4.2 采样优先 / 程序化回退）
+ *
+ *  分工严格照设计稿 §1.0 通用分层约定：
+ *    · Foley（脚步/马蹄/车轮/甲片/布帛/破空/木石）→ 采样接管，采样未到位时
+ *      回退到原程序化积木（swapFoley：原指令降级为 fallback，绝不双响）。
+ *    · Vocal（号子/嘶吼/马嘶/呼吸）→ 纯采样叠加（addVox），无采样则静默跳过，
+ *      绝不用合成器假冒人声 —— 电子音破功的主因就在这里。
+ *    · Body/Transient（warDrum / thud / transient）→ 保持程序化。战鼓与青铜鸣
+ *      是设计稿 §0.3 钦定的「声音图腾」，音高按兵种精调过，不能被采样抹平。
+ *      A2 交击处采样只作「材质接触垫层」叠加，同时把程序化峰值让出一档。
+ *
+ *  采样经济：9 条人声覆盖 7 兵种 × 多拍位，靠 rate（音高）+ gain（分量）+
+ *  阵营偏移（红 ×1.06 / 黑 ×0.94，由 executeInst 自动施加）拉开辨识度。
+ * ------------------------------------------------------------------------ */
+
+/** 在指定拍位的某层里，把首个匹配 type 的程序化指令换成采样指令（原指令转为 fallback） */
+function swapFoley(beat: string, layer: string, type: string, key: string, opts: any = {}): void {
+  const r = BEAT_RECIPES[beat];
+  if (!r || !r.layers || !r.layers[layer]) return;
+  const arr = r.layers[layer] as any[];
+  const idx = arr.findIndex(x => x && x.type === type && !x._sampled);
+  if (idx < 0) return;
+  const orig = arr[idx];
+  arr[idx] = {
+    type: 'sample', key, _sampled: true,
+    offset: orig.offset || 0,
+    gain: opts.gain != null ? opts.gain : 0.6,
+    ...opts,
+    fallback: orig
+  };
+}
+
+/** 把某层里所有匹配 type 的指令标记为「采样到位则让位」（用于多指令合成一个物理事件） */
+function yieldToSample(beat: string, layer: string, type: string, key: string): void {
+  const r = BEAT_RECIPES[beat];
+  if (!r || !r.layers || !r.layers[layer]) return;
+  for (const inst of r.layers[layer] as any[]) {
+    if (inst && inst.type === type && !inst._sampled) inst.muteIfSample = key;
+  }
+}
+
+/** 追加纯采样指令（Vocal 层 / 材质垫层）。层不存在则创建 */
+function addSample(beat: string, layer: string, key: string, opts: any = {}): void {
+  const r = BEAT_RECIPES[beat];
+  if (!r) return;
+  if (!r.layers) r.layers = {};
+  if (!r.layers[layer]) r.layers[layer] = [];
+  (r.layers[layer] as any[]).push({ type: 'sample', key, _sampled: true, gain: 0.5, ...opts });
+}
+
+/** 缩放某层里匹配 type 的程序化峰值（为叠加的采样垫层让出电平余量） */
+function trimPeak(beat: string, layer: string, type: string, mul: number): void {
+  const r = BEAT_RECIPES[beat];
+  if (!r || !r.layers || !r.layers[layer]) return;
+  for (const inst of r.layers[layer] as any[]) {
+    if (inst && inst.type === type && inst.peak != null) inst.peak *= mul;
+  }
+}
+
+function applySampleOverlay(): void {
+  /* ===== 每兵种的采样选型（材质 → 采样 key + 音高/分量）===== */
+  const STEP: Record<string, { key: string; gain: number; rate: number }> = {
+    P: { key: 'foley.step.light', gain: 0.62, rate: 1.00 },
+    N: { key: 'foley.hoof',       gain: 0.66, rate: 1.00 },
+    B: { key: 'foley.step.heavy', gain: 0.58, rate: 0.90 },  // 象足：更沉
+    A: { key: 'foley.step.light', gain: 0.40, rate: 1.10 },  // 仕：全场最静
+    R: { key: 'foley.wheel',      gain: 0.70, rate: 0.94 },
+    C: { key: 'foley.wheel',      gain: 0.52, rate: 0.86 },  // 砲车：更钝更慢
+    K: { key: 'foley.step.heavy', gain: 0.64, rate: 1.00 }
+  };
+  const CLASH: Record<string, { key: string; gain: number; rate: number }> = {
+    P: { key: 'foley.clash.bronze', gain: 0.46, rate: 1.00 },  // 戈 BAR
+    N: { key: 'foley.clash.blade',  gain: 0.44, rate: 0.94 },  // 戟
+    B: { key: 'foley.clash.bronze', gain: 0.42, rate: 0.80 },  // 钺 BELL：低沉
+    A: { key: 'foley.clash.blade',  gain: 0.40, rate: 1.14 },  // 短剑：最亮
+    R: { key: 'foley.clash.iron',   gain: 0.48, rate: 0.90 },  // 铁箍：最暗
+    K: { key: 'foley.clash.bronze', gain: 0.50, rate: 0.88 }   // 王剑 + 钟
+  };
+  const WHOOSH: Record<string, { key: string; gain: number; rate: number }> = {
+    P: { key: 'foley.whoosh.light', gain: 0.52, rate: 1.00 },
+    N: { key: 'foley.whoosh.light', gain: 0.54, rate: 0.94 },
+    B: { key: 'foley.whoosh.heavy', gain: 0.50, rate: 0.86 },
+    A: { key: 'foley.whoosh.light', gain: 0.44, rate: 1.16 },
+    R: { key: 'foley.whoosh.heavy', gain: 0.56, rate: 0.92 },
+    C: { key: 'foley.whoosh.heavy', gain: 0.50, rate: 0.74 },  // 抛石：钝木石低啸
+    K: { key: 'foley.whoosh.heavy', gain: 0.54, rate: 0.96 }
+  };
+  /** 甲片分量（design §1.4：仕最静；§1.6：炮无金属 → 不接甲片采样） */
+  const ARMOR_GAIN: Record<string, number> = { P: 0.46, N: 0.50, B: 0.38, A: 0.26, R: 0.58, K: 0.56 };
+  /** 落位重量（重量级越高越明显） */
+  const LAND_GAIN: Record<string, number> = { B: 0.40, R: 0.52, K: 0.50 };
+
+  for (const p of ALL_PIECES) {
+    const pk = PIECE_NAMES[p]!;
+    const mv = `${pk}.move`;
+    const cp = `${pk}.capture`;
+    const ag = ARMOR_GAIN[p];
+
+    /* ---------- 移动 M1 起步 ---------- */
+    if (ag != null) swapFoley(`${mv}.launch`, 'T', 'armorClink', 'foley.armor', { gain: ag, rate: 1.0 });
+    swapFoley(`${mv}.launch`, 'C', 'clothRustle', 'foley.cloth', { gain: p === 'A' ? 0.30 : 0.38, rate: p === 'A' ? 1.12 : 0.96 });
+
+    /* ---------- 移动 M2 巡航（脚步/马蹄/车轮 —— 「是什么在动」的核心）------- */
+    const st = STEP[p]!;
+    switch (p) {
+      case 'P':
+        swapFoley(`${mv}.cruise`, 'B', 'footStep', st.key, { gain: st.gain, rate: st.rate });
+        swapFoley(`${mv}.cruise`, 'T', 'armorClink', 'foley.armor', { gain: 0.34 });
+        break;
+      case 'N':
+        // 马蹄三连拍：采样单条整体接管，6 条程序化指令集体让位
+        swapFoley(`${mv}.cruise`, 'B', 'transient', st.key, { gain: st.gain, rate: st.rate });
+        yieldToSample(`${mv}.cruise`, 'B', 'transient', st.key);
+        yieldToSample(`${mv}.cruise`, 'B', 'osc', st.key);
+        swapFoley(`${mv}.cruise`, 'C', 'horseSnort', 'vox.horse.snort', { gain: 0.34, probability: 0.30 });
+        break;
+      case 'B':
+        swapFoley(`${mv}.cruise`, 'C', 'noise', 'foley.cloth', { gain: 0.52, rate: 0.88 });
+        yieldToSample(`${mv}.cruise`, 'C', 'clothRustle', 'foley.cloth');
+        addSample(`${mv}.cruise`, 'B', st.key, { gain: st.gain * 0.8, rate: st.rate });
+        swapFoley(`${mv}.cruise`, 'T', 'armorClink', 'foley.armor', { gain: 0.30 });
+        break;
+      case 'A':
+        swapFoley(`${mv}.cruise`, 'C', 'clothRustle', 'foley.cloth', { gain: 0.34, rate: 1.14 });
+        addSample(`${mv}.cruise`, 'B', st.key, { gain: st.gain, rate: st.rate });
+        break;
+      case 'R':
+        // 木轮碾地：采样接管碾压噪声，4 条辚辚 transient 让位（采样自带辚辚）
+        swapFoley(`${mv}.cruise`, 'C', 'noise', st.key, { gain: st.gain, rate: st.rate });
+        yieldToSample(`${mv}.cruise`, 'T', 'transient', st.key);
+        swapFoley(`${mv}.cruise`, 'C', 'armorClink', 'foley.armor', { gain: 0.44 });
+        break;
+      case 'C':
+        // 炮：木车吱呀 + 木轮（严守 §1.6 红线，无金属采样）
+        swapFoley(`${mv}.cruise`, 'C', 'leatherCreak', 'foley.wood.creak', { gain: 0.50, rate: 1.0 });
+        swapFoley(`${mv}.cruise`, 'C', 'footStep', st.key, { gain: st.gain, rate: st.rate });
+        yieldToSample(`${mv}.cruise`, 'C', 'footStep', st.key);
+        break;
+      case 'K':
+        swapFoley(`${mv}.cruise`, 'B', 'footStep', st.key, { gain: st.gain, rate: st.rate });
+        swapFoley(`${mv}.cruise`, 'T', 'armorClink', 'foley.armor', { gain: 0.42 });
+        break;
+    }
+
+    /* ---------- 移动 M4 落位（最重拍：战鼓保持程序化，甲片+重量走采样）----- */
+    if (ag != null) swapFoley(`${mv}.land`, 'T', 'armorClink', 'foley.armor', { gain: ag * 1.15 });
+    if (LAND_GAIN[p] != null) addSample(`${mv}.land`, 'B', 'foley.land.heavy', { gain: LAND_GAIN[p]!, rate: p === 'B' ? 0.88 : 1.0 });
+
+    /* ---------- 移动 M5 收势 ---------- */
+    if (ag != null) swapFoley(`${mv}.settle`, 'T', 'armorClink', 'foley.armor', { gain: ag * 0.55, rate: 1.06 });
+    swapFoley(`${mv}.settle`, 'C', 'clothRustle', 'foley.cloth', { gain: 0.22, rate: 1.0 });
+
+    /* ---------- 进攻 A0 冲锋 / A1 蓄势（破空）---------- */
+    const wh = WHOOSH[p]!;
+    swapFoley(`${cp}.approach`, 'C', 'whoosh', wh.key, { gain: wh.gain, rate: wh.rate });
+    swapFoley(`${cp}.windup`, 'C', 'whoosh', wh.key, { gain: wh.gain * 0.82, rate: wh.rate * 1.06 });
+    if (ag != null) swapFoley(`${cp}.windup`, 'T', 'armorClink', 'foley.armor', { gain: ag * 0.6 });
+    if (p === 'B') swapFoley(`${cp}.approach`, 'C', 'clothRustle', 'foley.cloth', { gain: 0.46, rate: 0.84 });
+
+    /* ---------- 进攻 A2 交击（图腾保程序化，采样作材质接触垫层）---------- */
+    const cl = CLASH[p];
+    if (cl) {
+      trimPeak(`${cp}.clash`, 'C', 'bladeClash', 0.72);
+      addSample(`${cp}.clash`, 'T', cl.key, { gain: cl.gain, rate: cl.rate, busTarget: 'hitBus' });
+    }
+
+    /* ---------- 进攻 A4 受害者崩塌（甲片 + 身体闷击）---------- */
+    swapFoley(`${cp}.victim.shake`, 'C', 'armorClink', 'foley.armor', { gain: 0.42, rate: 1.04 });
+    const vw = VICTIM_WEIGHTS[p] === 'heavy' ? 'foley.thud.heavy'
+             : (VICTIM_WEIGHTS[p] === 'medium' ? 'foley.thud.heavy' : 'foley.thud.light');
+    addSample(`${cp}.victim.shake`, 'B', vw, {
+      gain: VICTIM_WEIGHTS[p] === 'light' ? 0.44 : 0.54,
+      rate: VICTIM_WEIGHTS[p] === 'medium' ? 1.10 : 1.0
+    });
+
+    /* ---------- 进攻 A5 收势 ---------- */
+    if (ag != null) swapFoley(`${cp}.settle`, 'T', 'armorClink', 'foley.armor', { gain: ag * 0.5, rate: 1.04 });
+  }
+
+  /* ===== Vocal 层：纯采样，无采样则静默（design §1 各兵种 Vocal 列）===== */
+
+  // 移动 M1：号子 / 策马 / 御者「驾！」/ 砲兵「起！」
+  addSample('pawn.move.launch',   'C', 'vox.shout.heave',  { gain: 0.44, rate: 1.00, offset: 0.03, probability: 0.75 });
+  addSample('horse.move.launch',  'C', 'vox.shout.drive',  { gain: 0.34, rate: 1.10, offset: 0.02, probability: 0.65 });
+  addSample('rook.move.launch',   'C', 'vox.shout.drive',  { gain: 0.50, rate: 0.92, offset: 0.02 });
+  addSample('cannon.move.launch', 'C', 'vox.shout.heave',  { gain: 0.42, rate: 0.90, offset: 0.03 });
+
+  // 进攻 A0：冲锋嘶吼 / 冲锋马嘶
+  addSample('pawn.capture.approach',  'C', 'vox.shout.charge', { gain: 0.50, rate: 1.00 });
+  addSample('horse.capture.approach', 'C', 'vox.horse.neigh',  { gain: 0.52, rate: 1.00 });
+  addSample('rook.capture.approach',  'C', 'vox.horse.neigh',  { gain: 0.40, rate: 0.92, offset: 0.05 }); // 双马齐嘶
+
+  // 进攻 A2：命中瞬间的吼喝（走 hitBus，不受 hitFreeze 低通压制）
+  addSample('pawn.capture.clash',     'C', 'vox.shout.kill', { gain: 0.56, rate: 1.00, busTarget: 'hitBus' });
+  addSample('horse.capture.clash',    'C', 'vox.shout.kill', { gain: 0.48, rate: 1.06, busTarget: 'hitBus' });
+  addSample('elephant.capture.clash', 'C', 'vox.shout.kill', { gain: 0.50, rate: 0.86, busTarget: 'hitBus' }); // 沉声「斩！」
+  addSample('advisor.capture.clash',  'C', 'vox.shout.kill', { gain: 0.34, rate: 1.14, busTarget: 'hitBus' }); // 冷喝
+  addSample('rook.capture.clash',     'C', 'vox.shout.drive',{ gain: 0.44, rate: 0.88, busTarget: 'hitBus' }); // 御者吼
+  addSample('king.capture.clash',     'C', 'vox.king.roar',  { gain: 0.60, rate: 1.00, busTarget: 'hitBus' });
+
+  /* ===== 炮：纯木石特殊路径（design §1.6 红线：无金属、无火药）===== */
+  swapFoley('cannon.capture.load', 'C', 'leatherCreak', 'foley.wood.creak', { gain: 0.54, rate: 1.04 });
+  swapFoley('cannon.capture.aim',  'C', 'leatherCreak', 'foley.wood.creak', { gain: 0.44, rate: 0.92 });
+  swapFoley('cannon.capture.aim',  'C', 'whoosh', 'foley.whoosh.heavy', { gain: 0.50, rate: 0.74 });
+  // 砲兵齐声「放！」—— 发射瞬间（aim 拍 @T−0.235 + 0.09 ≈ T−0.145）
+  addSample('cannon.capture.aim',  'C', 'vox.shout.fire', { gain: 0.54, rate: 1.00, offset: 0.09 });
+  // 石弹落地碎裂：采样接管碎裂主体，7 片碎石 transient 让位（采样自带飞散）
+  swapFoley('cannon.capture.stoneImpact', 'C', 'dustScuff', 'foley.stone.crush', { gain: 0.72, rate: 1.0, busTarget: 'hitBus' });
+  yieldToSample('cannon.capture.stoneImpact', 'T2', 'armorClink', 'foley.stone.crush');
+  swapFoley('cannon.capture.recoil', 'C', 'dustScuff', 'foley.wood.creak', { gain: 0.34, rate: 1.18 });
+
+  /* ===== 待机：呼吸 / 响鼻（拟真突破关键，全程低分量、概率触发）===== */
+  addSample('pawn.idle',     'C', 'vox.breath',      { gain: 0.20, rate: 1.06, probability: 0.42 });
+  addSample('advisor.idle',  'C', 'vox.breath',      { gain: 0.15, rate: 1.14, probability: 0.34 });
+  addSample('king.idle',     'C', 'vox.breath',      { gain: 0.22, rate: 0.88, probability: 0.46 });
+  addSample('elephant.idle', 'C', 'vox.breath',      { gain: 0.16, rate: 0.84, probability: 0.32 }); // 吟诵气声
+  addSample('rook.idle',     'C', 'vox.breath',      { gain: 0.15, rate: 0.94, probability: 0.28 }); // 御者勒缰气声
+  addSample('horse.idle',    'C', 'vox.horse.snort', { gain: 0.30, rate: 1.00, probability: 0.34 });
+  addSample('cannon.idle',   'C', 'foley.wood.creak',{ gain: 0.26, rate: 0.96, probability: 0.40 });
+}
+
+applySampleOverlay();
+
+/* --------------------------------------------------------------------------
  * 10. SEQUENCES — 演出序列编排
  *
  *     每条序列定义了一组拍点及其相对时间偏移（以 T=0 为锚点）。
@@ -1157,8 +1381,8 @@ export const AMBIENT_LAYERS = {
     rate: 0.26,
     lfoRate: { freq: 0.037, amp: 0.015 },  // playbackRate LFO ±1.5%
     filter: { type: 'lowpass', freq: 300, q: 1.6, lfoFreq: 0.055, lfoAmp: 110 },
-    gain: { base: 0.55, lfoRate: 0.083, lfoAmp: 0.28 },
-    peak: 0.024, wet: 0.52,
+    gain: { base: 0.12, lfoRate: 0.083, lfoAmp: 0.06 },
+    peak: 0.014, wet: 0.50,
     highpass: 55
   },
   banner: {
@@ -1209,6 +1433,49 @@ export const AMBIENT_LAYERS = {
     interval: { lo: 6.0, hi: 18.0 },
     params: { peak: 0.026, lp: 1700, dur: 1.1 },
     peak: 0.026, wet: 0.66
+  }
+};
+
+/* --------------------------------------------------------------------------
+ * 11.5 采样环境床（8s 无缝循环 · design §2.1 风沙 / 远处军阵 / 行军鼓）
+ *
+ *  与上面 AMBIENT_LAYERS 的关系：
+ *    · wind / crowd —— 程序化层先建（保证进场即有底噪、无空窗），采样解码完成后
+ *      **交叉淡化接管**（程序化 →0，采样 →目标电平），避免叠加变吵。
+ *    · march —— 纯采样新增层（行军鼓点常驻床）。采样缺失就没有这层，原有阵发
+ *      farDrum 仍然工作，不会留下静默空洞。
+ *
+ *  电平定标（用户实测反馈：风沙曾过大、其余层几乎听不见）：
+ *    风沙压到 0.10 打底；军阵嗡鸣 0.085 —— 是「远处一片人马」而非人群围观；
+ *    行军鼓 0.075 —— 只当低频脉搏，不抢走子鼓点。三者叠加后仍在 ambLimit 之下。
+ *  张力联动：tensionMul 给出张力 0→1 时该层的电平倍率（只在合理区间小幅推）。
+ * ------------------------------------------------------------------------ */
+
+export const AMBIENT_BEDS: Record<string, {
+  key: string; gain: number; wet: number; rate: number;
+  highpass?: number; lowpass?: number;
+  lfo?: { freq: number; amp: number };
+  tensionMul: [number, number];
+  crossfade: number;
+  replaces?: string;
+}> = {
+  wind: {
+    key: 'ambient.loop.wind', gain: 0.10, wet: 0.42, rate: 1.0,
+    highpass: 48, lowpass: 3200,
+    lfo: { freq: 0.071, amp: 0.035 },          // 阵风呼吸（±35%）
+    tensionMul: [0.88, 1.16], crossfade: 2.2, replaces: 'wind'
+  },
+  crowd: {
+    key: 'ambient.loop.crowd', gain: 0.085, wet: 0.60, rate: 1.0,
+    highpass: 90, lowpass: 2100,               // 远场：削掉近场高频细节
+    lfo: { freq: 0.043, amp: 0.030 },
+    tensionMul: [0.80, 1.45], crossfade: 2.6, replaces: 'crowd'
+  },
+  march: {
+    key: 'ambient.loop.drum', gain: 0.075, wet: 0.55, rate: 1.0,
+    highpass: 38, lowpass: 900,                // 远处鼓：只剩膜体低频
+    lfo: { freq: 0.029, amp: 0.022 },
+    tensionMul: [0.62, 1.55], crossfade: 3.0
   }
 };
 
