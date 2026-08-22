@@ -12,10 +12,11 @@ import {
   getCaptureBeat, getLiftMul, clampA0,
   MOVE_LEAN, M0_LEAN_BACK, M0_SQUASH,
   M3_OVERSHOOT, M4_SQUASH,
-  HITSTOP, AI_SPEED_MUL, IMPACT_LEVELS, CAPTURE_TOTAL, CAPTURE_BEAT
+  HITSTOP, AI_SPEED_MUL, IMPACT_LEVELS, CAPTURE_TOTAL, CAPTURE_BEAT,
+  beatSpeedMul, distScaleFor
 } from './CombatConstants.ts';
 import { windUp, strike, settle, applyDissolvePose } from './PieceChoreography.ts';
-import { cellPan } from './coords.ts';
+import { cellPan, cellDistance } from './coords.ts';
 import { cloneMaterialsForFade, setTreeOpacity, restoreMaterials } from '../animator.ts';
 
 /**
@@ -48,20 +49,29 @@ export function execute(cd: any, attacker: any, victim: any, fromCell: { file: n
 
     const vType = victim.userData.pieceType;
     const aSide = attacker.userData.pieceSide;
-    const speedMul = opts.aiFast ? AI_SPEED_MUL : 1.0;
     const impactLevel = opts.impactLevel || 'L3';
     const impactParam = (IMPACT_LEVELS as Record<string, { shakeIntensity: number, shakeDuration: number, particleCount: number, hitstop: number }>)[impactLevel] || IMPACT_LEVELS.L3;
 
-    // ── 取参数 ──
-    // A0 按距离算巡航时长（用 file 差近似距离）
+    // ── 距离因子 ──
+    // cellDist = 格数（1~N），喂给速度框架（决策 5：远距时长随距离增长）。
+    // distFactor = 原归一化距离（格子/8），仅给 clampA0 算 A0 巡航时长用，语义不变。
+    const cellDist = Math.max(1, cellDistance(fromCell, toCell));
     const distFactor = Math.max(0, Math.abs(toCell.file - fromCell.file) + Math.abs(toCell.rank - fromCell.rank)) / 8;
+    // ★ Sprint 1 速度框架（决策 2+5）：
+    //   beatSpeedMul(pt) = ANIM_SPEED × SPEED_MUL[pt]（兵种速度，放时长分母）；
+    //   distScale = distScaleFor(格距)（远距时长更长，放时长分子，决策 5 物理真实）。
+    //   每拍时长 = 原拍长 / speedMul × distScale。与 AI_SPEED_MUL 正交相乘；
+    //   与 timeScale(dt 缩放) 正交不冲突；hitstop(A3) 不缩放（见 A3 = impactParam.hitstop）。
+    const baseSpeedMul = beatSpeedMul(aType);
+    const speedMul = opts.aiFast ? baseSpeedMul * AI_SPEED_MUL : baseSpeedMul;
+    const distScale = distScaleFor(cellDist);
     const aTypeKey = aType;
-    const A0 = clampA0(aTypeKey, distFactor) * speedMul;
-    const A1 = getCaptureBeat('A1', aTypeKey) * speedMul;
-    const A2 = getCaptureBeat('A2', aTypeKey) * speedMul;
-    const A3 = impactParam.hitstop;  // hitstop 不用 speedMul
-    const A4 = getCaptureBeat('A4', aTypeKey) * speedMul;
-    const A5 = getCaptureBeat('A5', aTypeKey) * speedMul;
+    const A0 = clampA0(aTypeKey, distFactor) / speedMul * distScale;
+    const A1 = getCaptureBeat('A1', aTypeKey) / speedMul * distScale;
+    const A2 = getCaptureBeat('A2', aTypeKey) / speedMul * distScale;
+    const A3 = impactParam.hitstop;  // hitstop 不用 speedMul（冻结 dt 流）
+    const A4 = getCaptureBeat('A4', aTypeKey) / speedMul * distScale;
+    const A5 = getCaptureBeat('A5', aTypeKey) / speedMul * distScale;
 
     const leanBackA1 = (M0_LEAN_BACK[aType] || 0.08) * 1.3; // 蓄势后仰略大于 M0
     const leanForwardA2 = -(MOVE_LEAN[aType] || -0.12) * 1.2;
@@ -312,7 +322,11 @@ function executeCannon(cd: any, attacker: any, victim: any, fromCell: { file: nu
   return new Promise<void>((resolve) => {
     const animator = cd.animator;
     const effects = cd.effects;
-    const speedMul = opts.aiFast ? AI_SPEED_MUL : 1.0;
+    // ★ Sprint 1 速度框架：炮接入 beatSpeedMul(C=0.9 慢)，与 AI 正交相乘。
+    //   炮为隔山打牛、总长锚定 CAPTURE_TOTAL.C（内部时间重分配），不随格距拉长，
+    //   故此处不含 distScale（与决策 5「炮慢」一致，距离因子对炮无意义）。
+    const _baseSpeedMul = beatSpeedMul(PT.CANNON);
+    const speedMul = opts.aiFast ? _baseSpeedMul * AI_SPEED_MUL : _baseSpeedMul;
 
     const vType = victim.userData.pieceType;
     const aSide = attacker.userData.pieceSide;

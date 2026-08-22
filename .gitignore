@@ -42,3 +42,14 @@ _qa/p3out/err.txt
 
 # ---- QA 冒烟产物（cdp-smoke / build / check-vendor 输出，2026-08-17 起整目录不入库）----
 _qa/
+
+# ---- 本地工作区 / 设计规格 / 脚本工具（不入库，本地 QA/工作室产物）----
+design/
+scripts/
+.workbuddy/
+
+# ---- 临时构建副本（规避预览进程锁定的 dist/ 时用的替代输出目录）----
+dist-sprint1/
+dist-sprint1-locked/
+dist-sprint1-locked-2/
+dist-qa-verify/

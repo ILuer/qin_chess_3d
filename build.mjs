@@ -28,7 +28,9 @@ import { gzipSync } from 'node:zlib';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = __dirname;
 const VENDOR = path.join(ROOT, 'vendor', 'three-r185');
-const OUTDIR = path.join(ROOT, 'dist');
+// 允许通过 BUILD_OUT 环境变量覆盖输出目录（如 BUILD_OUT=dist-sprint1），避免被预览进程锁定的 dist/ 无法写入；
+// 默认仍写 dist/，行为与历史一致。
+const OUTDIR = path.join(ROOT, process.env.BUILD_OUT || 'dist');
 
 /** 常见 MIME（ES Module 必须 text/javascript，否则浏览器报 Strict MIME） */
 const MIME = {

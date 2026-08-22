@@ -13,11 +13,12 @@ import {
   moveFlourish, resetMovePose,
   moveCharge, snapshotMovePose, settleMovePose
 } from './PieceChoreography.ts';
-import { cellPan } from './coords.ts';
+import { cellPan, cellDistance } from './coords.ts';
 import {
   getBeatDuration, getLiftMul,
   MOVE_LEAN, M0_LEAN_BACK, M0_SQUASH,
-  M3_OVERSHOOT, M4_SQUASH, AI_SPEED_MUL, VFX_INTERVAL
+  M3_OVERSHOOT, M4_SQUASH, AI_SPEED_MUL, VFX_INTERVAL,
+  beatSpeedMul, distScaleFor
 } from './CombatConstants.ts';
 
 /**
@@ -39,15 +40,23 @@ export function execute(cd: any, piece: any, fromCell: { file: number, rank: num
     const sequencer = cd.sequencer;
 
     const type = piece.userData.pieceType;
-    const speedMul = opts.aiFast ? AI_SPEED_MUL : 1.0;
+    // ★ Sprint 1 速度框架（决策 2+5）：
+    //   beatSpeedMul(pt) = ANIM_SPEED × SPEED_MUL[pt]（兵种速度，放时长分母）；
+    //   distScale = distScaleFor(格距)（远距时长更长，放时长分子，决策 5 物理真实）。
+    //   每拍时长 = 原拍长 / beatSpeedMul × distScale。
+    //   与 AI_SPEED_MUL 正交相乘；与 animator 的 timeScale（dt 缩放）正交不冲突。
+    const distFactor = cellDistance(fromCell, toCell);
+    const distScale = distScaleFor(distFactor);
+    const baseSpeedMul = beatSpeedMul(type);
+    const speedMul = opts.aiFast ? baseSpeedMul * AI_SPEED_MUL : baseSpeedMul;
 
-    // ── 取参数 ──
-    const M0 = getBeatDuration('M0', type) * speedMul;
-    const M1 = getBeatDuration('M1', type) * speedMul;
-    const M2 = getBeatDuration('M2', type) * speedMul;
-    const M3 = getBeatDuration('M3', type) * speedMul;
-    const M4 = getBeatDuration('M4', type) * speedMul;
-    const M5 = getBeatDuration('M5', type) * speedMul;
+    // ── 取参数（每拍时长 = 原拍长 / speedMul × distScale）──
+    const M0 = getBeatDuration('M0', type) / speedMul * distScale;
+    const M1 = getBeatDuration('M1', type) / speedMul * distScale;
+    const M2 = getBeatDuration('M2', type) / speedMul * distScale;
+    const M3 = getBeatDuration('M3', type) / speedMul * distScale;
+    const M4 = getBeatDuration('M4', type) / speedMul * distScale;
+    const M5 = getBeatDuration('M5', type) / speedMul * distScale;
 
     const leanVal = MOVE_LEAN[type] || -0.12;
     const leanBack = M0_LEAN_BACK[type] || 0.08;

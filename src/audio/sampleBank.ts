@@ -28,10 +28,18 @@ export const MAX_SAMPLE_BYTES = 12 * 1024 * 1024;
  *
  *  预算（design §5.1）：单文件 ≤MAX_SAMPLE_BYTES，解码总量 ≤12MB（已上调容纳
  *  全集；原 §5.1 的 6MB 估值偏小）。
- *  当前：磁盘 ~3.7MB / 解码 float32 ~8.1MB。
+ *  当前：磁盘 ~3.7MB / 解码 float32 ~8.1MB（原有 29 条物理建模合成）。
  *    · foley  17 × ≤0.5s @32k（one-shot，池化复用）
  *    · vox     9 × ≤1.15s @32k
  *    · ambient 3 × 8.0s @22k（无缝循环床）
+ *
+ *  Sprint1 真实录音（K/P/A 九事件）：来源 Kenney.nl CC0 整包（ui-audio / sci-fi-sounds /
+ *  impact-sounds / rpg-audio / voiceover-pack-fighter），经解码（OGG→WAV）统一为
+ *  32k mono PCM16、峰值 -3dBFS、时长裁剪到 idle 0.1-0.4s / move 0.4-0.8s / capture
+ *  0.6-1.0s。新增 9 key（vox.king.idle / vox.king.capture / vox.advisor.capture /
+ *  foley.king.move / foley.pawn.idle / foley.pawn.move / foley.pawn.capture /
+ *  foley.advisor.idle / foley.advisor.move），磁盘合计 ~0.84MB。CC0 协议记录见
+ *  assets/audio/ATTRIBUTION.md。详见 design/audio/sprint1-real-sfx-integration.md。
  */
 export const SAMPLE_MANIFEST: Record<string, string> = {
   /* ---- Foley：材质接触（决定「是什么在动」）---- */
@@ -53,6 +61,14 @@ export const SAMPLE_MANIFEST: Record<string, string> = {
   'foley.drum.war':     'assets/audio/foley/war_drum.wav',      // 落位战鼓（圆膜本征模）
   'foley.land.heavy':   'assets/audio/foley/land_heavy.wav',    // 重量落地
 
+  /* ---- Foley：Sprint1 真实录音（K/P/A · Kenney.nl CC0 整包）---- */
+  'foley.king.move':    'assets/audio/foley/king.move.wav',      // 步辇（木轮辚辚）
+  'foley.pawn.idle':    'assets/audio/foley/pawn.idle.wav',      // 戈柄轻叩盾面（木+金属）
+  'foley.pawn.move':    'assets/audio/foley/pawn.move.long.wav', // 皮靴踏地 + 甲片摩擦（双段拼接拉长）
+  'foley.pawn.capture': 'assets/audio/foley/pawn.capture.wav',   // 戈劈砍破空 + 盾格金属
+  'foley.advisor.idle': 'assets/audio/foley/advisor.idle.wav',   // 剑鞘轻碰
+  'foley.advisor.move': 'assets/audio/foley/advisor.move.long.wav', // 护卫碎步（双段拼接拉长）
+
   /* ---- Vocal：人声/兽声（决定「谁在动、情绪如何」·拟真突破关键）---- */
   'vox.shout.kill':     'assets/audio/vox/shout_kill.wav',      // 「杀！」九人齐吼（A2）
   'vox.shout.charge':   'assets/audio/vox/shout_charge.wav',    // 冲锋嘶吼（A0）
@@ -63,6 +79,11 @@ export const SAMPLE_MANIFEST: Record<string, string> = {
   'vox.horse.neigh':    'assets/audio/vox/horse_neigh.wav',     // 冲锋马嘶（A0）
   'vox.horse.snort':    'assets/audio/vox/horse_snort.wav',     // 响鼻（idle）
   'vox.breath':         'assets/audio/vox/breath.wav',          // 待机呼吸
+
+  /* ---- Vocal：Sprint1 真实录音（K/P/A · Kenney.nl CC0 整包）---- */
+  'vox.king.idle':      'assets/audio/vox/king.idle.wav',        // 帅旗猎猎 + 低沉呼吸
+  'vox.king.capture':   'assets/audio/vox/king.capture.wav',     // 帅旗前指 + 一喝
+  'vox.advisor.capture':'assets/audio/vox/advisor.capture.wav', // 战吼 + 劈砍
 
   /* ---- Ambient：8s 无缝循环床 ---- */
   'ambient.loop.wind':  'assets/audio/ambient/wind_loop.wav',   // 风沙席卷

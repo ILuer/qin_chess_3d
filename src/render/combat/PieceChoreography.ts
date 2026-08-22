@@ -208,7 +208,7 @@ export function windUp(piece: any, type: string, t: number): void {
   // 各兵种子组收势（switch 回退）
   switch (type) {
     case PT.PAWN:
-      if (sub.arm) sub.arm.rotation.x = -0.25 * t;  // 戈后收
+      if (sub.armR) sub.armR.rotation.x = -0.25 * t;  // 戈后收（右臂持戈）
       break;
     case PT.HORSE:
       if (sub.mount) sub.mount.rotation.x = 0.1 * t;  // 马首微扬
@@ -258,7 +258,8 @@ export function strike(piece: any, type: string, victimPos: any, t: number): voi
   const k = Math.sin(Math.PI * t / 2);
   switch (type) {
     case PT.PAWN:
-      if (sub.arm) sub.arm.rotation.x = -0.55 * k;  // 戈直刺
+      if (sub.armR) sub.armR.rotation.x = -0.55 * k;  // 戈直刺（右臂挥下）
+      if (sub.spear) sub.spear.rotation.z = -0.20 * k; // 戈随臂加速
       break;
     case PT.HORSE:
       if (sub.rider) sub.rider.rotation.x = -0.75 * k; // 骑手长戟下劈
@@ -304,7 +305,9 @@ export function settle(piece: any, type: string, t: number): void {
   const damp = (1 - t) * Math.cos(Math.PI * t / 2);
   switch (type) {
     case PT.PAWN:
-      if (sub.arm) sub.arm.rotation.x = sub.arm.rotation.x * damp;  // 阻尼归零
+      if (sub.armR) sub.armR.rotation.x = sub.armR.rotation.x * damp;  // 阻尼归零
+      if (sub.spear) sub.spear.rotation.z = sub.spear.rotation.z * damp;
+      if (sub.shield) sub.shield.rotation.x = sub.shield.rotation.x * damp;
       break;
     case PT.HORSE:
       if (sub.rider) sub.rider.rotation.x = sub.rider.rotation.x * damp;
@@ -356,7 +359,7 @@ export function moveCharge(piece: any, type: string, t: number): void {
   // switch 回退（与 POSE_TABLE move.anticipation 数值保持一致）
   switch (type) {
     case PT.PAWN:
-      if (sub.arm) sub.arm.rotation.x = -0.15 * t;      // 戈后收蓄力
+      if (sub.armR) sub.armR.rotation.x = -0.15 * t;      // 戈后收蓄力
       break;
     case PT.HORSE:
       if (sub.rider) sub.rider.rotation.x = -0.10 * t;  // 骑手勒缰
@@ -413,8 +416,10 @@ export function moveFlourish(piece: any, type: string, t: number): void {
   const k = Math.sin(Math.PI * t / 2);   // 0 → 峰值（落点保持）
   switch (type) {
     case PT.PAWN:
-      if (sub.arm) sub.arm.rotation.x = -0.32 * k;   // 戈前指
-      if (sub.legs) sub.legs.rotation.x = 0.16 * k;  // 踏步摆腿
+      if (sub.armR) sub.armR.rotation.x = -0.32 * k;   // 戈前指（右臂持戈前指）
+      if (sub.armL) sub.armL.rotation.x = -0.22 * k;   // 左臂协同前指
+      if (sub.legR) sub.legR.rotation.x = 0.16 * k;    // 双足交替步频（错相位）
+      if (sub.legL) sub.legL.rotation.x = -0.16 * k;
       break;
     case PT.HORSE:
       if (sub.mount) sub.mount.rotation.x = -0.22 * k;  // 马身前扑
@@ -446,7 +451,7 @@ export function moveFlourish(piece: any, type: string, t: number): void {
 
 /** switch 回退用的移动通道清单（与 resetMovePose 的归零集合一致） */
 const _MOVE_FALLBACK_CHANNELS: Record<string, string[]> = {
-  [PT.PAWN]:     ['arm.rotation.x', 'legs.rotation.x'],
+  [PT.PAWN]:     ['armR.rotation.x', 'armL.rotation.x', 'legR.rotation.x', 'legL.rotation.x'],
   [PT.HORSE]:    ['mount.rotation.x', 'rider.rotation.x'],
   [PT.ELEPHANT]: ['arms.rotation.z', 'robe.rotation.x'],
   [PT.ADVISOR]:  ['sword.rotation.z', 'shield.rotation.x'],
@@ -521,8 +526,12 @@ export function resetMovePose(piece: any, type: string): void {
   const { sub } = _getGroups(piece);
   switch (type) {
     case PT.PAWN:
-      if (sub.arm) sub.arm.rotation.x = 0;
-      if (sub.legs) sub.legs.rotation.x = 0;
+      if (sub.armR) sub.armR.rotation.x = 0;
+      if (sub.armL) sub.armL.rotation.x = 0;
+      if (sub.legR) sub.legR.rotation.x = 0;
+      if (sub.legL) sub.legL.rotation.x = 0;
+      if (sub.spear) sub.spear.rotation.z = 0;
+      if (sub.shield) sub.shield.rotation.x = 0;
       break;
     case PT.HORSE:
       if (sub.mount) sub.mount.rotation.x = 0;

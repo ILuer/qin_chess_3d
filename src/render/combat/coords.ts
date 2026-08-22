@@ -24,6 +24,22 @@ export function cellPan(cell: { file: number, rank: number }): number {
 }
 
 /**
+ * 两格之间的移动格数（曼哈顿距离，Sprint 1 距离因子入口）。
+ * 中国象棋走子均为正交格移，曼哈顿距离 = |df| + |dr|，即实际步数。
+ * 供 MoveAction / CaptureAction 计算 distanceFactor 喂给 moveDurationFor /
+ * captureDurationFor（决策 5：远距动作时长随距离增长）。
+ * @param {{file:number, rank:number}} fromCell
+ * @param {{file:number, rank:number}} toCell
+ * @returns {number}  ≥0 的格数（相邻=1）
+ */
+export function cellDistance(
+  fromCell: { file: number, rank: number },
+  toCell: { file: number, rank: number }
+): number {
+  return Math.abs(toCell.file - fromCell.file) + Math.abs(toCell.rank - fromCell.rank);
+}
+
+/**
  * 棋盘坐标 -> 世界坐标（XZ 平面，棋子站 y=0）。
  * 与 src/core/constants.ts 的 toWorld 一致 —— 供音频 PannerNode source 定位等使用。
  * @param {number} file 0..8

@@ -175,7 +175,13 @@ function _sampleMap(tex: any): any {
 
 class Parts {
   list: any[];
-  constructor() { this.list = []; }
+  /** 强制单材质族（Sprint1 PERF-1 回归修复）：build() 跳过 matte/metal 双族拆分，
+   *  整个子组合并为单 mesh（用 matte 族代表材质，顶点色烘焙保留零件颜色）。
+   *  代价：金属件（甲片/青铜/鎏金）失去金属高光，仅保留颜色。
+   *  用于 P 及高 dc 兵种（R/A/K/C），把每子组 draw call 从 ≤2 压到恒 1，
+   *  使全盘 32 子 mesh 总数回落到 ≤185 预算内。 */
+  forceSingle: boolean;
+  constructor(forceSingle = false) { this.list = []; this.forceSingle = forceSingle; }
 
   /** 放置一个零件：pos / rot(Euler XYZ) / scale
    *  ★ 去基座统一偏移：所有零件的 Y 坐标减 FOOT（0.086），
@@ -323,8 +329,10 @@ class Parts {
       out.push(mesh);
     };
 
-    // 第四步：输出 —— 双族双 mesh（H6）；金属占比过低则回退旧单族（D5：12% 阈值）
-    if (metalRatio < 0.12) {
+    // 第四步：输出 —— 双族双 mesh（H6）；金属占比过低则回退旧单族（D5：12% 阈值）。
+    // ★ Sprint1 PERF-1 回归修复：forceSingle（P 及高 dc 兵种 R/A/K/C 开启）时恒走单族，
+    //   整子组合并为 1 mesh（用顶点数更多的族代表材质），draw call 每子组恒 1。
+    if (this.forceSingle || metalRatio < 0.12) {
       const familyMat = matteVerts >= metalVerts
         ? mats.families.matte : mats.families.metal;
       emit(matteGeos.concat(metalGeos), familyMat);
@@ -346,15 +354,18 @@ class Parts {
 class MultiParts {
   groups: Map<string, Parts>;
   defaultName: string;
-  constructor() {
+  /** 子组强制单材质族（Sprint1 PERF-1 修复）：所有子组 build() 跳过双族拆分 */
+  forceSingle: boolean;
+  constructor(forceSingle = false) {
     this.groups = new Map();
     /** 默认组名（不归属动画子组的公共零件归入此组，最终放入 idleGroup 顶层，如 R 车轮） */
     this.defaultName = '_base';
+    this.forceSingle = forceSingle;
   }
 
-  /** 取指定名称的 Parts 收集器；不存在则创建 */
+  /** 取指定名称的 Parts 收集器；不存在则创建（继承 forceSingle 标志） */
   get(name: string): any {
-    if (!this.groups.has(name)) this.groups.set(name, new Parts());
+    if (!this.groups.has(name)) this.groups.set(name, new Parts(this.forceSingle));
     return this.groups.get(name);
   }
 
@@ -376,68 +387,67 @@ class MultiParts {
  * ============================================================ */
 
 function buildPawn(mp: any, M: any, K: any, side: string): void {
-  const Pb = mp.get('body');   // 躯干 + 头 + 帽（dissolvePose 整体崩姿）
-  const armP = mp.get('arm');  // 双臂 + 戈 + 盾（绕肩 pivot）
-  const legP = mp.get('legs'); // 双靴（绕足 pivot，低伏 / 踏步）
+  const Pb = mp.get('body');     // 躯干 + 头 + 帽（dissolvePose 整体崩姿）
+  const armR = mp.get('armR');   // 右臂 + 手（绕右肩 pivot）
+  const armL = mp.get('armL');   // 左臂 + 手（绕左肩 pivot）
+  const legR = mp.get('legR');   // 右靴（绕足 pivot，低伏 / 踏步）
+  const legL = mp.get('legL');   // 左靴
+  const shieldP = mp.get('shield'); // 圆盾（绕盾心 pivot，独立子组，便于盾格挡驱动）
+  const spearP = mp.get('spear');   // 戈（挂 armR 子节点，随右臂挥动）
 
-  // 战靴（legs 组，接触面用鞋底材质）
-  legP.add(box(0.075, 0.045, 0.115), M.bootSole, { pos: [0.055, FOOT + 0.022, -0.028] });
-  legP.add(box(0.075, 0.045, 0.115), M.bootSole, { pos: [-0.055, FOOT + 0.022, -0.028] });
-  // 大腿（anatomy 大腿，hip → knee）
-  legP.strut(M.clothDeep, [+0.055, 0.430, -0.010], [+0.055, 0.230, -0.018], 0.034, 0.030, 8);
-  legP.strut(M.clothDeep, [-0.055, 0.430, -0.010], [-0.055, 0.230, -0.018], 0.034, 0.030, 8);
-  // 膝盖小球
-  legP.add(sph(0.026, 8, 6), M.clothDeep, { pos: [+0.055, 0.230, -0.018] });
-  legP.add(sph(0.026, 8, 6), M.clothDeep, { pos: [-0.055, 0.230, -0.018] });
-  // 小腿（anatomy 小腿，knee → ankle）
-  legP.strut(M.clothDeep, [+0.055, 0.230, -0.018], [+0.055, FOOT + 0.045, -0.025], 0.028, 0.024, 8);
-  legP.strut(M.clothDeep, [-0.055, 0.230, -0.018], [-0.055, FOOT + 0.045, -0.025], 0.028, 0.024, 8);
-  // 短褐（下摆）
+  // ── 双腿（按左右拆 legR/legL，绕胯 pivot）──
+  // 右腿
+  legR.add(box(0.075, 0.045, 0.115), M.bootSole, { pos: [0.055, FOOT + 0.022, -0.028] });
+  legR.strut(M.clothDeep, [+0.055, 0.430, -0.010], [+0.055, 0.230, -0.018], 0.034, 0.030, 8);
+  legR.add(sph(0.026, 8, 6), M.clothDeep, { pos: [+0.055, 0.230, -0.018] });
+  legR.strut(M.clothDeep, [+0.055, 0.230, -0.018], [+0.055, FOOT + 0.045, -0.025], 0.028, 0.024, 8);
+  // 左腿
+  legL.add(box(0.075, 0.045, 0.115), M.bootSole, { pos: [-0.055, FOOT + 0.022, -0.028] });
+  legL.strut(M.clothDeep, [-0.055, 0.430, -0.010], [-0.055, 0.230, -0.018], 0.034, 0.030, 8);
+  legL.add(sph(0.026, 8, 6), M.clothDeep, { pos: [-0.055, 0.230, -0.018] });
+  legL.strut(M.clothDeep, [-0.055, 0.230, -0.018], [-0.055, FOOT + 0.045, -0.025], 0.028, 0.024, 8);
+
+  // ── 躯干（body 组，与旧一致）──
   Pb.add(cyl(0.105, 0.155, 0.235, 14), M.cloth, { pos: [0, FOOT + 0.118, 0] });
   Pb.add(tor(0.150, 0.012, 5, 16), M.clothDeep, { pos: [0, FOOT + 0.024, 0], rot: [Math.PI / 2, 0, 0] });
-  // 革带
   Pb.add(tor(0.108, 0.016, 5, 16), M.leather, { pos: [0, 0.345, 0], rot: [Math.PI / 2, 0, 0] });
-  // 躯干 + 皮甲片（三层）
   Pb.add(cyl(0.100, 0.112, 0.185, 14), M.clothDeep, { pos: [0, 0.437, 0] });
-  // 腹部层（anatomy 腹部，独立一层区分胸腹）
   Pb.add(cyl(0.110, 0.118, 0.060, 14), M.clothDeep, { pos: [0, 0.378, 0] });
-  // 胸部皮甲（anatomy 胸部）
   Pb.add(cyl(0.118, 0.122, 0.022, 14), M.armor, { pos: [0, 0.375, 0] });
   Pb.add(cyl(0.118, 0.122, 0.022, 14), M.armor, { pos: [0, 0.435, 0] });
   Pb.add(cyl(0.116, 0.120, 0.022, 14), M.armor, { pos: [0, 0.492, 0] });
-  // 肩
   Pb.add(sph(0.050, 10, 8), M.armorDeep, { pos: [0.098, 0.523, 0] });
   Pb.add(sph(0.050, 10, 8), M.armorDeep, { pos: [-0.098, 0.523, 0] });
-  // 领 + 颈 + 头
   Pb.add(cyl(0.062, 0.080, 0.024, 12), M.accentDim, { pos: [0, 0.542, 0] });
   Pb.add(cyl(0.030, 0.032, 0.038, 8), M.skin, { pos: [0, 0.566, 0] });
   Pb.add(sph(0.056, 12, 10), M.skin, { pos: [0, 0.618, -0.006] });
-  // 介帻（扁平尖顶软帽）
   Pb.add(cyl(0.072, 0.076, 0.012, 14), M.clothDeep, { pos: [0, 0.657, -0.004] });
   Pb.add(tor(0.062, 0.008, 5, 14), M.leather, { pos: [0, 0.664, -0.004], rot: [Math.PI / 2, 0, 0] });
   Pb.add(cyl(0.022, 0.068, 0.070, 12), M.cloth, { pos: [0, 0.700, -0.004], rot: [-0.12, 0, 0] });
 
-  // 双臂（arm 组，绕肩 pivot）—— anatomy 大臂 + 小臂 + 手
-  // 右臂：大臂(肩→肘) + 小臂(肘→手腕) + 手
-  armP.strut(M.clothDeep, [+0.096, 0.505, 0.000], [+0.122, 0.438, -0.006], 0.030, 0.026, 8); // 大臂
-  armP.add(sph(0.026, 9, 7), M.clothDeep, { pos: [+0.122, 0.438, -0.006] }); // 肘
-  armP.strut(M.clothDeep, [+0.122, 0.438, -0.006], [+0.150, 0.372, -0.012], 0.026, 0.022, 8); // 小臂
-  // 左臂
-  armP.strut(M.clothDeep, [-0.096, 0.505, 0.000], [-0.122, 0.454, -0.020], 0.030, 0.026, 8);
-  armP.add(sph(0.026, 9, 7), M.clothDeep, { pos: [-0.122, 0.454, -0.020] });
-  armP.strut(M.clothDeep, [-0.122, 0.454, -0.020], [-0.148, 0.402, -0.040], 0.026, 0.022, 8);
-  // 手
-  armP.add(sph(0.032, 10, 8), M.skin, { pos: [0.156, 0.366, -0.014] });
-  armP.add(sph(0.032, 10, 8), M.skin, { pos: [-0.152, 0.398, -0.046] });
-  // 戈：长杆 + 青铜援 + 内 + 顶刺
-  armP.add(cyl(0.011, 0.013, 0.600, 8), M.woodDeep, { pos: [0.170, 0.440, -0.020], rot: [-0.055, 0, 0] });
-  armP.add(box(0.118, 0.028, 0.011), K.bronze, { pos: [0.226, 0.700, -0.030], rot: [0, 0, -0.10] });
-  armP.add(box(0.052, 0.020, 0.011), K.bronze, { pos: [0.126, 0.686, -0.030] });
-  armP.add(cyl(0.000, 0.018, 0.050, 8), K.bronze, { pos: [0.170, 0.765, -0.030] });
-  // 小圆盾（面向 -Z）
-  armP.add(cyl(0.094, 0.094, 0.018, 14), M.leather, { pos: [-0.176, 0.400, -0.058], rot: [Math.PI / 2, 0, 0] });
-  armP.add(tor(0.094, 0.012, 5, 16), M.accentDim, { pos: [-0.176, 0.400, -0.058] });
-  armP.add(sph(0.030, 10, 8), K.bronze, { pos: [-0.176, 0.400, -0.076] });
+  // ── 右臂（armR 组，绕右肩 pivot）—— 大臂 + 小臂 + 手 ──
+  armR.strut(M.clothDeep, [+0.096, 0.505, 0.000], [+0.122, 0.438, -0.006], 0.030, 0.026, 8); // 大臂
+  armR.add(sph(0.026, 9, 7), M.clothDeep, { pos: [+0.122, 0.438, -0.006] });                   // 肘
+  armR.strut(M.clothDeep, [+0.122, 0.438, -0.006], [+0.150, 0.372, -0.012], 0.026, 0.022, 8);  // 小臂
+  armR.add(sph(0.032, 10, 8), M.skin, { pos: [0.156, 0.366, -0.014] });                          // 手
+
+  // ── 左臂（armL 组，绕左肩 pivot）──
+  armL.strut(M.clothDeep, [-0.096, 0.505, 0.000], [-0.122, 0.454, -0.020], 0.030, 0.026, 8);
+  armL.add(sph(0.026, 9, 7), M.clothDeep, { pos: [-0.122, 0.454, -0.020] });
+  armL.strut(M.clothDeep, [-0.122, 0.454, -0.020], [-0.148, 0.402, -0.040], 0.026, 0.022, 8);
+  armL.add(sph(0.032, 10, 8), M.skin, { pos: [-0.152, 0.398, -0.046] });
+
+  // ── 戈（spear 组，挂 armR 子节点 —— 随右臂挥动；绕握把 pivot 自转）──
+  // 坐标基准 = 右小臂末端手附近（piece-local，与旧 arm 组戈位一致）
+  spearP.add(cyl(0.011, 0.013, 0.600, 8), M.woodDeep, { pos: [0.170, 0.440, -0.020], rot: [-0.055, 0, 0] });
+  spearP.add(box(0.118, 0.028, 0.011), K.bronze, { pos: [0.226, 0.700, -0.030], rot: [0, 0, -0.10] });
+  spearP.add(box(0.052, 0.020, 0.011), K.bronze, { pos: [0.126, 0.686, -0.030] });
+  spearP.add(cyl(0.000, 0.018, 0.050, 8), K.bronze, { pos: [0.170, 0.765, -0.030] });
+
+  // ── 小圆盾（shield 组，绕盾心 pivot，独立子组）── 面向 -Z，贴左前臂前
+  shieldP.add(cyl(0.094, 0.094, 0.018, 14), M.leather, { pos: [-0.176, 0.400, -0.058], rot: [Math.PI / 2, 0, 0] });
+  shieldP.add(tor(0.094, 0.012, 5, 16), M.accentDim, { pos: [-0.176, 0.400, -0.058] });
+  shieldP.add(sph(0.030, 10, 8), K.bronze, { pos: [-0.176, 0.400, -0.076] });
 }
 
 /* ============================================================
@@ -1367,13 +1377,34 @@ const MULTI_GROUP_TYPES = new Set(['K', 'C', 'R', 'P', 'A', 'N', 'B']);
  * 仅列出需要精炼旋转的子组；为空则 Group 留在原点（平移类动画不受影响）。
  */
 const SUBGROUP_JOINTS: Record<string, Record<string, any>> = {
-  P: { body: [0, 0.334, 0], arm: [0, 0.348, 0], legs: [0, -0.086, 0] },
+  // ★ Sprint 1 重构：兵/卒 P 拆为 armL/armR、legL/legR，新增独立 shield，戈(spear)挂 armR 子节点。
+  //   零新 Mesh（仅重新分组到 Group 容器），draw call 不增。
+  P: {
+    body: [0, 0.334, 0],
+    armR: [0.096, 0.505, 0],   // 右肩
+    armL: [-0.096, 0.505, 0],  // 左肩
+    legR: [0.055, 0.300, 0],   // 右胯（踏步绕胯转）
+    legL: [-0.055, 0.300, 0],  // 左胯
+    shield: [-0.176, 0.400, -0.058], // 盾心
+    spear: [0.170, 0.440, -0.020]    // 戈握把（作为 armR 子节点，随右臂挥动）
+  },
   A: { body: [0, 0.334, 0], arms: [0, 0.378, 0], sword: [0, 0.328, -0.17], shield: [0, 0.45, -0.20] },
   N: { mount: [0, 0.128, 0], rider: [0, 0.328, 0] },
   B: { robe: [0, 0.368, 0], arms: [0, 0.328, -0.10] },
   R: { horses: [0, 0.168, -0.30], body: [0, 0.288, 0.02], driver: [0.05, 0.378, 0.40], spearman: [-0.05, 0.378, 0.46], wheelL: [-0.26, 0.330, 0], wheelR: [0.26, 0.330, 0] },
   C: { trebuchet: [0, 0.308, 0], cart: [0, 0.114, 0], soldierL: [-0.25, 0.248, 0.09], soldierR: [0.25, 0.248, 0.09] },
   K: { body: [0, 0.378, 0], throne: [0, 0.028, 0], crown: [0, 0.964, 0], sword: [0.14, 0.434, -0.02], banner: [0, 0.394, 0], rArm: [0.14, 0.46, 0] }
+};
+
+/**
+ * 子组父子关系（Sprint 1 新增）：某些子组需作为另一子组的**子 Object3D**，
+ * 继承父组变换（如 P 的戈 spear 挂在右臂 armR 下，挥臂时戈自然跟随）。
+ * 键 = 子组名，值 = 父组名。构建时该子组 Group 会被 add 到父组而非 idleGroup。
+ * 父组的关节锚定（translate -joint + position joint）已先完成，子组再以自身 joint
+ * 叠加，world 位置正确。
+ */
+const SUBGROUP_PARENTS: Record<string, Record<string, string>> = {
+  P: { spear: 'armR' }
 };
 
 const _templates = new Map();
@@ -1391,11 +1422,17 @@ function buildTemplate(type: string, side: string, lodLevel: number): any {
   let mp = null;
   let P = null;
 
+  // ★ Sprint1 PERF-1 回归修复：P/R/A/K/C 五型强制单材质族（每子组 1 mesh），
+  //   把全盘 32 子 mesh 从 ~272 压到 ≤185 预算内。N/B 保持双族以保留金属高光
+  //   （N rider 甲片、B 本无金属），且其单枚 mesh 数已较低（实测 ~12/枚）。
+  const FORCE_SINGLE_TYPES = new Set(['P', 'R', 'A', 'K', 'C']);
+  const forceSingle = FORCE_SINGLE_TYPES.has(type);
+
   if (useMulti) {
-    mp = new MultiParts();
+    mp = new MultiParts(forceSingle);
     P = mp.base;
   } else {
-    P = new Parts();
+    P = new Parts(forceSingle);
   }
 
   const fn = BUILDERS[type] || BUILDERS.P;
@@ -1438,9 +1475,11 @@ function buildTemplate(type: string, side: string, lodLevel: number): any {
       for (const m of allGroups['_base']) idleGroup.add(m);
     }
 
-    // 创建命名子 Group 并挂入 idleGroup
+    // 创建命名子 Group 并挂入 idleGroup（或父组）
     const subGroupNames = [];
     const jointTable = SUBGROUP_JOINTS[type] || null;
+    const parentTable = SUBGROUP_PARENTS[type] || null;
+    const createdGroups: Record<string, any> = {};
     for (const name of Object.keys(allGroups)) {
       if (name === '_base') continue;
       const g = new THREE.Group();
@@ -1456,8 +1495,17 @@ function buildTemplate(type: string, side: string, lodLevel: number): any {
         g.position.set(jx, jy, jz);
       }
       for (const m of meshes) g.add(m);
-      idleGroup.add(g);
+      createdGroups[name] = g;
       subGroupNames.push(name);
+    }
+    // 先挂无父组的到 idleGroup，再把有父组的 add 到对应父组（如 P.spear → armR）
+    for (const name of subGroupNames) {
+      const parent = parentTable && parentTable[name];
+      if (parent && createdGroups[parent]) {
+        createdGroups[parent].add(createdGroups[name]);
+      } else {
+        idleGroup.add(createdGroups[name]);
+      }
     }
 
     // 根 Group（单位变换，供外部做动画/定位）

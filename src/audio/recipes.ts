@@ -1296,7 +1296,43 @@ function applySampleOverlay(): void {
   addSample('cannon.idle',   'C', 'foley.wood.creak',{ gain: 0.26, rate: 0.96, probability: 0.40 });
 }
 
+/** 把某拍某层里已挂载的指定 sample 指令的 key 替换为 Sprint1 专属真实录音键。
+ *  用于"接管"applySampleOverlay 已用通用键（vox.breath / foley.step.light /
+ *  vox.king.roar / vox.shout.kill）挂载的采样，避免 addSample 追加造成双响。 */
+function overrideSample(beat: string, layer: string, fromKey: string, toKey: string, opts: any = {}): void {
+  const r = BEAT_RECIPES[beat];
+  if (!r || !r.layers || !r.layers[layer]) return;
+  for (const inst of r.layers[layer] as any[]) {
+    if (inst && inst.type === 'sample' && inst.key === fromKey) {
+      inst.key = toKey;
+      Object.assign(inst, opts);
+    }
+  }
+}
+
+/** Sprint1 真实录音接管（K/P/A 九事件 · Kenney.nl CC0 整包）：
+ *  优先采样，缺失（解码失败/未加载）时由 sfx.ts 回退原程序化/通用采样，零回归。
+ *  仅覆盖 K/P/A；其余兵种保持 applySampleOverlay 既有路由不变。 */
+function applySprint1RealSamples(): void {
+  // ---- 将/帅 K ----
+  overrideSample('king.idle',          'C', 'vox.breath',      'vox.king.idle',     { gain: 0.34, rate: 0.94, probability: 0.55 });
+  swapFoley('king.move.launch',        'C', 'clothRustle',     'foley.king.move',   { gain: 0.40, rate: 1.0 });
+  overrideSample('king.capture.clash', 'C', 'vox.king.roar',   'vox.king.capture',  { gain: 0.60, rate: 1.0, busTarget: 'hitBus' });
+
+  // ---- 兵/卒 P ----
+  overrideSample('pawn.idle',          'C', 'vox.breath',      'foley.pawn.idle',   { gain: 0.30, rate: 1.0 });
+  overrideSample('pawn.move.cruise',   'B', 'foley.step.light', 'foley.pawn.move',   { gain: 0.55, rate: 1.0 });
+  trimPeak('pawn.capture.clash',       'C', 'bladeClash',      0.72);
+  addSample('pawn.capture.clash',      'T', 'foley.pawn.capture', { gain: 0.46, rate: 1.0, busTarget: 'hitBus' });
+
+  // ---- 士/仕 A ----
+  overrideSample('advisor.idle',       'C', 'vox.breath',      'foley.advisor.idle',{ gain: 0.28, rate: 1.0 });
+  overrideSample('advisor.move.cruise','B', 'foley.step.light', 'foley.advisor.move',{ gain: 0.40, rate: 1.10 });
+  overrideSample('advisor.capture.clash','C','vox.shout.kill',  'vox.advisor.capture',{ gain: 0.40, rate: 1.06, busTarget: 'hitBus' });
+}
+
 applySampleOverlay();
+applySprint1RealSamples();
 
 /* --------------------------------------------------------------------------
  * 10. SEQUENCES — 演出序列编排

@@ -23,6 +23,82 @@ import { PT, PALETTE } from '../../core/constants.ts';
 export const DRAW_CALL_BUDGET = 155;
 
 // ═══════════════════════════════════════════════════════════════
+// §0.5 全局速度可调框架（Sprint 1：决策 2 + 5 的钩子）
+// ═══════════════════════════════════════════════════════════════
+//
+// 设计意图（用户拍板）：
+//   - 决策 2：所有棋子的所有动作时长均可调。核心第一优先级 = 战场真实效果（非节奏整齐）。
+//   - 决策 5：速度按兵种特性（马/车快、炮慢、其余稳重），且考虑距离——
+//             不同距离动作时长按现实距离调（远距覆盖更长时间）。
+//
+// 正交性纪律（务必遵守，避免回归）：
+//   - 本框架是「beat 时长缩放系数」——作用于 MOVE_TOTAL / CAPTURE_TOTAL 的预计算值。
+//   - animator.update 的 `timeScale`（headless 下被置 0、探针强制 1）是「dt 缩放」，
+//     二者在动画推进上是**相乘**关系（timeScale×本系数），互不冲突。
+//   - AI_SPEED_MUL 仍作为独立因子在 MoveAction/CaptureAction 里与本系数**相乘**（见各 Action）。
+//   - hitstop 逻辑完全不被本框架触碰（冻结的是 dt 流，不是 beat 时长）。
+
+/**
+ * 全局速度系数。1 = 基准；<1 更慢更真实；>1 更快。
+ * 单一总闸，调它即可全局统一加速/减速，无需改逐兵种表。
+ */
+export const ANIM_SPEED = 1.0;
+
+/**
+ * 各兵种速度系数初值（决策 5）。
+ * 键 = PT 单字符。马/车快、炮慢（推着走）、兵/卒/相/象/仕/士/将/帅稳重。
+ *   P=1.0（兵/卒，稳重）   N=1.1（马，快）
+ *   B=0.9（象/相，文官迟缓） A=1.0（士/仕，稳重）
+ *   R=0.95（车，略快但车体重） C=0.9（炮，推着走最慢）
+ *   K=0.85（将/帅，最稳重 —— 决策 5 用户给的初值）
+ * 数值越大 = 动作越快（时长越短）。
+ */
+export const SPEED_MUL: Record<string, number> = {
+  P: 1.0, N: 1.1, B: 0.9, A: 1.0, R: 0.95, C: 0.9, K: 0.85
+};
+
+/** 远距时长增长系数上限（封顶 1.8，防止跨全盘移动时长爆炸） */
+export const DIST_SCALE_CAP = 1.8;
+
+/**
+ * 距离因子 → 时长缩放系数（distScale）。
+ * 现实：速度恒定则时长 ∝ 距离；远距（≥4 格）需要更长时间覆盖。
+ * 映射：近距(1 格)略快（distScale=1），远距线性增长，封顶 DIST_SCALE_CAP。
+ *   distScale = clamp(1 + (distanceFactor - 1) * 0.12, 1, DIST_SCALE_CAP)
+ * @param {number} distanceFactor  移动格数（曼哈顿或直线，1~N），由 cellDistance 计算
+ * @returns {number}
+ */
+export function distScaleFor(distanceFactor: number): number {
+  const df = Math.max(1, distanceFactor);
+  const raw = 1 + (df - 1) * 0.12;
+  return Math.max(1, Math.min(DIST_SCALE_CAP, raw));
+}
+
+/**
+ * 把「兵种 + 距离」折算成一个**总速度系数**（与 MOVE_TOTAL/CAPTURE_TOTAL 相除即得到实际时长）。
+ * = ANIM_SPEED × SPEED_MUL[pt] × distScale。
+ * 未知兵种回退 SPEED_MUL.P / distScale=1。
+ * @param {string} pt   PT 单字符（'P'|'N'|'B'|'A'|'R'|'C'|'K'）
+ * @param {number} distanceFactor  移动格数（1~N）
+ * @returns {number}
+ */
+export function perTypeSpeedMul(pt: string, distanceFactor = 1): number {
+  const base = SPEED_MUL[pt] ?? SPEED_MUL.P ?? 1.0;
+  return ANIM_SPEED * base * distScaleFor(distanceFactor);
+}
+
+/**
+ * 不含距离的「兵种速度系数」（仅 ANIM_SPEED × SPEED_MUL[pt]）。
+ * 供 MoveAction / CaptureAction 逐拍时长缩放用：beat 时长 = 原拍长 / beatSpeedMul(pt) × distScale(df)。
+ * 与 perTypeSpeedMul 的区别：本函数不含距离因子，距离增长由调用方单独 × distScaleFor(df) 实现，
+ * 以保证「远距时长更长」（决策 5 物理真实：远距需要更长时间覆盖）。
+ */
+export function beatSpeedMul(pt: string): number {
+  const base = SPEED_MUL[pt] ?? SPEED_MUL.P ?? 1.0;
+  return ANIM_SPEED * base;
+}
+
+// ═══════════════════════════════════════════════════════════════
 // §1 移动节拍参数 MOVE_BEAT（替代单一 TIMING.moveDuration）
 // ═══════════════════════════════════════════════════════════════
 
@@ -345,19 +421,19 @@ export const IDLE_WEAPON_BIAS = {
  */
 export const IDLE_PIECE = {
   [PT.PAWN]: {
-    desc: '戈叩盾：缓摆 + 叩击脉冲（P）',
+    desc: '戈叩盾：缓摆 + 叩击脉冲（P，Sprint 1 拆 armR/armL/legL/legR/shield/spear）',
     breathe: 0.020, sway: 0.026,
     l1: [
-      ['arm', 'z', 0.115, 0.62, 0],
-      ['arm', 'x', 0.075, 0.62, 0.6],
-      ['body', 'x', 0.052, 0.62, Math.PI]
+      ['armR', 'z', 0.115, 0.62, 0],      // 戈叩盾节律（右臂绕 z 小幅圆周叩击）
+      ['armR', 'x', 0.075, 0.62, 0.6],    // 戈前后微摆
+      ['body', 'x', 0.052, 0.62, Math.PI] // 负重微沉
     ],
     l2: [
-      ['arm', 'x', 0.130, 3.2],
+      ['armR', 'x', 0.130, 3.2],          // 叩击脉冲
       ['body', 'x', -0.050, 3.2]
     ],
-    // windUp 写 arm.x → 只归零 arm.z / body.x
-    zeroChannels: ['arm.rotation.z', 'body.rotation.x']
+    // windUp 写 armR.x / shield.x → 只归零 armR.z / body.x
+    zeroChannels: ['armR.rotation.z', 'body.rotation.x']
   },
   [PT.HORSE]: {
     desc: '扬前身 + 骑手对位后仰（N）',
@@ -469,20 +545,23 @@ export const IDLE_PIECE = {
  */
 export const POSE_TABLE: Record<string, Record<string, any>> = {
   [PT.PAWN]: {
+    // ★ Sprint 1 重构：子组已拆 armR/armL/legR/legL/shield/spear（见 SUBGROUP_JOINTS.P）。
+    //   戈叩盾节律用 armR + shield 表达；负重微换腿用 legL/legR 错相位。
+    //   逐级加速（肩→大臂→小臂→戈）留待后续骨骼精细化，本 Sprint 用单峰值 + 现有包络保证「可读动作」。
     idle: {
-      anticipation: { sub: { body: { rotation: { x: 0.028 } } }, duration: 0.87, ease: 'easeOutQuad', channels: ['body.rotation.x'] },
-      action: { sub: { arm: { rotation: { x: 0.055 } } }, duration: 5.0, ease: 'easeOutQuad', channels: ['arm.rotation.x'] },
-      recovery: { sub: { arm: { rotation: { z: 0 } } }, duration: 0.5, ease: 'easeInOutQuad', channels: ['arm.rotation.z'] }
+      anticipation: { sub: { armR: { rotation: { x: 0.020 } } }, duration: 0.87, ease: 'easeOutQuad', channels: ['armR.rotation.x'] },
+      action: { sub: { armR: { rotation: { x: 0.045 } }, shield: { rotation: { z: 0.030 } }, legL: { rotation: { x: 0.012 } } }, duration: 5.0, ease: 'easeOutQuad', channels: ['armR.rotation.x', 'shield.rotation.z', 'legL.rotation.x'] },
+      recovery: { sub: { armR: { rotation: { x: 0 } }, shield: { rotation: { z: 0 } }, legL: { rotation: { x: 0 } } }, duration: 0.5, ease: 'easeInOutQuad', channels: ['armR.rotation.x', 'shield.rotation.z', 'legL.rotation.x'] }
     },
     move: {
-      anticipation: { sub: { arm: { rotation: { x: -0.15 } } }, duration: 0.14, ease: 'easeOutQuad', channels: ['arm.rotation.x'] },
-      action: { sub: { arm: { rotation: { x: -0.32 } }, legs: { rotation: { x: 0.16 } } }, duration: 0.14, ease: 'easeInCubic', channels: ['arm.rotation.x', 'legs.rotation.x'] },
-      recovery: { sub: { arm: { rotation: { x: 0 } }, legs: { rotation: { x: 0 } } }, duration: 0.30, ease: 'easeInOutQuad', channels: ['arm.rotation.x', 'legs.rotation.x'] }
+      anticipation: { sub: { armR: { rotation: { x: -0.15 } }, armL: { rotation: { x: -0.10 } } }, duration: 0.14, ease: 'easeOutQuad', channels: ['armR.rotation.x', 'armL.rotation.x'] },
+      action: { sub: { armR: { rotation: { x: -0.32 } }, armL: { rotation: { x: -0.22 } }, legR: { rotation: { x: 0.16 } }, legL: { rotation: { x: -0.16 } } }, duration: 0.14, ease: 'easeInCubic', channels: ['armR.rotation.x', 'armL.rotation.x', 'legR.rotation.x', 'legL.rotation.x'] },
+      recovery: { sub: { armR: { rotation: { x: 0 } }, armL: { rotation: { x: 0 } }, legR: { rotation: { x: 0 } }, legL: { rotation: { x: 0 } } }, duration: 0.30, ease: 'easeInOutQuad', channels: ['armR.rotation.x', 'armL.rotation.x', 'legR.rotation.x', 'legL.rotation.x'] }
     },
     capture: {
-      anticipation: { sub: { arm: { rotation: { x: -0.25 } } }, duration: 0.13, ease: 'easeOutQuad', channels: ['arm.rotation.x'] },
-      action: { sub: { arm: { rotation: { x: -0.55 } } }, duration: 0.09, ease: 'easeInCubic', channels: ['arm.rotation.x'] },
-      recovery: { sub: { arm: { rotation: { x: 0 } } }, duration: 0.24, ease: 'easeInOutQuad', channels: ['arm.rotation.x'] }
+      anticipation: { sub: { armR: { rotation: { x: -0.25 } }, shield: { rotation: { x: -0.12 } } }, duration: 0.13, ease: 'easeOutQuad', channels: ['armR.rotation.x', 'shield.rotation.x'] },
+      action: { sub: { armR: { rotation: { x: -0.58 } }, spear: { rotation: { z: -0.20 } }, shield: { rotation: { x: -0.25 } } }, duration: 0.09, ease: 'easeInCubic', channels: ['armR.rotation.x', 'spear.rotation.z', 'shield.rotation.x'] },
+      recovery: { sub: { armR: { rotation: { x: 0 } }, spear: { rotation: { z: 0 } }, shield: { rotation: { x: 0 } } }, duration: 0.24, ease: 'easeInOutQuad', channels: ['armR.rotation.x', 'spear.rotation.z', 'shield.rotation.x'] }
     }
   },
   [PT.HORSE]: {
@@ -520,20 +599,21 @@ export const POSE_TABLE: Record<string, Record<string, any>> = {
     }
   },
   [PT.ADVISOR]: {
+    // ★ Sprint 1：A 防御姿态（双手拄剑身前 + shield 微抬）/ 护卫碎步 / 战吼劈砍。
     idle: {
       anticipation: { sub: { body: { rotation: { z: 0.014 } } }, duration: 0.87, ease: 'easeOutQuad', channels: ['body.rotation.z'] },
-      action: { sub: { sword: { rotation: { z: 0.024 } } }, duration: 2.5, ease: 'easeOutQuad', channels: ['sword.rotation.z'] },
-      recovery: { sub: { body: { rotation: { z: 0 } } }, duration: 0.5, ease: 'easeInOutQuad', channels: ['body.rotation.z'] }
+      action: { sub: { sword: { rotation: { z: 0.024 } }, shield: { rotation: { x: 0.030 } }, arms: { rotation: { x: 0.012 } } }, duration: 2.5, ease: 'easeOutQuad', channels: ['sword.rotation.z', 'shield.rotation.x', 'arms.rotation.x'] },
+      recovery: { sub: { body: { rotation: { z: 0 } }, shield: { rotation: { x: 0 } }, arms: { rotation: { x: 0 } } }, duration: 0.5, ease: 'easeInOutQuad', channels: ['body.rotation.z', 'shield.rotation.x', 'arms.rotation.x'] }
     },
     move: {
-      anticipation: { sub: { sword: { rotation: { z: -0.08 } } }, duration: 0.14, ease: 'easeOutQuad', channels: ['sword.rotation.z'] },
-      action: { sub: { sword: { rotation: { z: -0.12 } }, shield: { rotation: { x: -0.10 } } }, duration: 0.08, ease: 'easeInCubic', channels: ['sword.rotation.z', 'shield.rotation.x'] },
-      recovery: { sub: { sword: { rotation: { z: 0 } }, shield: { rotation: { x: 0 } } }, duration: 0.26, ease: 'easeInOutQuad', channels: ['sword.rotation.z', 'shield.rotation.x'] }
+      anticipation: { sub: { sword: { rotation: { z: -0.08 } }, shield: { rotation: { x: -0.06 } } }, duration: 0.14, ease: 'easeOutQuad', channels: ['sword.rotation.z', 'shield.rotation.x'] },
+      action: { sub: { sword: { rotation: { z: -0.12 } }, shield: { rotation: { x: -0.10 } }, arms: { rotation: { x: -0.06 } } }, duration: 0.08, ease: 'easeInCubic', channels: ['sword.rotation.z', 'shield.rotation.x', 'arms.rotation.x'] },
+      recovery: { sub: { sword: { rotation: { z: 0 } }, shield: { rotation: { x: 0 } }, arms: { rotation: { x: 0 } } }, duration: 0.26, ease: 'easeInOutQuad', channels: ['sword.rotation.z', 'shield.rotation.x', 'arms.rotation.x'] }
     },
     capture: {
-      anticipation: { sub: { sword: { rotation: { z: -0.4 } }, shield: { rotation: { x: -0.15 } } }, duration: 0.13, ease: 'easeOutQuad', channels: ['sword.rotation.z', 'shield.rotation.x'] },
-      action: { sub: { sword: { rotation: { z: -0.85 } }, shield: { rotation: { x: -0.25 } } }, duration: 0.08, ease: 'easeInCubic', channels: ['sword.rotation.z', 'shield.rotation.x'] },
-      recovery: { sub: { sword: { rotation: { z: 0 } }, shield: { rotation: { x: 0 } } }, duration: 0.26, ease: 'easeInOutQuad', channels: ['sword.rotation.z', 'shield.rotation.x'] }
+      anticipation: { sub: { sword: { rotation: { z: -0.4 } }, shield: { rotation: { x: -0.15 } }, body: { rotation: { x: -0.05 } } }, duration: 0.13, ease: 'easeOutQuad', channels: ['sword.rotation.z', 'shield.rotation.x', 'body.rotation.x'] },
+      action: { sub: { sword: { rotation: { z: -0.85 } }, shield: { rotation: { x: -0.25 } }, body: { rotation: { x: -0.12 } } }, duration: 0.08, ease: 'easeInCubic', channels: ['sword.rotation.z', 'shield.rotation.x', 'body.rotation.x'] },
+      recovery: { sub: { sword: { rotation: { z: 0 } }, shield: { rotation: { x: 0 } }, body: { rotation: { x: 0 } } }, duration: 0.26, ease: 'easeInOutQuad', channels: ['sword.rotation.z', 'shield.rotation.x', 'body.rotation.x'] }
     }
   },
   [PT.ROOK]: {
@@ -571,20 +651,21 @@ export const POSE_TABLE: Record<string, Record<string, any>> = {
     }
   },
   [PT.KING]: {
+    // ★ Sprint 1：K 龙椅微浮（throne 微沉）/ 帅旗猎猎（banner）/ 步辇位移 + 旗扬 / 帅旗前指 + 剑指一喝（rArm）。
     idle: {
-      anticipation: { sub: { rArm: { rotation: { z: 0.058 } } }, duration: 0.87, ease: 'easeOutQuad', channels: ['rArm.rotation.z'] },
-      action: { sub: { banner: { rotation: { z: 0.034 } } }, duration: 2.5, ease: 'easeOutQuad', channels: ['banner.rotation.z'] },
-      recovery: { sub: { rArm: { rotation: { z: 0 } } }, duration: 0.5, ease: 'easeInOutQuad', channels: ['rArm.rotation.z'] }
+      anticipation: { sub: { rArm: { rotation: { z: 0.058 } }, throne: { rotation: { y: 0.010 } } }, duration: 0.87, ease: 'easeOutQuad', channels: ['rArm.rotation.z', 'throne.rotation.y'] },
+      action: { sub: { banner: { rotation: { z: 0.034 } }, throne: { rotation: { y: 0.020 } } }, duration: 2.5, ease: 'easeOutQuad', channels: ['banner.rotation.z', 'throne.rotation.y'] },
+      recovery: { sub: { rArm: { rotation: { z: 0 } }, throne: { rotation: { y: 0 } } }, duration: 0.5, ease: 'easeInOutQuad', channels: ['rArm.rotation.z', 'throne.rotation.y'] }
     },
     move: {
-      anticipation: { sub: { throne: { rotation: { x: 0.06 } } }, duration: 0.14, ease: 'easeOutQuad', channels: ['throne.rotation.x'] },
-      action: { sub: { throne: { rotation: { x: -0.06 } }, sword: { rotation: { z: -0.10 } } }, duration: 0.12, ease: 'easeInCubic', channels: ['throne.rotation.x', 'sword.rotation.z'] },
-      recovery: { sub: { throne: { rotation: { x: 0 } }, sword: { rotation: { z: 0 } } }, duration: 0.30, ease: 'easeInOutQuad', channels: ['throne.rotation.x', 'sword.rotation.z'] }
+      anticipation: { sub: { throne: { rotation: { x: 0.06 } }, banner: { rotation: { z: 0.04 } } }, duration: 0.14, ease: 'easeOutQuad', channels: ['throne.rotation.x', 'banner.rotation.z'] },
+      action: { sub: { throne: { rotation: { x: -0.06 } }, sword: { rotation: { z: -0.10 } }, banner: { rotation: { z: 0.06 } } }, duration: 0.12, ease: 'easeInCubic', channels: ['throne.rotation.x', 'sword.rotation.z', 'banner.rotation.z'] },
+      recovery: { sub: { throne: { rotation: { x: 0 } }, sword: { rotation: { z: 0 } }, banner: { rotation: { z: 0 } } }, duration: 0.30, ease: 'easeInOutQuad', channels: ['throne.rotation.x', 'sword.rotation.z', 'banner.rotation.z'] }
     },
     capture: {
-      anticipation: { sub: { sword: { rotation: { z: -0.25 } }, throne: { rotation: { x: -0.10 } } }, duration: 0.17, ease: 'easeOutQuad', channels: ['sword.rotation.z', 'throne.rotation.x'] },
-      action: { sub: { sword: { rotation: { z: -0.40 } }, throne: { rotation: { x: -0.15 } } }, duration: 0.08, ease: 'easeInCubic', channels: ['sword.rotation.z', 'throne.rotation.x'] },
-      recovery: { sub: { sword: { rotation: { z: 0 } }, throne: { rotation: { x: 0 } } }, duration: 0.30, ease: 'easeInOutQuad', channels: ['sword.rotation.z', 'throne.rotation.x'] }
+      anticipation: { sub: { sword: { rotation: { z: -0.25 } }, throne: { rotation: { x: -0.10 } }, banner: { rotation: { z: -0.12 } } }, duration: 0.17, ease: 'easeOutQuad', channels: ['sword.rotation.z', 'throne.rotation.x', 'banner.rotation.z'] },
+      action: { sub: { sword: { rotation: { z: -0.40 } }, throne: { rotation: { x: -0.15 } }, banner: { rotation: { z: -0.30 } }, rArm: { rotation: { z: -0.10 } } }, duration: 0.08, ease: 'easeInCubic', channels: ['sword.rotation.z', 'throne.rotation.x', 'banner.rotation.z', 'rArm.rotation.z'] },
+      recovery: { sub: { sword: { rotation: { z: 0 } }, throne: { rotation: { x: 0 } }, banner: { rotation: { z: 0 } }, rArm: { rotation: { z: 0 } } }, duration: 0.30, ease: 'easeInOutQuad', channels: ['sword.rotation.z', 'throne.rotation.x', 'banner.rotation.z', 'rArm.rotation.z'] }
     }
   }
 };
@@ -638,4 +719,49 @@ export function getCaptureBeat(beat: string, pieceTypeKey: string, distanceFacto
   if (beat === 'A0') return clampA0(pieceTypeKey, distanceFactor);
   if (beat === 'A4') return A4_COLLAPSE;
   return cb[beat] || 0.42;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// §11.5 速度可调框架出口函数（Sprint 1：决策 2 + 5）
+// ═══════════════════════════════════════════════════════════════
+//
+// ★ 决策 5 公式方向修正说明（重要）：
+//   任务原型写 moveDurationFor = MOVE_TOTAL / (ANIM_SPEED × SPEED_MUL × distScale)，
+//   但决策 5 文字明确要求「近距略快、远距略慢」「远距需要更长时间覆盖」
+//   （物理真实：速度恒定则时长 ∝ 距离）。若 distScale 置分母（>1 时），时长反而更短，
+//   与决策意图矛盾。distScale 系数 1+(df-1)*0.12（>1）显然是「时长增长倍数」。
+//   故本实现将 distScale 置于**分子**（时长缩放）：
+//     moveDurationFor(pt, df)   = MOVE_TOTAL[pt] / (ANIM_SPEED × SPEED_MUL[pt]) × distScaleFor(df)
+//     captureDurationFor(pt,df) = CAPTURE_TOTAL[pt] / (ANIM_SPEED × SPEED_MUL[pt]) × distScaleFor(df)
+//   近距(df=1, distScale=1) 时长=基准/SPEED_MUL；远距(df≥4, distScale>1) 时长线性增长（封顶 1.8×）。
+//   此为遵循决策物理意图的唯一自洽解；perTypeSpeedMul（含距离）保留供参考/测试，但
+//   Action 集成改用 beatSpeedMul（不含距离）× distScaleFor 分开，确保远距更长。
+//
+// 与现有逐拍架构对齐：MoveAction/CaptureAction 按拍拼接总时长，故在 Action 层把每拍
+// 时长 = 原拍长 / beatSpeedMul(pt) × distScaleFor(df)，与上式数学等价，且保留逐拍结构、
+// 与 AI_SPEED_MUL 正交相乘、与 timeScale(dt 缩放) 正交不冲突。hitstop(A3) 不缩放。
+
+/**
+ * 某兵种「移动总时长」经全局速度框架缩放后的结果（秒）。
+ * = MOVE_TOTAL[pt] / (ANIM_SPEED × SPEED_MUL[pt]) × distScaleFor(distanceFactor)
+ * @param {string} pt  PT 单字符
+ * @param {number} distanceFactor  移动格数（1~N）
+ * @returns {number}
+ */
+export function moveDurationFor(pt: string, distanceFactor = 1): number {
+  const total = (MOVE_TOTAL as Record<string, number>)[pt] ?? MOVE_TOTAL.P;
+  return (total / beatSpeedMul(pt)) * distScaleFor(distanceFactor);
+}
+
+/**
+ * 某兵种「吃子总时长」经全局速度框架缩放后的结果（秒）。
+ * = CAPTURE_TOTAL[pt] / (ANIM_SPEED × SPEED_MUL[pt]) × distScaleFor(distanceFactor)
+ * 注意：仅覆盖 A0..A2/A4/A5 的 beat 时长缩放；hitstop(A3) 由冲击级决定、不在此缩放。
+ * @param {string} pt  PT 单字符
+ * @param {number} distanceFactor  移动格数（1~N）
+ * @returns {number}
+ */
+export function captureDurationFor(pt: string, distanceFactor = 1): number {
+  const total = (CAPTURE_TOTAL as Record<string, number>)[pt] ?? CAPTURE_TOTAL.P;
+  return (total / beatSpeedMul(pt)) * distScaleFor(distanceFactor);
 }
