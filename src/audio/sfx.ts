@@ -1722,6 +1722,11 @@ export const SFX = {
     return Object.keys(SAMPLE_MANIFEST).length;
   },
 
+  /** 采样清单 key 列表（真机自检脚本遍历声明用，只读） */
+  sampleManifestKeys(): string[] {
+    return Object.keys(SAMPLE_MANIFEST);
+  },
+
   /** 内部使用：获取上下文/节点（供 ambience.js 使用） */
   _internals: {
     get ctx() { return ctx; },
