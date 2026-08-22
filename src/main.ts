@@ -432,10 +432,21 @@ function toggleSound(): void {
   const on = !SFX.isEnabled();
   SFX.setEnabled(on);
   if (on) {
-    // 修复：开启后 AudioContext 可能仍 suspended，playEvent 当帧会早返回吞掉声音；
-    // 先 resume（setEnabled 内已处理）再延迟一帧播放，确保选子音能发声。
-    try { if (SFX._internals && SFX._internals.ctx && SFX._internals.ctx.state === 'suspended') SFX._internals.ctx.resume().catch(() => {}); } catch (e) { /* 忽略 */ }
-    requestAnimationFrame(() => { try { SFX.play('select'); } catch (e) { /* 忽略 */ } });
+    // 修复：开启后 AudioContext 可能因浏览器自动暂停策略仍处于 suspended，
+    // playEvent 当帧会早返回吞掉声音；且 setEnabled 内的 resume 是异步的，
+    // 单帧 retry 不可靠。此处等待 resume 真正完成后（Promise 回调 / 兜底延时）
+    // 再播一声「select」，确保重开棋子音效必定可闻，彻底解决「开了没声」。
+    const ctxAny = SFX._internals && SFX._internals.ctx;
+    const playProbe = () => { try { SFX.play('select'); } catch (e) { /* 忽略 */ } };
+    if (ctxAny && ctxAny.state === 'suspended') {
+      try {
+        const p = ctxAny.resume();
+        if (p && typeof p.then === 'function') p.then(playProbe).catch(playProbe);
+        else setTimeout(playProbe, 60);
+      } catch (e) { setTimeout(playProbe, 60); }
+    } else {
+      requestAnimationFrame(playProbe);
+    }
   }
   syncControls();
   hud.showToast(on ? '棋子音效已开启' : '棋子音效已静音', 'info', 1.6);

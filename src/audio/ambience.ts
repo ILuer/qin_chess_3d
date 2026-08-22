@@ -335,7 +335,10 @@ export class AmbienceSystem {
 
     // 电平 + 缓慢起伏 LFO（抗听觉疲劳：8s 循环靠 LFO 打散周期性）
     const g = i.ctx.createGain();
-    const target = cfg.gain * this._bedTensionMul(cfg);
+    // 修复：采样床异步挂载时若环境音已关闭（_enabled=false），增益保持 FLOOR，
+    // 不 ramp 到 target —— 否则关闭期间的延迟加载床会绕过静音突然发声。
+    const enabledNow = this._enabled;
+    const target = enabledNow ? cfg.gain * this._bedTensionMul(cfg) : FLOOR;
     g.gain.setValueAtTime(FLOOR, t);
     g.gain.linearRampToValueAtTime(target, t + Math.max(0.05, fadeIn));
     tail.connect(g);
@@ -396,11 +399,15 @@ export class AmbienceSystem {
     for (const name of Object.keys(this._beds)) {
       const bed = this._beds[name];
       if (!bed || !bed.g) continue;
-      const target = bed.baseGain * this._bedTensionMul(bed.cfg);
+      // 修复：关闭时采样床自身增益也压到静默 —— 床的 g.gain 走的是
+      // ambientBus 之前的链路，若这里把床推回 baseGain，会绕过 ambientBus
+      // 的 FLOOR 静音继续发声（环境音关不掉的第二个泄漏点）。
+      const target = !this._enabled ? FLOOR
+        : Math.max(FLOOR, bed.baseGain * this._bedTensionMul(bed.cfg));
       try {
         bed.g.gain.cancelScheduledValues(ct);
         bed.g.gain.setValueAtTime(bed.g.gain.value, ct);
-        bed.g.gain.linearRampToValueAtTime(Math.max(FLOOR, target), ct + 1.2);
+        bed.g.gain.linearRampToValueAtTime(target, ct + 1.2);
         if (bed.lfoG) bed.lfoG.gain.linearRampToValueAtTime(target * (bed.cfg.lfo?.amp || 0), ct + 1.2);
       } catch (e) { /* noop */ }
     }
@@ -997,7 +1004,10 @@ export class AmbienceSystem {
     if (!this._active) return;
     this._breathPhase = 'descending';
     const i = _int();
-    if (i.ready && i.ambientBus) {
+    // 修复：环境音关闭时不修改 ambientBus 增益（保持静默），否则呼吸循环会
+    // 绕过 _enabled 把总线拉回 ~0.70，导致「环境音关不掉」。定时器链照常推进，
+    // 重开时 _breathRise 立即恢复呼吸节奏。
+    if (i.ready && i.ambientBus && this._enabled) {
       const t = i.ctx.currentTime;
       const current = i.ambientBus.gain.value || 0.70;
       i.ambientBus.gain.cancelScheduledValues(t);
@@ -1018,7 +1028,8 @@ export class AmbienceSystem {
     if (!this._active) return;
     this._breathPhase = 'rising';
     const i = _int();
-    if (i.ready && i.ambientBus) {
+    // 修复：同上，关闭时不把 ambientBus 拉回 0.70~0.92。
+    if (i.ready && i.ambientBus && this._enabled) {
       const t = i.ctx.currentTime;
       const gain = 0.70 + (0.92 - 0.70) * this._tension;
       i.ambientBus.gain.cancelScheduledValues(t);
@@ -1051,9 +1062,20 @@ export class AmbienceSystem {
 
     // 应用增益（平滑）
     const ct = i.ctx.currentTime;
-    i.ambientBus.gain.cancelScheduledValues(ct);
-    i.ambientBus.gain.setValueAtTime(i.ambientBus.gain.value || 0.70, ct);
-    i.ambientBus.gain.linearRampToValueAtTime(ambientGain, ct + 1.0);
+
+    // 修复：环境音关闭时，绝不能每帧把 ambientBus 拉回 ambientGain —— 否则
+    // setEnabled(false) 的 _fadeOut() 静音会被下一帧的张力映射彻底覆盖，
+    // 导致「环境音永远关不掉」。关闭时保持总线静默（FLOOR），张力计算照常
+    // 进行（_active 保持 true，重开即时恢复），仅增益链路尊重 _enabled。
+    if (!this._enabled) {
+      i.ambientBus.gain.cancelScheduledValues(ct);
+      i.ambientBus.gain.setValueAtTime(Math.max(i.ambientBus.gain.value, FLOOR), ct);
+      i.ambientBus.gain.linearRampToValueAtTime(FLOOR, ct + 0.8);
+    } else {
+      i.ambientBus.gain.cancelScheduledValues(ct);
+      i.ambientBus.gain.setValueAtTime(i.ambientBus.gain.value || 0.70, ct);
+      i.ambientBus.gain.linearRampToValueAtTime(ambientGain, ct + 1.0);
+    }
 
     // 存储更新的鼓间隔/峰值，供下次 _scheduleNext 使用
     this._drumInterval = drumInterval;
@@ -1062,14 +1084,23 @@ export class AmbienceSystem {
 
     // 更新人群层增益。注意：若采样床已接管人群层，这里必须让位 ——
     // 否则会把交叉淡化中的程序化层重新推回来，变成「采样 + 合成」双层嗡鸣。
-    if (this._layers.crowd && this._layers.crowd.g && !(this._beds && this._beds.crowd)) {
+    // 关闭时人群层同样压到静默，避免程序化层绕过 ambientBus 继续发声。
+    if (!this._enabled) {
+      if (this._layers.crowd && this._layers.crowd.g) {
+        try {
+          this._layers.crowd.g.gain.cancelScheduledValues(ct);
+          this._layers.crowd.g.gain.setValueAtTime(Math.max(this._layers.crowd.g.gain.value, FLOOR), ct);
+          this._layers.crowd.g.gain.linearRampToValueAtTime(FLOOR, ct + 0.8);
+        } catch (e) { /* 老层已回收 */ }
+      }
+    } else if (this._layers.crowd && this._layers.crowd.g && !(this._beds && this._beds.crowd)) {
       this._layers.crowd.g.gain.cancelScheduledValues(ct);
       this._layers.crowd.g.gain.setValueAtTime(this._layers.crowd.g.gain.value || 0, ct);
       this._layers.crowd.g.gain.linearRampToValueAtTime(
         envWet * crowdPeak * 0.05, ct + 1.0);
     }
 
-    // 采样环境床随张力重定标（风沙/军阵/行军鼓）
+    // 采样环境床随张力重定标（风沙/军阵/行军鼓）；关闭时同样静默。
     this._applyBedTension();
   }
 
