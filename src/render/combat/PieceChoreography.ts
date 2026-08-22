@@ -435,11 +435,15 @@ export function moveFlourish(piece: any, type: string, t: number): void {
     case PT.ROOK:
       if (sub.driver) sub.driver.rotation.x = -0.20 * k;    // 御者勒缰
       if (sub.spearman) sub.spearman.rotation.x = -0.25 * k; // 长戈前压
+      if (sub.wheelL) sub.wheelL.rotation.x = 7.5 * k;       // 双轮自转（巡航段累积）
+      if (sub.wheelR) sub.wheelR.rotation.x = 7.5 * k;
       break;
     case PT.CANNON:
       if (sub.soldierL) sub.soldierL.rotation.x = -0.30 * k; // 双兵推车
       if (sub.soldierR) sub.soldierR.rotation.x = -0.30 * k;
       if (sub.trebuchet) sub.trebuchet.rotation.z = 0.15 * k; // 抛臂随车颠簸
+      if (sub.wheelL) sub.wheelL.rotation.x = 6.0 * k;        // 推行轮自转
+      if (sub.wheelR) sub.wheelR.rotation.x = 6.0 * k;
       break;
     case PT.KING:
       if (sub.throne) sub.throne.rotation.x = -0.06 * k;  // 龙椅微倾

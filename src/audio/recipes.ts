@@ -1333,6 +1333,40 @@ function applySprint1RealSamples(): void {
 
 applySampleOverlay();
 applySprint1RealSamples();
+applySprint2RealSamples();
+
+/** Sprint2 真实录音接管（R/C 六事件 · Kenney.nl CC0 整包）：
+ *  复用 applySampleOverlay 已用通用键（vox.breath / foley.wheel / foley.wood.creak /
+ *  foley.stone.crush）挂载的采样点，通过 overrideSample / swapFoley 替换为 Sprint2 专属
+ *  真实录音键，避免 addSample 追加造成双响（与 Sprint1 applySprint1RealSamples 同构）。
+ *  缺失（解码失败/未加载）时由 sfx.ts 回退原程序化/通用采样，零回归。
+ *
+ *  落地状态：本环境无法联网取 Kenney 源、无本地 ogg、无离线转码工具，故
+ *  foley.rook.* / foley.cannon.* 的 wav 暂未落盘（详见 sampleBank.ts 头部注释与
+ *  design/audio/sprint1-real-sfx-integration.md §0）。MANIFEST 键已就位；待 Kenney
+ *  源到位即自动接管，无需再改本函数。 */
+function applySprint2RealSamples(): void {
+  // ---- 车 R ----
+  // R idle：轮轴吱呀/木轴摩擦 —— 接管 applySampleOverlay 挂在 rook.idle 的 vox.breath
+  overrideSample('rook.idle', 'C', 'vox.breath', 'foley.rook.idle',
+    { gain: 0.34, rate: 0.94, probability: 0.42 });
+  // R move：双轮滚动+马蹄 —— 替换巡航段 foley.wheel 为专属 foley.rook.move（更重更钝）
+  swapFoley('rook.move.cruise', 'C', 'noise', 'foley.rook.move', { gain: 0.72, rate: 0.92 });
+  // R capture：车轮急刹+戈击金属 —— 在御者吼(vox.shout.drive, hitBus)之上叠加金属垫层
+  trimPeak('rook.capture.clash', 'C', 'bladeClash', 0.72);
+  addSample('rook.capture.clash', 'T', 'foley.rook.capture',
+    { gain: 0.48, rate: 0.90, busTarget: 'hitBus' });
+
+  // ---- 炮 C ----
+  // C idle：木架吱呀+士兵低语 —— 接管 applySampleOverlay 挂在 cannon.idle 的 foley.wood.creak
+  overrideSample('cannon.idle', 'C', 'foley.wood.creak', 'foley.cannon.idle',
+    { gain: 0.40, rate: 0.96, probability: 0.46 });
+  // C move：推行+轮滚 —— 替换巡航段 foley.wheel 为专属 foley.cannon.move（更钝更慢）
+  swapFoley('cannon.move.cruise', 'C', 'footStep', 'foley.cannon.move', { gain: 0.54, rate: 0.86 });
+  // C capture：抛杆破空+巨石落地轰 —— 接管 stoneImpact 的 foley.stone.crush 为专属 foley.cannon.capture
+  overrideSample('cannon.capture.stoneImpact', 'C', 'foley.stone.crush', 'foley.cannon.capture',
+    { gain: 0.72, rate: 1.0, busTarget: 'hitBus' });
+}
 
 /* --------------------------------------------------------------------------
  * 10. SEQUENCES — 演出序列编排

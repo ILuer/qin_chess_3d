@@ -933,6 +933,9 @@ function buildCannon(mp: any, M: any, K: any, side: string): void {
   const Pt = mp.get('trebuchet');// 抛石机本体
   const PL = mp.get('soldierL'); // 左侧士兵
   const PR = mp.get('soldierR'); // 右侧士兵
+  const Pcw = mp.get('counterweight'); // 配重箱（随抛臂反向运动）
+  const Pwl = mp.get('wheelL');  // 推行左轮
+  const Pwr = mp.get('wheelR');  // 推行右轮
 
   const PIV = 0.480;            // 横轴（支点）高度
   // 蓄势态：抛杆后扬，长端（投掷端）在 +Z 后方扬起，
@@ -989,6 +992,23 @@ function buildCannon(mp: any, M: any, K: any, side: string): void {
   Pcart.add(box(0.040, 0.010, 0.010), K.bronzeDark, { pos: [-0.125, 0.140, 0] });
   Pcart.add(cyl(0.006, 0.006, 0.028, 6), K.bronzeDark, { pos: [-0.142, 0.154, 0] });
 
+  // 配重箱（counterweight 子组，挂在 trebuchet 短端 -Z 前方，随抛臂反向运动）
+  if (Pcw) {
+    Pcw.add(box(0.150, 0.120, 0.130), M.woodDeep, { pos: [0, 0, 0] });
+    Pcw.add(box(0.158, 0.040, 0.138), K.bronzeDark, { pos: [0, 0.070, 0] });
+    Pcw.add(box(0.158, 0.040, 0.138), K.bronzeDark, { pos: [0, -0.070, 0] });
+  }
+
+  // 炮推行轮（wheelL/wheelR 子组，小木轮绕轴自转；reuse buildWheel 风格但独立子组）
+  const buildCannonWheel = (Pg: any, x: number): void => {
+    if (!Pg) return;
+    Pg.add(torKeep(0.058, 0.016, 6, 14), M.wood, { pos: [x, 0, 0], rot: [0, Math.PI / 2, 0] });
+    Pg.add(cylKeep(0.030, 0.030, 0.050, 10), M.woodDeep, { pos: [x, 0, 0], rot: [0, 0, Math.PI / 2] });
+    Pg.add(sphKeep(0.022, 8, 6), M.accentDim, { pos: [x * 1.12, 0, 0] });
+  };
+  buildCannonWheel(Pwl, -0.145);
+  buildCannonWheel(Pwr, 0.145);
+
   // 抛杆（蓄势态：长端在 +Z 后方扬起，短端垂向 -Z 前方）
   const off = (LONG - SHORT) / 2;
   Pt.add(cyl(0.016, 0.020, LONG + SHORT, 10), M.wood, {
@@ -1023,13 +1043,11 @@ function buildCannon(mp: any, M: any, K: any, side: string): void {
   Pt.add(sph(0.044, 10, 8), K.leather, { pos: [0, tipY - 0.052, tipZ - 0.052], scale: [1, 0.66, 1.08] });
   Pt.add(sph(0.038, 10, 8), K.stone, { pos: [0, tipY - 0.080, tipZ - 0.052] });
 
-  // 配重箱（悬于短端/前方 -Z 侧，索从抛杆短端端点垂下）
+  // 配重箱（悬于短端/前方 -Z 侧）已由独立 counterweight 子组（Pcw，line 995-1000）承载，
+  // 该子组由 CaptureAction 驱动做反向运动；此处仅保留悬挂索，从抛杆短端垂向配重箱方向。
   const cwY = btmY - 0.030, cwZ = btmZ + 0.006;
   Pt.strut(K.rope, [0, btmY, btmZ], [0.048, cwY + 0.048, cwZ + 0.012], 0.007, 0.007, 6);
   Pt.strut(K.rope, [0, btmY, btmZ], [-0.048, cwY + 0.048, cwZ + 0.012], 0.007, 0.007, 6);
-  Pt.add(box(0.136, 0.106, 0.124), M.woodDeep, { pos: [0, cwY, cwZ] });
-  Pt.add(box(0.140, 0.012, 0.128), M.accentDim, { pos: [0, cwY + 0.038, cwZ] });
-  Pt.add(box(0.140, 0.012, 0.128), M.accentDim, { pos: [0, cwY - 0.038, cwZ] });
 
   // 备用石弹（基座右侧）
   Pt.add(sph(0.038, 10, 8), K.stone, { pos: [0.16, FOOT + 0.044, 0.08] });
@@ -1392,7 +1410,7 @@ const SUBGROUP_JOINTS: Record<string, Record<string, any>> = {
   N: { mount: [0, 0.128, 0], rider: [0, 0.328, 0] },
   B: { robe: [0, 0.368, 0], arms: [0, 0.328, -0.10] },
   R: { horses: [0, 0.168, -0.30], body: [0, 0.288, 0.02], driver: [0.05, 0.378, 0.40], spearman: [-0.05, 0.378, 0.46], wheelL: [-0.26, 0.330, 0], wheelR: [0.26, 0.330, 0] },
-  C: { trebuchet: [0, 0.308, 0], cart: [0, 0.114, 0], soldierL: [-0.25, 0.248, 0.09], soldierR: [0.25, 0.248, 0.09] },
+  C: { trebuchet: [0, 0.308, 0], cart: [0, 0.114, 0], soldierL: [-0.25, 0.248, 0.09], soldierR: [0.25, 0.248, 0.09], counterweight: [0, 0.250, -0.150], wheelL: [-0.145, 0.060, 0.110], wheelR: [0.145, 0.060, 0.110] },
   K: { body: [0, 0.378, 0], throne: [0, 0.028, 0], crown: [0, 0.964, 0], sword: [0.14, 0.434, -0.02], banner: [0, 0.394, 0], rArm: [0.14, 0.46, 0] }
 };
 

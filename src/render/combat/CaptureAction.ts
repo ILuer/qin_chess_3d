@@ -434,6 +434,7 @@ function executeCannon(cd: any, attacker: any, victim: any, fromCell: { file: nu
       onUpdate: (t: number) => {
         // 抛臂拉弦：全程累计，越拉越慢 = 蓄力感（easeOutCubic 已由 step easing 施加）
         if (sg.trebuchet) sg.trebuchet.rotation.z = -0.48 * t;
+        if (sg.counterweight) sg.counterweight.rotation.z = 0.42 * t; // 配重反向上扬（蓄力）
         // 双兵协作：前 1/3 抱石 / 中 1/3 上弦 / 后 1/3 就位警戒
         if (sg.soldierL && sg.soldierR) {
           if (t < 1 / 3) {
@@ -457,6 +458,7 @@ function executeCannon(cd: any, attacker: any, victim: any, fromCell: { file: nu
       easing: animator.EASE.easeInOutCubic,
       onUpdate: (t: number) => {
         if (sg.trebuchet) sg.trebuchet.rotation.z = -0.48;   // 峰值锁定（瞄准期不动）
+        if (sg.counterweight) sg.counterweight.rotation.z = 0.42; // 配重同步锁定
         if (sg.cart) sg.cart.rotation.x = -0.06 * t;         // 双兵压身稳住车架
       }
     });
@@ -484,6 +486,7 @@ function executeCannon(cd: any, attacker: any, victim: any, fromCell: { file: nu
       onUpdate: (t: number) => {
         const swingT = Math.min(1, t / swingRatio);   // 抛臂甩出进度（前 A2 占比）
         if (sg.trebuchet) sg.trebuchet.rotation.z = -0.48 * (1 - swingT) + 0.40 * Math.sin(Math.PI * swingT);
+        if (sg.counterweight) sg.counterweight.rotation.z = 0.42 * (1 - swingT) - 0.36 * Math.sin(Math.PI * swingT); // 配重猛砸（反向）
         if (proj && arc) {
           const flightT = Math.max(0, (t - swingRatio) / (1 - swingRatio));
           arc.getPoint(Math.min(1, flightT), tmp);
@@ -508,6 +511,7 @@ function executeCannon(cd: any, attacker: any, victim: any, fromCell: { file: nu
       onUpdate: (t: number) => {
         const osc = Math.sin(Math.PI * t) * (1 - t);   // 阻尼随动（随动不回弹过冲）
         if (sg.trebuchet) sg.trebuchet.rotation.z = 0.18 * osc;
+        if (sg.counterweight) sg.counterweight.rotation.z = -0.16 * osc; // 配重回摆
         if (sg.cart) sg.cart.rotation.x = -0.10 * (1 - t);
         if (sg.soldierL) sg.soldierL.rotation.x = -0.20 * (1 - t);
         if (sg.soldierR) sg.soldierR.rotation.x = -0.20 * (1 - t);
@@ -515,6 +519,7 @@ function executeCannon(cd: any, attacker: any, victim: any, fromCell: { file: nu
       onComplete: () => {
         // 复位全部子组（幂等）
         if (sg.trebuchet) sg.trebuchet.rotation.z = 0;
+        if (sg.counterweight) sg.counterweight.rotation.z = 0;
         if (sg.cart) sg.cart.rotation.x = 0;
         if (sg.soldierL) sg.soldierL.rotation.x = 0;
         if (sg.soldierR) sg.soldierR.rotation.x = 0;

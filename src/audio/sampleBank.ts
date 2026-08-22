@@ -40,6 +40,15 @@ export const MAX_SAMPLE_BYTES = 12 * 1024 * 1024;
  *  foley.king.move / foley.pawn.idle / foley.pawn.move / foley.pawn.capture /
  *  foley.advisor.idle / foley.advisor.move），磁盘合计 ~0.84MB。CC0 协议记录见
  *  assets/audio/ATTRIBUTION.md。详见 design/audio/sprint1-real-sfx-integration.md。
+ *
+ *  Sprint2 真实录音（R/C 六事件）：沿用同一 Kenney.nl CC0 整包，新增 6 key
+ *  （foley.rook.idle / foley.rook.move / foley.rook.capture / foley.cannon.idle /
+ *  foley.cannon.move / foley.cannon.capture）。R/C 六事件全部为 foley 语义
+ *  （轮轴/轮滚/急刹/木架/推行/巨石落地轰；士兵低语走 foley 布料/噪声层，不新增 vox）。
+ *  落地状态：本环境无法联网取 Kenney 源、且无本地 ogg、无离线转码工具
+ *  （soundfile/numpy 未装且 pip 不可达），故 wav 暂未落盘，MANIFEST 键已先就位；
+ *  待 Kenney 源到位（同 Sprint1 的 kenney-ogg-to-wav.py 流程）即按 recipes.ts
+ *  applySprint2RealSamples() 接管，零代码改动。详见 design/audio/sprint1-real-sfx-integration.md §0 环境约束。
  */
 export const SAMPLE_MANIFEST: Record<string, string> = {
   /* ---- Foley：材质接触（决定「是什么在动」）---- */
@@ -68,6 +77,14 @@ export const SAMPLE_MANIFEST: Record<string, string> = {
   'foley.pawn.capture': 'assets/audio/foley/pawn.capture.wav',   // 戈劈砍破空 + 盾格金属
   'foley.advisor.idle': 'assets/audio/foley/advisor.idle.wav',   // 剑鞘轻碰
   'foley.advisor.move': 'assets/audio/foley/advisor.move.long.wav', // 护卫碎步（双段拼接拉长）
+
+  /* ---- Foley：Sprint2 真实录音（R/C · Kenney.nl CC0 整包 · 待源落地）---- */
+  'foley.rook.idle':    'assets/audio/foley/rook.idle.wav',       // 车·轮轴吱呀/木轴摩擦
+  'foley.rook.move':    'assets/audio/foley/rook.move.wav',       // 车·双轮滚动+马蹄
+  'foley.rook.capture': 'assets/audio/foley/rook.capture.wav',    // 车·车轮急刹+戈击金属
+  'foley.cannon.idle':  'assets/audio/foley/cannon.idle.wav',     // 炮·木架吱呀+士兵低语
+  'foley.cannon.move':  'assets/audio/foley/cannon.move.wav',     // 炮·推行+轮滚
+  'foley.cannon.capture':'assets/audio/foley/cannon.capture.wav', // 炮·抛杆破空+巨石落地轰
 
   /* ---- Vocal：人声/兽声（决定「谁在动、情绪如何」·拟真突破关键）---- */
   'vox.shout.kill':     'assets/audio/vox/shout_kill.wav',      // 「杀！」九人齐吼（A2）
