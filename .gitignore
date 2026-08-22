@@ -28,6 +28,14 @@ desktop.ini
 # 注意：不要在此忽略下划线开头的文件。
 # _headers 是 Cloudflare Pages 的响应头配置，必须入库。
 
+# ---- Sprint 临时构建副本（规避预览进程锁定的 dist/ 时用的替代输出目录）----
+dist-sprint1/
+dist-sprint2/
+dist-sprint3/
+
+# ---- 工作室 SOP 产物（设计/文档/QA 计划不入库，仅本地留档）----
+production/
+
 # ---- 本地验证生成的临时副本（由 dev/transform_phase3.mjs 重新生成，不入库）----
 _qa/p3out/animator_test.mjs
 _qa/p3out/constants_test.mjs

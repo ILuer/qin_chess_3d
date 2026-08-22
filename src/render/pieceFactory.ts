@@ -20,7 +20,7 @@
  *   R: horses | body | driver | spearman
  *   P: body | arm | legs
  *   A: body | arms | sword
- *   N: mount | rider
+ *   N: bodyHorse | legFL | legFR | legBL | legBR | rider
  *   B: robe | arms
  *   公共零件（如 R 车轮）归入 idleGroup 顶层，不作为独立子组。
  *
@@ -455,51 +455,60 @@ function buildPawn(mp: any, M: any, K: any, side: string): void {
  * ============================================================ */
 
 function buildHorse(mp: any, M: any, K: any, side: string): void {
-  const mountP = mp.get('mount');   // 马身 + 头 + 四腿 + 尾（绕马身关节自转）
+  // Sprint 3：拆 mount → bodyHorse（马身/颈/头/鬃/面帘/尾/鞍，绕马身关节自转）
+  // + legFL/legFR/legBL/legBR（各承载一条腿，绕各自髋 hip 锚点自转，四蹄步态）
+  // 腿几何以绝对坐标写入对应子组；buildTemplate 多分组路径对带 joint 的子组
+  // 自动 geometry.translate(-hip) + g.position = hip，使腿绕髋而非棋子根旋转。
+  // 锚点取 strut 起点 hip（见 SUBGROUP_JOINTS.N），非 knee（knee 为中间关节）。
+  const bodyHorse = mp.get('bodyHorse');
+  const legFL = mp.get('legFL');   // 左前腿（髋 [+0.076, 0.300, -0.140]）
+  const legFR = mp.get('legFR');   // 右前腿（髋 [-0.076, 0.300, -0.140]）
+  const legBL = mp.get('legBL');   // 左后腿（髋 [+0.080, 0.300,  0.165]）
+  const legBR = mp.get('legBR');   // 右后腿（髋 [-0.080, 0.300,  0.165]）
   const riderP = mp.get('rider');   // 骑手 + 长戟（绕骑手关节自转）
   const hide = M.leather;
-  // 马身（mount）
-  mountP.add(sph(0.135, 14, 10), hide, { pos: [0, 0.355, 0.015], scale: [0.78, 0.82, 1.42] });
-  mountP.add(sph(0.115, 12, 9), hide, { pos: [0, 0.372, -0.145], scale: [0.86, 0.90, 0.90] });
-  mountP.add(sph(0.120, 12, 9), hide, { pos: [0, 0.358, 0.160], scale: [0.90, 0.95, 0.90] });
+  // 马身（bodyHorse）
+  bodyHorse.add(sph(0.135, 14, 10), hide, { pos: [0, 0.355, 0.015], scale: [0.78, 0.82, 1.42] });
+  bodyHorse.add(sph(0.115, 12, 9), hide, { pos: [0, 0.372, -0.145], scale: [0.86, 0.90, 0.90] });
+  bodyHorse.add(sph(0.120, 12, 9), hide, { pos: [0, 0.358, 0.160], scale: [0.90, 0.95, 0.90] });
   // 颈 + 头 + 口鼻 + 耳
-  mountP.strut(hide, [0, 0.600, -0.240], [0, 0.415, -0.130], 0.050, 0.080, 10);
-  mountP.add(sph(0.055, 10, 8), hide, { pos: [0, 0.600, -0.282], scale: [0.80, 0.95, 1.42] });
-  mountP.add(sph(0.036, 8, 6), hide, { pos: [0, 0.566, -0.344], scale: [0.85, 0.80, 1.00] });
-  mountP.add(cyl(0.000, 0.018, 0.044, 6), hide, { pos: [0.028, 0.652, -0.244], rot: [-0.2, 0, 0.15] });
-  mountP.add(cyl(0.000, 0.018, 0.044, 6), hide, { pos: [-0.028, 0.652, -0.244], rot: [-0.2, 0, -0.15] });
+  bodyHorse.strut(hide, [0, 0.600, -0.240], [0, 0.415, -0.130], 0.050, 0.080, 10);
+  bodyHorse.add(sph(0.055, 10, 8), hide, { pos: [0, 0.600, -0.282], scale: [0.80, 0.95, 1.42] });
+  bodyHorse.add(sph(0.036, 8, 6), hide, { pos: [0, 0.566, -0.344], scale: [0.85, 0.80, 1.00] });
+  bodyHorse.add(cyl(0.000, 0.018, 0.044, 6), hide, { pos: [0.028, 0.652, -0.244], rot: [-0.2, 0, 0.15] });
+  bodyHorse.add(cyl(0.000, 0.018, 0.044, 6), hide, { pos: [-0.028, 0.652, -0.244], rot: [-0.2, 0, -0.15] });
   // 鬃毛（三角片列）
-  mountP.add(box(0.014, 0.058, 0.048), K.hair, { pos: [0, 0.648, -0.232], rot: [0.45, 0, 0] });
-  mountP.add(box(0.014, 0.062, 0.048), K.hair, { pos: [0, 0.610, -0.190], rot: [0.55, 0, 0] });
-  mountP.add(box(0.014, 0.058, 0.048), K.hair, { pos: [0, 0.564, -0.152], rot: [0.62, 0, 0] });
+  bodyHorse.add(box(0.014, 0.058, 0.048), K.hair, { pos: [0, 0.648, -0.232], rot: [0.45, 0, 0] });
+  bodyHorse.add(box(0.014, 0.062, 0.048), K.hair, { pos: [0, 0.610, -0.190], rot: [0.55, 0, 0] });
+  bodyHorse.add(box(0.014, 0.058, 0.048), K.hair, { pos: [0, 0.564, -0.152], rot: [0.62, 0, 0] });
   // 马面帘
-  mountP.add(box(0.060, 0.075, 0.018), M.armor, { pos: [0, 0.610, -0.342], rot: [0.12, 0, 0] });
-  // 四腿（anatomy 大腿/小腿/蹄；FL raised = 动势，FR/BL/BR 站姿）
-  // 左前腿 FL 抬起：大腿 hip→knee + 小腿 knee→ankle + 蹄
-  mountP.strut(hide, [0.076, 0.300, -0.140], [0.094, 0.220, -0.200], 0.034, 0.028, 8); // 大腿
-  mountP.add(sph(0.024, 8, 6), hide, { pos: [0.094, 0.220, -0.200] });                   // 膝
-  mountP.strut(hide, [0.094, 0.220, -0.200], [0.108, FOOT + 0.018, -0.262], 0.024, 0.020, 8); // 小腿
+  bodyHorse.add(box(0.060, 0.075, 0.018), M.armor, { pos: [0, 0.610, -0.342], rot: [0.12, 0, 0] });
+  // 四腿（anatomy 大腿/小腿/蹄；FL 抬起动势，FR/BL/BR 站姿）
+  // 肌肉写实：膝 sph 略增粗、大腿小腿 strut 半径微调（零 mesh 增量，不引入金属件）
+  // 左前腿 FL 抬起：大腿 hip→knee + 膝球 + 小腿 knee→ankle + 蹄
+  legFL.strut(hide, [0.076, 0.300, -0.140], [0.094, 0.220, -0.200], 0.040, 0.032, 8); // 大腿（略粗）
+  legFL.add(sph(0.030, 8, 6), hide, { pos: [0.094, 0.220, -0.200] });                   // 膝（略粗）
+  legFL.strut(hide, [0.094, 0.220, -0.200], [0.108, FOOT + 0.018, -0.262], 0.030, 0.024, 8); // 小腿（略粗）
+  legFL.add(box(0.034, 0.018, 0.040), M.hoofSole, { pos: [+0.108, FOOT + 0.009, -0.262] }); // 蹄
   // 右前腿 FR 落地
-  mountP.strut(hide, [-0.076, 0.300, -0.140], [-0.080, 0.220, -0.155], 0.034, 0.028, 8);
-  mountP.add(sph(0.024, 8, 6), hide, { pos: [-0.080, 0.220, -0.155] });
-  mountP.strut(hide, [-0.080, 0.220, -0.155], [-0.082, FOOT + 0.018, -0.170], 0.024, 0.020, 8);
+  legFR.strut(hide, [-0.076, 0.300, -0.140], [-0.080, 0.220, -0.155], 0.040, 0.032, 8);
+  legFR.add(sph(0.030, 8, 6), hide, { pos: [-0.080, 0.220, -0.155] });
+  legFR.strut(hide, [-0.080, 0.220, -0.155], [-0.082, FOOT + 0.018, -0.170], 0.030, 0.024, 8);
+  legFR.add(box(0.034, 0.018, 0.040), M.hoofSole, { pos: [-0.082, FOOT + 0.009, -0.170] });
   // 左后腿 BL 落地
-  mountP.strut(hide, [0.080, 0.300, 0.165], [0.084, 0.220, 0.188], 0.034, 0.028, 8);
-  mountP.add(sph(0.024, 8, 6), hide, { pos: [0.084, 0.220, 0.188] });
-  mountP.strut(hide, [0.084, 0.220, 0.188], [0.086, FOOT + 0.018, 0.208], 0.024, 0.020, 8);
+  legBL.strut(hide, [0.080, 0.300, 0.165], [0.084, 0.220, 0.188], 0.040, 0.032, 8);
+  legBL.add(sph(0.030, 8, 6), hide, { pos: [0.084, 0.220, 0.188] });
+  legBL.strut(hide, [0.084, 0.220, 0.188], [0.086, FOOT + 0.018, 0.208], 0.030, 0.024, 8);
+  legBL.add(box(0.034, 0.018, 0.040), M.hoofSole, { pos: [+0.086, FOOT + 0.009,  0.208] });
   // 右后腿 BR 落地
-  mountP.strut(hide, [-0.080, 0.300, 0.165], [-0.084, 0.220, 0.188], 0.034, 0.028, 8);
-  mountP.add(sph(0.024, 8, 6), hide, { pos: [-0.084, 0.220, 0.188] });
-  mountP.strut(hide, [-0.084, 0.220, 0.188], [-0.086, FOOT + 0.018, 0.208], 0.024, 0.020, 8);
-  // 蹄（4 蹄，落地蹄底用 hoofSole 材质，独立件 → 仍并入 mount matte 族）
-  mountP.add(box(0.034, 0.018, 0.040), M.hoofSole, { pos: [+0.108, FOOT + 0.009, -0.262] }); // FL
-  mountP.add(box(0.034, 0.018, 0.040), M.hoofSole, { pos: [-0.082, FOOT + 0.009, -0.170] }); // FR
-  mountP.add(box(0.034, 0.018, 0.040), M.hoofSole, { pos: [+0.086, FOOT + 0.009,  0.208] }); // BL
-  mountP.add(box(0.034, 0.018, 0.040), M.hoofSole, { pos: [-0.086, FOOT + 0.009,  0.208] }); // BR
+  legBR.strut(hide, [-0.080, 0.300, 0.165], [-0.084, 0.220, 0.188], 0.040, 0.032, 8);
+  legBR.add(sph(0.030, 8, 6), hide, { pos: [-0.084, 0.220, 0.188] });
+  legBR.strut(hide, [-0.084, 0.220, 0.188], [-0.086, FOOT + 0.018, 0.208], 0.030, 0.024, 8);
+  legBR.add(box(0.034, 0.018, 0.040), M.hoofSole, { pos: [-0.086, FOOT + 0.009,  0.208] });
   // 尾
-  mountP.strut(K.hair, [0, 0.420, 0.240], [0, 0.196, 0.332], 0.030, 0.010, 8);
+  bodyHorse.strut(K.hair, [0, 0.420, 0.240], [0, 0.196, 0.332], 0.030, 0.010, 8);
   // 鞍
-  mountP.add(cyl(0.098, 0.108, 0.052, 12), M.cloth, { pos: [0, 0.438, 0.020], scale: [1, 1, 1.45] });
+  bodyHorse.add(cyl(0.098, 0.108, 0.052, 12), M.cloth, { pos: [0, 0.438, 0.020], scale: [1, 1, 1.45] });
 
   /* ---- 骑手（rider，anatomy 完整覆盖）---- */
   // 腿（大腿外侧夹马身，小腿下垂贴马肋）
@@ -1407,7 +1416,7 @@ const SUBGROUP_JOINTS: Record<string, Record<string, any>> = {
     spear: [0.170, 0.440, -0.020]    // 戈握把（作为 armR 子节点，随右臂挥动）
   },
   A: { body: [0, 0.334, 0], arms: [0, 0.378, 0], sword: [0, 0.328, -0.17], shield: [0, 0.45, -0.20] },
-  N: { mount: [0, 0.128, 0], rider: [0, 0.328, 0] },
+  N: { bodyHorse: [0, 0.128, 0], legFL: [+0.076, 0.300, -0.140], legFR: [-0.076, 0.300, -0.140], legBL: [+0.080, 0.300, 0.165], legBR: [-0.080, 0.300, 0.165], rider: [0, 0.328, 0] },
   B: { robe: [0, 0.368, 0], arms: [0, 0.328, -0.10] },
   R: { horses: [0, 0.168, -0.30], body: [0, 0.288, 0.02], driver: [0.05, 0.378, 0.40], spearman: [-0.05, 0.378, 0.46], wheelL: [-0.26, 0.330, 0], wheelR: [0.26, 0.330, 0] },
   C: { trebuchet: [0, 0.308, 0], cart: [0, 0.114, 0], soldierL: [-0.25, 0.248, 0.09], soldierR: [0.25, 0.248, 0.09], counterweight: [0, 0.250, -0.150], wheelL: [-0.145, 0.060, 0.110], wheelR: [0.145, 0.060, 0.110] },

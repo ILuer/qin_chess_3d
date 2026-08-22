@@ -211,7 +211,7 @@ export function windUp(piece: any, type: string, t: number): void {
       if (sub.armR) sub.armR.rotation.x = -0.25 * t;  // 戈后收（右臂持戈）
       break;
     case PT.HORSE:
-      if (sub.mount) sub.mount.rotation.x = 0.1 * t;  // 马首微扬
+      if (sub.bodyHorse) sub.bodyHorse.rotation.x = 0.1 * t;  // 马首微扬
       if (sub.rider) sub.rider.rotation.x = -0.2 * t; // 骑手提戟
       break;
     case PT.ELEPHANT:
@@ -263,7 +263,7 @@ export function strike(piece: any, type: string, victimPos: any, t: number): voi
       break;
     case PT.HORSE:
       if (sub.rider) sub.rider.rotation.x = -0.75 * k; // 骑手长戟下劈
-      if (sub.mount) sub.mount.rotation.x = -0.35 * k;  // 马身前扑
+      if (sub.bodyHorse) sub.bodyHorse.rotation.x = -0.35 * k;  // 马身前扑
       break;
     case PT.ELEPHANT:
       if (sub.arms) sub.arms.rotation.z = 0.75 * k;   // 宽袖横扫
@@ -311,7 +311,7 @@ export function settle(piece: any, type: string, t: number): void {
       break;
     case PT.HORSE:
       if (sub.rider) sub.rider.rotation.x = sub.rider.rotation.x * damp;
-      if (sub.mount) sub.mount.rotation.x = sub.mount.rotation.x * damp;
+      if (sub.bodyHorse) sub.bodyHorse.rotation.x = sub.bodyHorse.rotation.x * damp;
       break;
     case PT.ELEPHANT:
       if (sub.arms) sub.arms.rotation.z = sub.arms.rotation.z * damp;
@@ -422,8 +422,14 @@ export function moveFlourish(piece: any, type: string, t: number): void {
       if (sub.legL) sub.legL.rotation.x = -0.16 * k;
       break;
     case PT.HORSE:
-      if (sub.mount) sub.mount.rotation.x = -0.22 * k;  // 马身前扑
-      if (sub.rider) sub.rider.rotation.x = -0.25 * k;  // 骑手压身
+      if (sub.bodyHorse) sub.bodyHorse.rotation.x = 0.1 * Math.sin(Math.PI * t);   // 马首微扬（保留，sin 包络无缝衔接）
+      // ★ Sprint 3：四腿对角同相步态（trot）。FL/BR 同相、FR/BL 反相，
+      //   绕各自髋 hip 锚点 rotation.x 摆动；峰值 0.38 在 t=0.5，起止归零。
+      if (sub.legFL) sub.legFL.rotation.x = 0.38 * Math.sin(Math.PI * t);
+      if (sub.legBR) sub.legBR.rotation.x = 0.38 * Math.sin(Math.PI * t);  // 对角同相
+      if (sub.legFR) sub.legFR.rotation.x = -0.38 * Math.sin(Math.PI * t);
+      if (sub.legBL) sub.legBL.rotation.x = -0.38 * Math.sin(Math.PI * t);  // 另一对角反相
+      if (sub.rider) sub.rider.rotation.x = -0.25 * k;  // 骑手压身（保留）
       break;
     case PT.ELEPHANT:
       if (sub.arms) sub.arms.rotation.z = 0.22 * k;     // 宽袖摆动
@@ -456,7 +462,7 @@ export function moveFlourish(piece: any, type: string, t: number): void {
 /** switch 回退用的移动通道清单（与 resetMovePose 的归零集合一致） */
 const _MOVE_FALLBACK_CHANNELS: Record<string, string[]> = {
   [PT.PAWN]:     ['armR.rotation.x', 'armL.rotation.x', 'legR.rotation.x', 'legL.rotation.x'],
-  [PT.HORSE]:    ['mount.rotation.x', 'rider.rotation.x'],
+  [PT.HORSE]:    ['mount.rotation.x', 'rider.rotation.x', 'legFL.rotation.x', 'legFR.rotation.x', 'legBL.rotation.x', 'legBR.rotation.x'],
   [PT.ELEPHANT]: ['arms.rotation.z', 'robe.rotation.x'],
   [PT.ADVISOR]:  ['sword.rotation.z', 'shield.rotation.x'],
   [PT.ROOK]:     ['driver.rotation.x', 'spearman.rotation.x', 'wheelL.rotation.x', 'wheelR.rotation.x'],
@@ -538,8 +544,12 @@ export function resetMovePose(piece: any, type: string): void {
       if (sub.shield) sub.shield.rotation.x = 0;
       break;
     case PT.HORSE:
-      if (sub.mount) sub.mount.rotation.x = 0;
+      if (sub.bodyHorse) sub.bodyHorse.rotation.x = 0;
       if (sub.rider) sub.rider.rotation.x = 0;
+      if (sub.legFL) sub.legFL.rotation.x = 0;  // Sprint 3：四腿归零，避免走子残留旋转
+      if (sub.legFR) sub.legFR.rotation.x = 0;
+      if (sub.legBL) sub.legBL.rotation.x = 0;
+      if (sub.legBR) sub.legBR.rotation.x = 0;
       break;
     case PT.ELEPHANT:
       if (sub.arms) sub.arms.rotation.z = 0;

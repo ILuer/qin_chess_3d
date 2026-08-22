@@ -325,7 +325,7 @@ export const DISSOLVE_POSE = {
     desc: '前扑',
     rotX: 0, liftY: 0.03,
     subGroupActions: {
-      mount:  { rotX: +0.5 },
+      bodyHorse:  { rotX: +0.5 },
       rider:  { rotX: +0.4 }
     }
   },
@@ -439,15 +439,15 @@ export const IDLE_PIECE = {
     desc: '扬前身 + 骑手对位后仰（N）',
     breathe: 0.020, sway: 0.026,
     l1: [
-      // 设计稿 §120：mount.x 摆频须提升至 0.45Hz 以上近似奔跑感（原 0.26 违规）
-      ['mount', 'x', -0.105, 0.58, 0],
+      // 设计稿 §120：bodyHorse.x 摆频须提升至 0.45Hz 以上近似奔跑感（原 0.26 违规）
+      ['bodyHorse', 'x', -0.105, 0.58, 0],
       ['rider', 'x', 0.062, 0.58, 0],
       ['rider', 'z', 0.048, 0.58, 1.0]
     ],
     l2: [
-      ['mount', 'x', -0.090, 3.6]
+      ['bodyHorse', 'x', -0.090, 3.6]
     ],
-    // windUp 写 mount.x / rider.x → 只归零 rider.z
+    // windUp 写 bodyHorse.x / rider.x → 只归零 rider.z
     zeroChannels: ['rider.rotation.z']
   },
   [PT.ELEPHANT]: {
@@ -566,19 +566,19 @@ export const POSE_TABLE: Record<string, Record<string, any>> = {
   },
   [PT.HORSE]: {
     idle: {
-      anticipation: { sub: { mount: { rotation: { x: -0.048 } } }, duration: 0.87, ease: 'easeOutQuad', channels: ['mount.rotation.x'] },
-      action: { sub: { mount: { rotation: { x: -0.040 } } }, duration: 6.5, ease: 'easeOutQuad', channels: ['mount.rotation.x'] },
+      anticipation: { sub: { bodyHorse: { rotation: { x: -0.048 } } }, duration: 0.87, ease: 'easeOutQuad', channels: ['bodyHorse.rotation.x'] },
+      action: { sub: { bodyHorse: { rotation: { x: -0.040 } } }, duration: 6.5, ease: 'easeOutQuad', channels: ['bodyHorse.rotation.x'] },
       recovery: { sub: { rider: { rotation: { z: 0 } } }, duration: 0.5, ease: 'easeInOutQuad', channels: ['rider.rotation.z'] }
     },
     move: {
       anticipation: { sub: { rider: { rotation: { x: -0.10 } } }, duration: 0.14, ease: 'easeOutQuad', channels: ['rider.rotation.x'] },
-      action: { sub: { mount: { rotation: { x: -0.22 } }, rider: { rotation: { x: -0.25 } } }, duration: 0.08, ease: 'easeInCubic', channels: ['mount.rotation.x', 'rider.rotation.x'] },
-      recovery: { sub: { mount: { rotation: { x: 0 } }, rider: { rotation: { x: 0 } } }, duration: 0.30, ease: 'easeInOutQuad', channels: ['mount.rotation.x', 'rider.rotation.x'] }
+      action: { sub: { bodyHorse: { rotation: { x: -0.22 } }, rider: { rotation: { x: -0.25 } } }, duration: 0.08, ease: 'easeInCubic', channels: ['bodyHorse.rotation.x', 'rider.rotation.x'] },
+      recovery: { sub: { bodyHorse: { rotation: { x: 0 } }, rider: { rotation: { x: 0 } } }, duration: 0.30, ease: 'easeInOutQuad', channels: ['bodyHorse.rotation.x', 'rider.rotation.x'] }
     },
     capture: {
-      anticipation: { sub: { mount: { rotation: { x: 0.1 } }, rider: { rotation: { x: -0.2 } } }, duration: 0.15, ease: 'easeOutQuad', channels: ['mount.rotation.x', 'rider.rotation.x'] },
-      action: { sub: { rider: { rotation: { x: -0.75 } }, mount: { rotation: { x: -0.35 } } }, duration: 0.09, ease: 'easeInCubic', channels: ['rider.rotation.x', 'mount.rotation.x'] },
-      recovery: { sub: { rider: { rotation: { x: 0 } }, mount: { rotation: { x: 0 } } }, duration: 0.28, ease: 'easeInOutQuad', channels: ['rider.rotation.x', 'mount.rotation.x'] }
+      anticipation: { sub: { bodyHorse: { rotation: { x: 0.1 } }, rider: { rotation: { x: -0.2 } } }, duration: 0.15, ease: 'easeOutQuad', channels: ['bodyHorse.rotation.x', 'rider.rotation.x'] },
+      action: { sub: { rider: { rotation: { x: -0.75 } }, bodyHorse: { rotation: { x: -0.35 } } }, duration: 0.09, ease: 'easeInCubic', channels: ['rider.rotation.x', 'bodyHorse.rotation.x'] },
+      recovery: { sub: { rider: { rotation: { x: 0 } }, bodyHorse: { rotation: { x: 0 } } }, duration: 0.28, ease: 'easeInOutQuad', channels: ['rider.rotation.x', 'bodyHorse.rotation.x'] }
     }
   },
   [PT.ELEPHANT]: {
