@@ -1162,6 +1162,7 @@ function buildKing(mp: any, M: any, K: any, side: string): void {
   const Psword = mp.get('sword'); // 佩剑（windUp/strike/settle）
   const Pbanner = mp.get('banner'); // 帅旗（待机旌旗微动）
   const Pr = mp.get('rArm');      // 右臂+右手（契约 2.1 新增：待机抚扶手）
+  const Pcape = mp.get('capeHem'); // 披风下摆（Sprint5 写实：绕肩后关节独立飘动）
 
   const SEAT_Y = FOOT + 0.065; // 龙椅座位高度（路径 B：人物几何零改动，锚点不变）
   const BODY_BOT = SEAT_Y + 0.020; // 人物臀部坐在椅面上
@@ -1294,8 +1295,11 @@ function buildKing(mp: any, M: any, K: any, side: string): void {
   Pb.add(box(0.062, 0.046, 0.044), M.accent, { pos: [-0.174, PY(0.480), -0.020] });
 
   // 披风（自肩后垂落到椅背外；下摆收在 piece-y≈0.05 之上，避免插穿棋盘面/踏脚）
+  // Sprint5 写实：几何整体移入独立 capeHem 子组，绕肩后关节 [0,0.420,-0.010] 旋转。
+  // 做法：Pcape 组先 position 到关节点，几何顶点整体平移 -关节点，使旋转枢轴正确。
   // LatheGeometry profile y → piece-local y = profile_y - FOOT。设计 piece-y 直接给，
   // 故 profile y = piece_y + FOOT。
+  const capeJx = 0, capeJy = FOOT + 0.420, capeJz = -0.010; // 关节绝对坐标
   const capePts = [
     new THREE.Vector2(0.130, PY(0.500)),   // piece y 0.500 肩部
     new THREE.Vector2(0.168, PY(0.380)),   // piece y 0.380 背中部
@@ -1303,10 +1307,9 @@ function buildKing(mp: any, M: any, K: any, side: string): void {
     new THREE.Vector2(0.222, PY(0.110)),   // piece y 0.110 膝部
     new THREE.Vector2(0.232, PY(0.050))    // piece y 0.050 下摆
   ];
-  Pb.add(
-    new THREE.LatheGeometry(capePts, 18, -Math.PI * 0.52, Math.PI * 1.04),
-    M.capeCloth, {}
-  );
+  const capeGeo = new THREE.LatheGeometry(capePts, 18, -Math.PI * 0.52, Math.PI * 1.04);
+  capeGeo.translate(-capeJx, -capeJy, -capeJz); // 顶点平移到关节局部空间
+  Pcape.add(capeGeo, M.capeCloth, { pos: [capeJx, capeJy, capeJz] }); // 组定位回关节点
 
   // —— 左手（anatomy 大臂 + 小臂 + 手，搭左扶手）——
   // 大臂：肩 → 肘（肩源 piece(-0.14, 0.48, 0) → 肘 piece(-0.16, 0.36, 0.04)）
@@ -1435,7 +1438,7 @@ const SUBGROUP_JOINTS: Record<string, Record<string, any>> = {
   B: { bodyRobe: [0, 0.368, 0], hem: [0, 0.200, 0], arms: [0, 0.328, -0.10] },
   R: { horses: [0, 0.168, -0.30], body: [0, 0.288, 0.02], driver: [0.05, 0.378, 0.40], spearman: [-0.05, 0.378, 0.46], wheelL: [-0.26, 0.330, 0], wheelR: [0.26, 0.330, 0] },
   C: { trebuchet: [0, 0.308, 0], cart: [0, 0.114, 0], soldierL: [-0.25, 0.248, 0.09], soldierR: [0.25, 0.248, 0.09], counterweight: [0, 0.250, -0.150], wheelL: [-0.145, 0.060, 0.110], wheelR: [0.145, 0.060, 0.110] },
-  K: { body: [0, 0.378, 0], throne: [0, 0.028, 0], crown: [0, 0.964, 0], sword: [0.14, 0.434, -0.02], banner: [0, 0.394, 0], rArm: [0.14, 0.46, 0] }
+  K: { body: [0, 0.378, 0], throne: [0, 0.028, 0], crown: [0, 0.964, 0], sword: [0.14, 0.434, -0.02], banner: [0, 0.394, 0], rArm: [0.14, 0.46, 0], capeHem: [0, 0.420, -0.010] }
 };
 
 /**

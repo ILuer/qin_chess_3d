@@ -232,6 +232,7 @@ export function windUp(piece: any, type: string, t: number): void {
     case PT.KING:
       if (sub.sword) sub.sword.rotation.z = -0.25 * t;
       if (sub.throne) sub.throne.rotation.x = -0.1 * t;
+      if (sub.capeHem) sub.capeHem.rotation.z = 0.05 * t;   // 披风蓄势微扬
       break;
     default: break;
   }
@@ -280,6 +281,7 @@ export function strike(piece: any, type: string, victimPos: any, t: number): voi
     case PT.KING:
       if (sub.sword) sub.sword.rotation.z = -0.4 * k;  // 短促前压
       if (sub.throne) sub.throne.rotation.x = -0.15 * k;
+      if (sub.capeHem) sub.capeHem.rotation.z = 0.14 * k;  // 披风随挥剑翻飞
       break;
     default: break;
   }
@@ -332,6 +334,7 @@ export function settle(piece: any, type: string, t: number): void {
     case PT.KING:
       if (sub.sword) sub.sword.rotation.z = sub.sword.rotation.z * damp;
       if (sub.throne) sub.throne.rotation.x = sub.throne.rotation.x * damp;
+      if (sub.capeHem) sub.capeHem.rotation.z = sub.capeHem.rotation.z * damp;  // 披风余摆阻尼收敛
       break;
     default: break;
   }
@@ -456,6 +459,7 @@ export function moveFlourish(piece: any, type: string, t: number): void {
     case PT.KING:
       if (sub.throne) sub.throne.rotation.x = -0.06 * k;  // 龙椅微倾
       if (sub.sword) sub.sword.rotation.z = -0.10 * k;    // 王剑前压
+      if (sub.capeHem) sub.capeHem.rotation.z = 0.10 * k; // 披风随步辇飘动
       break;
     default: break;
   }
@@ -464,12 +468,12 @@ export function moveFlourish(piece: any, type: string, t: number): void {
 /** switch 回退用的移动通道清单（与 resetMovePose 的归零集合一致） */
 const _MOVE_FALLBACK_CHANNELS: Record<string, string[]> = {
   [PT.PAWN]:     ['armR.rotation.x', 'armL.rotation.x', 'legR.rotation.x', 'legL.rotation.x'],
-  [PT.HORSE]:    ['mount.rotation.x', 'rider.rotation.x', 'legFL.rotation.x', 'legFR.rotation.x', 'legBL.rotation.x', 'legBR.rotation.x'],
-  [PT.ELEPHANT]: ['arms.rotation.z', 'robe.rotation.x'],
+  [PT.HORSE]:    ['bodyHorse.rotation.x', 'rider.rotation.x', 'legFL.rotation.x', 'legFR.rotation.x', 'legBL.rotation.x', 'legBR.rotation.x'],
+  [PT.ELEPHANT]: ['arms.rotation.z', 'bodyRobe.rotation.x', 'hem.rotation.x', 'hem.rotation.z'],
   [PT.ADVISOR]:  ['sword.rotation.z', 'shield.rotation.x'],
   [PT.ROOK]:     ['driver.rotation.x', 'spearman.rotation.x', 'wheelL.rotation.x', 'wheelR.rotation.x'],
   [PT.CANNON]:   ['soldierL.rotation.x', 'soldierR.rotation.x', 'trebuchet.rotation.z'],
-  [PT.KING]:     ['throne.rotation.x', 'sword.rotation.z']
+  [PT.KING]:     ['throne.rotation.x', 'sword.rotation.z', 'capeHem.rotation.z']
 };
 
 /**
@@ -576,6 +580,7 @@ export function resetMovePose(piece: any, type: string): void {
     case PT.KING:
       if (sub.throne) sub.throne.rotation.x = 0;
       if (sub.sword) sub.sword.rotation.z = 0;
+      if (sub.capeHem) sub.capeHem.rotation.z = 0;
       break;
     default: break;
   }

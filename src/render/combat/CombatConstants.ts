@@ -659,13 +659,13 @@ export const POSE_TABLE: Record<string, Record<string, any>> = {
     },
     move: {
       anticipation: { sub: { throne: { rotation: { x: 0.06 } }, banner: { rotation: { z: 0.04 } } }, duration: 0.14, ease: 'easeOutQuad', channels: ['throne.rotation.x', 'banner.rotation.z'] },
-      action: { sub: { throne: { rotation: { x: -0.06 } }, sword: { rotation: { z: -0.10 } }, banner: { rotation: { z: 0.06 } } }, duration: 0.12, ease: 'easeInCubic', channels: ['throne.rotation.x', 'sword.rotation.z', 'banner.rotation.z'] },
-      recovery: { sub: { throne: { rotation: { x: 0 } }, sword: { rotation: { z: 0 } }, banner: { rotation: { z: 0 } } }, duration: 0.30, ease: 'easeInOutQuad', channels: ['throne.rotation.x', 'sword.rotation.z', 'banner.rotation.z'] }
+      action: { sub: { throne: { rotation: { x: -0.06 } }, sword: { rotation: { z: -0.10 } }, banner: { rotation: { z: 0.06 } }, capeHem: { rotation: { z: 0.10 } } }, duration: 0.12, ease: 'easeInCubic', channels: ['throne.rotation.x', 'sword.rotation.z', 'banner.rotation.z', 'capeHem.rotation.z'] },
+      recovery: { sub: { throne: { rotation: { x: 0 } }, sword: { rotation: { z: 0 } }, banner: { rotation: { z: 0 } }, capeHem: { rotation: { z: 0 } } }, duration: 0.30, ease: 'easeInOutQuad', channels: ['throne.rotation.x', 'sword.rotation.z', 'banner.rotation.z', 'capeHem.rotation.z'] }
     },
     capture: {
       anticipation: { sub: { sword: { rotation: { z: -0.25 } }, throne: { rotation: { x: -0.10 } }, banner: { rotation: { z: -0.12 } } }, duration: 0.17, ease: 'easeOutQuad', channels: ['sword.rotation.z', 'throne.rotation.x', 'banner.rotation.z'] },
-      action: { sub: { sword: { rotation: { z: -0.40 } }, throne: { rotation: { x: -0.15 } }, banner: { rotation: { z: -0.30 } }, rArm: { rotation: { z: -0.10 } } }, duration: 0.08, ease: 'easeInCubic', channels: ['sword.rotation.z', 'throne.rotation.x', 'banner.rotation.z', 'rArm.rotation.z'] },
-      recovery: { sub: { sword: { rotation: { z: 0 } }, throne: { rotation: { x: 0 } }, banner: { rotation: { z: 0 } }, rArm: { rotation: { z: 0 } } }, duration: 0.30, ease: 'easeInOutQuad', channels: ['sword.rotation.z', 'throne.rotation.x', 'banner.rotation.z', 'rArm.rotation.z'] }
+      action: { sub: { sword: { rotation: { z: -0.40 } }, throne: { rotation: { x: -0.15 } }, banner: { rotation: { z: -0.30 } }, rArm: { rotation: { z: -0.10 } }, capeHem: { rotation: { z: 0.14 } } }, duration: 0.08, ease: 'easeInCubic', channels: ['sword.rotation.z', 'throne.rotation.x', 'banner.rotation.z', 'rArm.rotation.z', 'capeHem.rotation.z'] },
+      recovery: { sub: { sword: { rotation: { z: 0 } }, throne: { rotation: { x: 0 } }, banner: { rotation: { z: 0 } }, rArm: { rotation: { z: 0 } }, capeHem: { rotation: { z: 0 } } }, duration: 0.30, ease: 'easeInOutQuad', channels: ['sword.rotation.z', 'throne.rotation.x', 'banner.rotation.z', 'rArm.rotation.z', 'capeHem.rotation.z'] }
     }
   }
 };
