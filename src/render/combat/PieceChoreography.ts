@@ -216,7 +216,7 @@ export function windUp(piece: any, type: string, t: number): void {
       break;
     case PT.ELEPHANT:
       if (sub.arms) sub.arms.rotation.z = -0.3 * t;   // 袖收紧
-      if (sub.robe) sub.robe.rotation.x = 0.15 * t;   // 袍角张开
+      if (sub.bodyRobe) sub.bodyRobe.rotation.x = 0.15 * t;   // 袍角张开
       break;
     case PT.ADVISOR:
       if (sub.sword) sub.sword.rotation.z = -0.4 * t; // 拔剑预位
@@ -267,7 +267,7 @@ export function strike(piece: any, type: string, victimPos: any, t: number): voi
       break;
     case PT.ELEPHANT:
       if (sub.arms) sub.arms.rotation.z = 0.75 * k;   // 宽袖横扫
-      if (sub.robe) sub.robe.rotation.z = 0.40 * k;   // 袍角翻飞
+      if (sub.bodyRobe) sub.bodyRobe.rotation.z = 0.40 * k;   // 袍角翻飞
       break;
     case PT.ADVISOR:
       if (sub.sword) sub.sword.rotation.z = -0.85 * k; // 拔剑下斩
@@ -315,7 +315,8 @@ export function settle(piece: any, type: string, t: number): void {
       break;
     case PT.ELEPHANT:
       if (sub.arms) sub.arms.rotation.z = sub.arms.rotation.z * damp;
-      if (sub.robe) { sub.robe.rotation.z = sub.robe.rotation.z * damp; sub.robe.rotation.x = sub.robe.rotation.x * damp; }
+      if (sub.bodyRobe) { sub.bodyRobe.rotation.z = sub.bodyRobe.rotation.z * damp; sub.bodyRobe.rotation.x = sub.bodyRobe.rotation.x * damp; }
+      if (sub.hem) { sub.hem.rotation.z = sub.hem.rotation.z * damp; sub.hem.rotation.x = sub.hem.rotation.x * damp; }  // 下摆余摆阻尼
       break;
     case PT.ADVISOR:
       if (sub.sword) sub.sword.rotation.z = sub.sword.rotation.z * damp;
@@ -433,7 +434,8 @@ export function moveFlourish(piece: any, type: string, t: number): void {
       break;
     case PT.ELEPHANT:
       if (sub.arms) sub.arms.rotation.z = 0.22 * k;     // 宽袖摆动
-      if (sub.robe) sub.robe.rotation.x = 0.15 * k;     // 袍角微扬
+      if (sub.bodyRobe) sub.bodyRobe.rotation.x = 0.15 * k;     // 袍角微扬
+      if (sub.hem) sub.hem.rotation.x = 0.22 * k;       // 下摆随行飘动
       break;
     case PT.ADVISOR:
       if (sub.sword) sub.sword.rotation.z = -0.12 * k;  // 稳剑于前
@@ -553,7 +555,8 @@ export function resetMovePose(piece: any, type: string): void {
       break;
     case PT.ELEPHANT:
       if (sub.arms) sub.arms.rotation.z = 0;
-      if (sub.robe) sub.robe.rotation.x = 0;
+      if (sub.bodyRobe) sub.bodyRobe.rotation.x = 0;
+      if (sub.hem) { sub.hem.rotation.x = 0; sub.hem.rotation.z = 0; }  // 下摆复位
       break;
     case PT.ADVISOR:
       if (sub.sword) sub.sword.rotation.z = 0;

@@ -589,13 +589,13 @@ export const POSE_TABLE: Record<string, Record<string, any>> = {
     },
     move: {
       anticipation: { sub: { arms: { rotation: { z: -0.10 } } }, duration: 0.15, ease: 'easeOutQuad', channels: ['arms.rotation.z'] },
-      action: { sub: { arms: { rotation: { z: 0.22 } }, robe: { rotation: { x: 0.15 } } }, duration: 0.16, ease: 'easeInCubic', channels: ['arms.rotation.z', 'robe.rotation.x'] },
-      recovery: { sub: { arms: { rotation: { z: 0 } }, robe: { rotation: { x: 0 } } }, duration: 0.30, ease: 'easeInOutQuad', channels: ['arms.rotation.z', 'robe.rotation.x'] }
+      action: { sub: { arms: { rotation: { z: 0.22 } }, bodyRobe: { rotation: { x: 0.15 } } }, duration: 0.16, ease: 'easeInCubic', channels: ['arms.rotation.z', 'bodyRobe.rotation.x'] },
+      recovery: { sub: { arms: { rotation: { z: 0 } }, bodyRobe: { rotation: { x: 0 } } }, duration: 0.30, ease: 'easeInOutQuad', channels: ['arms.rotation.z', 'bodyRobe.rotation.x'] }
     },
     capture: {
-      anticipation: { sub: { arms: { rotation: { z: -0.3 } }, robe: { rotation: { x: 0.15 } } }, duration: 0.18, ease: 'easeOutQuad', channels: ['arms.rotation.z', 'robe.rotation.x'] },
-      action: { sub: { arms: { rotation: { z: 0.75 } }, robe: { rotation: { z: 0.40 } } }, duration: 0.09, ease: 'easeInCubic', channels: ['arms.rotation.z', 'robe.rotation.z'] },
-      recovery: { sub: { arms: { rotation: { z: 0 } }, robe: { rotation: { z: 0, x: 0 } } }, duration: 0.32, ease: 'easeInOutQuad', channels: ['arms.rotation.z', 'robe.rotation.z'] }
+      anticipation: { sub: { arms: { rotation: { z: -0.3 } }, bodyRobe: { rotation: { x: 0.15 } } }, duration: 0.18, ease: 'easeOutQuad', channels: ['arms.rotation.z', 'bodyRobe.rotation.x'] },
+      action: { sub: { arms: { rotation: { z: 0.75 } }, bodyRobe: { rotation: { z: 0.40 } } }, duration: 0.09, ease: 'easeInCubic', channels: ['arms.rotation.z', 'bodyRobe.rotation.z'] },
+      recovery: { sub: { arms: { rotation: { z: 0 } }, bodyRobe: { rotation: { z: 0, x: 0 } } }, duration: 0.32, ease: 'easeInOutQuad', channels: ['arms.rotation.z', 'bodyRobe.rotation.z'] }
     }
   },
   [PT.ADVISOR]: {

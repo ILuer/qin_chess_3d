@@ -32,6 +32,7 @@ desktop.ini
 dist-sprint1/
 dist-sprint2/
 dist-sprint3/
+dist-sprint4/
 
 # ---- 工作室 SOP 产物（设计/文档/QA 计划不入库，仅本地留档）----
 production/
@@ -61,6 +62,8 @@ dist-sprint1/
 dist-sprint1-locked/
 dist-sprint1-locked-2/
 dist-sprint2/
+dist-sprint3/
+dist-sprint4/
 dist-qa-verify/
 
 # ---- 音频探针/合成临时产物（不入库）----

@@ -558,13 +558,14 @@ function buildHorse(mp: any, M: any, K: any, side: string): void {
  * ============================================================ */
 
 function buildElephant(mp: any, M: any, K: any, side: string): void {
-  const robeP = mp.get('robe');   // 袍身 + 头 + 帽（静止主体，绕袍身关节微动）
-  const armsP = mp.get('arms');   // 宽袖 + 双手 + 简牍（绕肩关节摆动）
+  const robeP = mp.get('bodyRobe'); // 袍身躯干 + 头 + 帽（静止主体，绕袍身关节微动）
+  const hemP = mp.get('hem');       // 下摆（独立子组，绕腰 pivot [0,0.200,0] 飘动）
+  const armsP = mp.get('arms');     // 宽袖 + 双手 + 简牍（绕肩关节摆动）
 
   // 履（接触面用鞋底材质）
   robeP.add(box(0.070, 0.035, 0.100), M.bootSole, { pos: [0.048, FOOT + 0.018, -0.030] });
   robeP.add(box(0.070, 0.035, 0.100), M.bootSole, { pos: [-0.048, FOOT + 0.018, -0.030] });
-  // 深衣（下摆外扩的车削袍身）
+  // 深衣（袍身躯干，腰以上车削，下摆移入 hem 子组）
   const robePts = [
     new THREE.Vector2(0.006, FOOT),
     new THREE.Vector2(0.172, FOOT + 0.004),
@@ -600,6 +601,18 @@ function buildElephant(mp: any, M: any, K: any, side: string): void {
   // 胸部层（anatomy 胸部）
   robeP.add(cyl(0.140, 0.152, 0.060, 18), M.cloth, { pos: [0, 0.330, 0] });
   robeP.add(cyl(0.130, 0.142, 0.040, 18), M.clothDeep, { pos: [0, 0.420, 0] });
+
+  // ★ Sprint 4 下摆 hem：腰际以下裙幅，绕腰 pivot [0,0.200,0] 旋转飘动
+  //   几何沿用原 robePts 腰线下段（y∈[FOOT,0.200]）Lathe 车削，含两段裙褶环。
+  const hemPts = [
+    new THREE.Vector2(0.006, FOOT),
+    new THREE.Vector2(0.172, FOOT + 0.004),
+    new THREE.Vector2(0.180, 0.130),
+    new THREE.Vector2(0.166, 0.200)
+  ];
+  hemP.add(new THREE.LatheGeometry(hemPts, 18), M.robe, {});
+  hemP.add(tor(0.176, 0.012, 5, 18), M.clothDeep, { pos: [0, FOOT + 0.004, 0], rot: [Math.PI / 2, 0, 0] });
+  hemP.add(tor(0.170, 0.014, 5, 18), M.accentDim, { pos: [0, 0.130, 0], rot: [Math.PI / 2, 0, 0] });
 
   // 宽袖 + 双手 + 简牍（arms，绕肩关节摆动，anatomy 大臂 + 小臂 + 手）
   // 右臂 大臂 + 小臂
@@ -1417,7 +1430,9 @@ const SUBGROUP_JOINTS: Record<string, Record<string, any>> = {
   },
   A: { body: [0, 0.334, 0], arms: [0, 0.378, 0], sword: [0, 0.328, -0.17], shield: [0, 0.45, -0.20] },
   N: { bodyHorse: [0, 0.128, 0], legFL: [+0.076, 0.300, -0.140], legFR: [-0.076, 0.300, -0.140], legBL: [+0.080, 0.300, 0.165], legBR: [-0.080, 0.300, 0.165], rider: [0, 0.328, 0] },
-  B: { robe: [0, 0.368, 0], arms: [0, 0.328, -0.10] },
+  // ★ Sprint 4 写实：象 B 拆 robe→bodyRobe + hem（下摆独立可飘动子组），
+  //   arms 暂不动（零增量，Sprint 4 不拆袖）。hem 绕腰 pivot [0,0.200,0] 残留 1 mesh/枚。
+  B: { bodyRobe: [0, 0.368, 0], hem: [0, 0.200, 0], arms: [0, 0.328, -0.10] },
   R: { horses: [0, 0.168, -0.30], body: [0, 0.288, 0.02], driver: [0.05, 0.378, 0.40], spearman: [-0.05, 0.378, 0.46], wheelL: [-0.26, 0.330, 0], wheelR: [0.26, 0.330, 0] },
   C: { trebuchet: [0, 0.308, 0], cart: [0, 0.114, 0], soldierL: [-0.25, 0.248, 0.09], soldierR: [0.25, 0.248, 0.09], counterweight: [0, 0.250, -0.150], wheelL: [-0.145, 0.060, 0.110], wheelR: [0.145, 0.060, 0.110] },
   K: { body: [0, 0.378, 0], throne: [0, 0.028, 0], crown: [0, 0.964, 0], sword: [0.14, 0.434, -0.02], banner: [0, 0.394, 0], rArm: [0.14, 0.46, 0] }
