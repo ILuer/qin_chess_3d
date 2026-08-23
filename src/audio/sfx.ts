@@ -1320,7 +1320,26 @@ function hitFreeze(t: number, holdSec?: number): void {
 
 function playEvent(name: string, opts: any = {}): boolean {
   if (!ready || !ctx || !settings.enabled) return false;
-  if (ctx.state === 'suspended') { ctx.resume().catch(() => {}); return false; }
+  // A3（修复「选中几次后无声」）：ctx 被浏览器自动 suspended 时，旧逻辑 resume()
+  // 后直接 return false 吞掉当帧声音，且 resume 异步未生效 → 后续点击持续丢声。
+  // 改进：suspended 时先 resume，待其真正 running 再渲染本事件（手势栈内 resume
+  // 可靠，这里用 Promise 回调兜底，最多延迟一帧，不再静默吞音）。
+  if (ctx.state === 'suspended') {
+    try {
+      const p = ctx.resume();
+      if (p && typeof p.then === 'function') {
+        // 选中音按兵种解析：优先 ${piece}.select，缺失回退通用 select
+        let ev = name;
+        if (name === 'select' && opts && opts.piece) {
+          const pName = PIECE_NAMES[opts.piece];
+          if (pName && BEAT_RECIPES[`${pName}.select`]) ev = `${pName}.select`;
+        }
+        p.then(() => renderEventAt(ev, t0(), opts)).catch(() => {});
+        return true;
+      }
+    } catch (e) { /* 忽略，落入下方常规路径 */ }
+    // resume 同步失败（极少见）→ 仍尝试渲染，浏览器可能已隐式恢复
+  }
 
   // 选中音按兵种解析：优先 ${piece}.select，缺失回退通用 select
   let eventName = name;
@@ -1486,6 +1505,31 @@ export const SFX = {
       silenceSrc.buffer = silenceBuf;
       silenceSrc.connect(ctx.destination);
       silenceSrc.start(0);
+
+      // A3（修复「选中几次后无声 / 背景不持续」）：浏览器会在音频空闲后自动把
+      // AudioContext 置为 suspended（省电），届时所有棋子音（playEvent 早返回吞音）
+      // 与背景常驻节点（wind/crowd/bed 在 suspended 时不前进）一并停摆。
+      // ① onstatechange：一旦观察到 suspended 且页面可见，立即恢复；
+      // ② 全局用户手势监听：任意 pointerdown/keydown 都先 resume，确保点击选中
+      //    棋子时 ctx 已在运行态，第一声绝不丢失（resume 必须在手势栈内才可靠）。
+      let _gestureBound = false;
+      const _wake = () => {
+        if (ctx && ctx.state === 'suspended') {
+          try { ctx.resume().catch(() => {}); } catch (e) { /* 忽略 */ }
+        }
+      };
+      ctx.onstatechange = () => {
+        if (ctx && ctx.state === 'suspended' && !document.hidden) _wake();
+      };
+      if (!_gestureBound) {
+        _gestureBound = true;
+        const onGesture = () => _wake();
+        window.addEventListener('pointerdown', onGesture, { passive: true });
+        window.addEventListener('keydown', onGesture, { passive: true });
+        document.addEventListener('visibilitychange', () => {
+          if (!document.hidden) _wake();
+        }, { passive: true });
+      }
 
       return true;
     } catch (e) {

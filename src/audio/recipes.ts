@@ -284,7 +284,7 @@ export const BEAT_RECIPES: Record<string, Recipe> = {};
 BEAT_RECIPES['select'] = {
   layers: {
     C: [
-      { type: 'bronzeBody', freq: 880, peak: 0.34, decayScale: 1, partials: 'BELL', vibHz: 0 }
+      { type: 'bronzeBody', freq: 880, peak: 0.16, decayScale: 0.7, partials: 'BELL', vibHz: 0 }
     ],
     T: [
       { type: 'transient', freq: 4200, q: 1.6, peak: 0.10, dur: 0.012, rate: 1.3 }
@@ -296,19 +296,19 @@ BEAT_RECIPES['select'] = {
 /* ----- 9.1b 各兵种选中音（按兵种可辨识，车/炮走金属/木石非编钟） ----- */
 
 BEAT_RECIPES['pawn.select'] = {
-  // 兵·戈：亮而短促的青铜剑鸣
+  // 兵·戈：亮而短促的青铜剑鸣（降为采样号子的金属起音陪衬）
   layers: {
-    C: [{ type: 'bronzeBody', freq: 620, peak: 0.30, decayScale: 0.9, partials: 'BAR', vibHz: 0 }],
+    C: [{ type: 'bronzeBody', freq: 620, peak: 0.15, decayScale: 0.7, partials: 'BAR', vibHz: 0 }],
     T: [{ type: 'transient', freq: 3600, q: 1.8, peak: 0.09, dur: 0.012, rate: 1.3 }]
   },
   opts: { wet: 0.14, life: 0.9 }
 };
 
 BEAT_RECIPES['horse.select'] = {
-  // 马·长戟：稍低的戟鸣 + 皮革吱呀
+  // 马·长戟：稍低的戟鸣 + 皮革吱呀（降为采样马嘶的金属起音陪衬）
   layers: {
     C: [
-      { type: 'bronzeBody', freq: 480, peak: 0.26, decayScale: 1.0, partials: 'BAR', vibHz: 0 },
+      { type: 'bronzeBody', freq: 480, peak: 0.13, decayScale: 0.8, partials: 'BAR', vibHz: 0 },
       { type: 'leatherCreak', cf: 520, q: 1.8, peak: 0.07, dur: 0.16, grain: 3 }
     ],
     T: [{ type: 'transient', freq: 3000, q: 1.6, peak: 0.08, dur: 0.014, rate: 1.2 }]
@@ -317,9 +317,9 @@ BEAT_RECIPES['horse.select'] = {
 };
 
 BEAT_RECIPES['elephant.select'] = {
-  // 象·铜钺：厚重的钟体 + 木底
+  // 象·铜钺：厚重的钟体 + 木底（降为采样象鸣的金属起音陪衬）
   layers: {
-    C: [{ type: 'bronzeBody', freq: 330, peak: 0.32, decayScale: 1.4, partials: 'BELL', vibHz: 0 }],
+    C: [{ type: 'bronzeBody', freq: 330, peak: 0.16, decayScale: 1.0, partials: 'BELL', vibHz: 0 }],
     B: [{ type: 'woodKnock', f: 160, peak: 0.14, dur: 0.06 }],
     T: [{ type: 'transient', freq: 2400, q: 1.4, peak: 0.08, dur: 0.016, rate: 1.1 }]
   },
@@ -327,9 +327,9 @@ BEAT_RECIPES['elephant.select'] = {
 };
 
 BEAT_RECIPES['advisor.select'] = {
-  // 士·短剑：亮而轻的短剑 + 软甲
+  // 士·短剑：亮而轻的短剑 + 软甲（降为采样短喝的金属起音陪衬）
   layers: {
-    C: [{ type: 'bronzeBody', freq: 880, peak: 0.24, decayScale: 0.7, partials: 'BAR', vibHz: 0 }],
+    C: [{ type: 'bronzeBody', freq: 880, peak: 0.12, decayScale: 0.6, partials: 'BAR', vibHz: 0 }],
     T: [
       { type: 'armorClink', n: 2, f0: 3400, f1: 4200, peak: 0.06, spread: 0.04, ring: 0.10, softAttack: 0.005 },
       { type: 'transient', freq: 4200, q: 2.0, peak: 0.06, dur: 0.010, rate: 1.3 }
@@ -339,9 +339,9 @@ BEAT_RECIPES['advisor.select'] = {
 };
 
 BEAT_RECIPES['rook.select'] = {
-  // 车·车戈铁箍：暗铁 + 木轮辚辚 + 甲片（非编钟）
+  // 车·车戈铁箍：暗铁 + 木轮辚辚 + 甲片（非编钟，降为采样御者喝的起音陪衬）
   layers: {
-    C: [{ type: 'bronzeBody', freq: 1660, peak: 0.22, decayScale: 0.8, partials: 'IRON', vibHz: 0 }],
+    C: [{ type: 'bronzeBody', freq: 1660, peak: 0.11, decayScale: 0.7, partials: 'IRON', vibHz: 0 }],
     B: [
       { type: 'woodKnock', f: 150, peak: 0.16, dur: 0.06 },
       { type: 'woodKnock', f: 138, peak: 0.10, dur: 0.05, offset: 0.05 }
@@ -368,11 +368,11 @@ BEAT_RECIPES['cannon.select'] = {
 };
 
 BEAT_RECIPES['king.select'] = {
-  // 帅·王剑：剑鸣（上移与兵·戈 620 拉开音程）+ 编钟尾韵（王者）
+  // 帅·王剑：剑鸣（上移与兵·戈 620 拉开音程）+ 编钟尾韵（王者，降为采样王吼起音陪衬）
   layers: {
     C: [
-      { type: 'bronzeBody', freq: 740, peak: 0.26, decayScale: 1.1, partials: 'BAR', vibHz: 0 },
-      { type: 'bronzeBody', freq: 523.25, peak: 0.17, decayScale: 1.3, partials: 'BELL', vibHz: 0, offset: 0.01 }
+      { type: 'bronzeBody', freq: 740, peak: 0.13, decayScale: 0.9, partials: 'BAR', vibHz: 0 },
+      { type: 'bronzeBody', freq: 523.25, peak: 0.09, decayScale: 1.1, partials: 'BELL', vibHz: 0, offset: 0.01 }
     ],
     T: [{ type: 'transient', freq: 4200, q: 1.6, peak: 0.11, dur: 0.012, rate: 1.3 }]
   },
@@ -1308,6 +1308,21 @@ function applySampleOverlay(): void {
   addSample('rook.idle',     'C', 'vox.breath',      { gain: 0.15, rate: 0.94, probability: 0.28 }); // 御者勒缰气声
   addSample('horse.idle',    'C', 'vox.horse.snort', { gain: 0.30, rate: 1.00, probability: 0.34 });
   addSample('cannon.idle',   'C', 'foley.wood.creak',{ gain: 0.26, rate: 0.96, probability: 0.40 });
+
+  /* ===== 选中音：真实配音主驱动（修复「选中棋子仍是电子合成音」）=====
+   * 旧 select 配方全为 bronzeBody 程序化编钟/金属鸣，无采样层。此处为每个兵种
+   * 追加真实 vocal/foley 采样作为选中主声（战吼/号子/马嘶/象鸣/御者喝/发射令），
+   * 程序化 bronzeBody 降为低分量「金属余韵」点缀（保留兵种可辨识音高）。
+   * 采样未加载 → executeInst 静默跳过（不降级合成），不会破功。
+   * 象(B)走 vox.king.roar 低吼，与相共用（sfx.ts 已去阵营偏移）。 */
+  addSample('pawn.select',     'C', 'vox.shout.heave',  { gain: 0.40, rate: 1.00, busTarget: 'sfxBus' });   // 兵·号子「嘿！」
+  addSample('horse.select',    'C', 'vox.horse.neigh',  { gain: 0.46, rate: 1.00, busTarget: 'sfxBus' });   // 马·嘶鸣
+  addSample('elephant.select', 'C', 'vox.king.roar',    { gain: 0.44, rate: 0.84, busTarget: 'sfxBus' });   // 象/相·低吼
+  addSample('advisor.select',  'C', 'vox.shout.charge', { gain: 0.30, rate: 1.14, busTarget: 'sfxBus' });   // 士·短喝
+  addSample('rook.select',     'C', 'vox.shout.drive',  { gain: 0.42, rate: 0.92, busTarget: 'sfxBus' });   // 车·御者「驾！」
+  addSample('cannon.select',   'C', 'vox.shout.fire',   { gain: 0.42, rate: 1.00, busTarget: 'sfxBus' });   // 炮·「放！」
+  addSample('king.select',     'C', 'vox.king.roar',    { gain: 0.48, rate: 1.00, busTarget: 'sfxBus' });   // 帅·王一喝
+  addSample('select',          'C', 'vox.shout.heave',  { gain: 0.28, rate: 1.0,  busTarget: 'sfxBus', probability: 0.7 }); // 通用回退
 }
 
 /** 把某拍某层里已挂载的指定 sample 指令的 key 替换为 Sprint1 专属真实录音键。
