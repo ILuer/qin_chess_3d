@@ -165,7 +165,9 @@ function _sampleMap(tex: any): any {
     const w = img && img.width ? img.width : 0;
     const h = img && img.height ? img.height : 0;
     if (w > 0 && h > 0 && img.getContext) {
-      const id = img.getContext('2d').getImageData(0, 0, w, h);
+      // willReadFrequently: 该 canvas 仅用于多次 getImageData 采样贴图，
+      // 启用后可避免浏览器在 GPU↔CPU 间反复搬运、消除 willReadFrequently 性能告警。
+      const id = img.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h);
       entry = { w: w, h: h, data: id.data };
     }
   } catch (e) { entry = null; }

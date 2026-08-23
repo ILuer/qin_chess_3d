@@ -140,28 +140,17 @@ async function writeManifest() {
 }
 
 async function buildOnce() {
-  // 主 bundle：src/main.js → dist/main.js（three 内联；webgpu 动态 chunk）
+  // 主 bundle：src/main.js → dist/main.js（three 内联；webgpu 动态 chunk）。
+  // AI module worker 由 esbuild 原生处理：engine.ts 里的
+  //   new Worker(new URL('./worker.js', import.meta.url), { type: 'module' })
+  // 会被 esbuild 自动识别为 worker entry，把 src/ai/worker.ts 打包为独立 chunk
+  // （带内容哈希，如 worker-XXXX.js）并重写该 URL —— 无需手动第二 entry，
+  // 否则会出现「手动产物 worker.js 与 esbuild 自动产物命名不一致 / URL 不被改写」的双路冲突。
   await esbuild.build(common);
-
-  // AI module worker：单独 entry → dist/worker.js。
-  // esbuild 不会自动打包 new Worker(new URL('./worker.js', import.meta.url))，
-  // 必须显式把 worker 作为第二 entry。运行时 main bundle 里
-  // new URL('./worker.js', import.meta.url) 相对 dist/main.js 解析 → dist/worker.js，天然命中。
-  await esbuild.build({
-    entryPoints: [resolveEntry('src/ai/worker.js')],
-    bundle: true,
-    format: 'esm',
-    outfile: path.join(OUTDIR, 'worker.js'),
-    target: common.target,
-    sourcemap: false,
-    legalComments: 'none',
-    logLevel: 'info',
-    plugins: [threeVendorPlugin]   // worker 不引 three，但保留插件以防御未来引入
-  });
 
   // 构建产物清单（SW 预缓存契约）
   const manifestPath = await writeManifest();
-  console.log('[build] 产物已写入 dist/（main.js + worker.js + chunks/）');
+  console.log('[build] 产物已写入 dist/（main.js + worker chunk + chunks/）');
   console.log(`[build] assets-manifest.json 已生成 -> ${manifestPath}`);
 }
 

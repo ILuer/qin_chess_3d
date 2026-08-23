@@ -59,9 +59,12 @@ export class AIEngine {
   _initWorker(): void {
     if (typeof Worker === 'undefined') { this._useSliced('浏览器不支持 Web Worker'); return; }
     try {
-      // 内联 new URL 模式：esbuild 会把 worker 及其依赖打包为独立产物并重写 URL
-      // （分离变量写法会让 esbuild 无法识别，打包后 URL 会指向不存在的 dist/worker.js）
-      const w = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
+      // 内联 new URL 模式：esbuild 识别到 new URL('./worker.js', import.meta.url) 后，
+      // 会自动把 ./worker.ts（源文件，esbuild 按存在解析）打包为独立 chunk，并把这里的
+      // URL 重写成带内容哈希的产物路径（如 ./worker-XXXX.js），从而正确命中 /dist/ 产物、
+      // 避免线上请求不存在的 .ts 而触发 Strict MIME 拒绝。
+      // （分离变量写法会让 esbuild 无法识别，切勿改为 const u = new URL(...) 形式）
+      const w = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
       w.addEventListener('message', ev => this._onWorkerMessage(ev));
       w.addEventListener('error', err => {
         console.warn('[AI] Worker 运行出错，降级为主线程时间切片：', err && err.message);
