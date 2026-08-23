@@ -1349,6 +1349,13 @@ function renderEventAt(eventName: string, t: number, opts: any = {}): boolean {
 
   if (degradation === 'off') return false;
 
+  // 象(B)：红「相」/黑「象」共用同一套配音配方与采样路由，去除阵营音高偏移与
+  // 明暗滤波（FACTION_SHIFT + bright/dark tone），让双方听感完全一致。
+  // 其余兵种仍保留阵营可分辨特征。
+  if (eventName.startsWith('elephant.')) {
+    opts = { ...opts, faction: null };
+  }
+
   const { faction, pan, pit, vol } = opts;
 
   // 阵营音高偏移
