@@ -94,8 +94,10 @@ let nodeCount = 0;
 /* --- 持久化设置 --- */
 const settings = {
   enabled: true,
-  volume: 0.8,
-  ambient: true
+  volume: 0.8,        // 主音量（masterGain）
+  ambient: true,
+  ambientVol: 0.34,   // 背景音量系数（缩放 ambientBus，红线 ≤0.50 等效）
+  sfxVol: 1.0         // 棋子音效系数（缩放 sfxBus，含命中 hitBus）
 };
 
 /* --- 降级 --- */
@@ -117,6 +119,8 @@ function loadSettings(): void {
     if (typeof o.enabled === 'boolean') settings.enabled = o.enabled;
     if (typeof o.volume === 'number' && isFinite(o.volume)) settings.volume = clamp(o.volume, 0, 1);
     if (typeof o.ambient === 'boolean') settings.ambient = o.ambient;
+    if (typeof o.ambientVol === 'number' && isFinite(o.ambientVol)) settings.ambientVol = clamp(o.ambientVol, 0, 1);
+    if (typeof o.sfxVol === 'number' && isFinite(o.sfxVol)) settings.sfxVol = clamp(o.sfxVol, 0, 1);
   } catch (e) { /* 静默降级 */ }
 }
 
@@ -192,7 +196,7 @@ function buildGraph(): void {
 
   /* --- 前景音效总线 --- */
   sfxBus = ctx.createGain();
-  sfxBus.gain.setValueAtTime(1.0, ctx.currentTime);
+  sfxBus.gain.setValueAtTime(1.0 * settings.sfxVol, ctx.currentTime);
 
   hitLP = ctx.createBiquadFilter();
   hitLP.type = 'lowpass';
@@ -231,8 +235,11 @@ function buildGraph(): void {
   idleDuck.connect(masterGain);
 
   /* --- 环境总线 --- */
+  // 背景音量基准刻意压低：环境是「远处战场嗡鸣」，必须明显低于棋子动作音效。
+  // 设计约定（本次修订）：ambientBus ≤ 0.34，张力拉满也只到 ~0.50，绝不反客为主。
   ambientBus = ctx.createGain();
-  ambientBus.gain.setValueAtTime(0.70, ctx.currentTime);
+  // 背景基准 0.32 × 系数(默认0.34/0.34=1)；用户滑块按 ambientVol 整体缩放
+  ambientBus.gain.setValueAtTime(0.32 * (settings.ambientVol / 0.34), ctx.currentTime);
 
   ambLimit = ctx.createDynamicsCompressor();
   ambLimit.threshold.setValueAtTime(-18, ctx.currentTime);
@@ -1640,22 +1647,65 @@ export const SFX = {
   },
 
   setAmbientIntensity(v: number): void {
+    // 仅作为「用户背景音量」滑块的别名入口；真正缩放走 setAmbientVolume。
+    this.setAmbientVolume(v);
+  },
+
+  /**
+   * 背景音量系数（独立于主音量）：缩放整条 ambientBus。
+   * 红线：等效绝对增益 ≤ 0.50（背景绝不高于棋子音效）。
+   * @param {number} v 0..1，相对默认基准(0.34)的比例（保存为 ambientVol）
+   */
+  setAmbientVolume(v: number): number {
+    const n = clamp(typeof v === 'number' && isFinite(v) ? v : settings.ambientVol, 0, 1);
+    settings.ambientVol = n;
+    saveSettings();
     if (ambientBus && ctx) {
       const t = ctx.currentTime;
       ambientBus.gain.cancelScheduledValues(t);
       ambientBus.gain.setValueAtTime(ambientBus.gain.value, t);
-      ambientBus.gain.linearRampToValueAtTime(clamp(v, 0, 1), t + 0.3);
+      // 绝对上限 0.50：系数虽可达 1.0，但基准 0.32 × (1/0.34) ≈ 0.94 会越线，
+      // 故取 min 与红线等效值，确保背景永远低于棋子音效。
+      const target = Math.min(0.32 * (n / 0.34), 0.50);
+      ambientBus.gain.linearRampToValueAtTime(target, t + 0.3);
     }
+    return n;
+  },
+
+  getAmbientVolume(): number {
+    return settings.ambientVol;
+  },
+
+  /**
+   * 棋子音效系数（独立于主音量）：缩放整条 sfxBus（含命中 hitBus、移动/待机/进攻采样）。
+   * @param {number} v 0..1，相对默认(1.0)的比例（保存为 sfxVol）
+   */
+  setSFXVolume(v: number): number {
+    const n = clamp(typeof v === 'number' && isFinite(v) ? v : settings.sfxVol, 0, 1);
+    settings.sfxVol = n;
+    saveSettings();
+    if (sfxBus && ctx) {
+      const t = ctx.currentTime;
+      sfxBus.gain.cancelScheduledValues(t);
+      sfxBus.gain.setValueAtTime(sfxBus.gain.value, t);
+      sfxBus.gain.linearRampToValueAtTime(n, t + 0.1);
+    }
+    return n;
+  },
+
+  getSFXVolume(): number {
+    return settings.sfxVol;
   },
 
   setAmbientTension(level: number): void {
-    // 由 ambience.js 调用，映射 TENSION → 环境参数
+    // 由 ambience.js 调用，映射 TENSION → 环境参数（背景绝不能高于棋子音效）
     if (ambientBus && ctx) {
       const t = ctx.currentTime;
-      const gain = 0.70 + (0.92 - 0.70) * clamp(level, 0, 1);
+      const gain = 0.30 + (0.50 - 0.30) * clamp(level, 0, 1);
+      const target = Math.min(gain * (settings.ambientVol / 0.34), 0.50);
       ambientBus.gain.cancelScheduledValues(t);
       ambientBus.gain.setValueAtTime(ambientBus.gain.value, t);
-      ambientBus.gain.linearRampToValueAtTime(gain, t + 0.5);
+      ambientBus.gain.linearRampToValueAtTime(target, t + 0.5);
     }
   },
 

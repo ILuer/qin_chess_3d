@@ -693,6 +693,8 @@ function syncControls(): void {
   controls.setAIState(aiEnabled, difficulty);
   controls.setSoundState(SFX.isEnabled());
   if (ambience) controls.setAmbientState(ambience.isEnabled());
+  // 音量滑块初始同步（背景 / 棋子，独立于主音量）
+  try { controls.setVolumeStates(SFX.getAmbientVolume(), SFX.getSFXVolume()); } catch (e) { /* 忽略 */ }
   if (sceneSys) {
     controls.setFlipState(sceneSys.viewSide);
     controls.setTopViewState(sceneSys.isTopView);
@@ -1002,6 +1004,9 @@ async function boot(): Promise<void> {
       toggleAmbient,
       toggleAI,
       setDifficulty,
+      // 音量（背景 / 棋子，独立于主音量）— 滑块实时调节
+      setAmbientVolume: (v: number) => { try { SFX.setAmbientVolume(v); } catch (e) { /* 忽略 */ } },
+      setSFXVolume: (v: number) => { try { SFX.setSFXVolume(v); } catch (e) { /* 忽略 */ } },
       toggleFollowCamera,
       resign: doResign,
       toggleHelp: (force?: boolean): boolean => hud.toggleHelp(force),   // UI-FIX-123：force=false 供 Esc / 关闭按钮强制关闭

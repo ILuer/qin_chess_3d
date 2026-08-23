@@ -13,6 +13,8 @@ const $ = (sel: string, root: Document = document): HTMLElement | null => root.q
 /** 二次确认的等待时长（毫秒） */
 const CONFIRM_WINDOW = 3200;
 
+const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : (v > hi ? hi : v));
+
 export class Controls {
   actions: Record<string, any>;
   _confirmTimers: Map<HTMLElement, ReturnType<typeof setTimeout>>;
@@ -27,6 +29,8 @@ export class Controls {
   btnAI: any;
   btnResign: any;
   selDifficulty: any;
+  rangeAmbient: any;
+  rangeSfx: any;
 
   /**
    * @param {Object} actions
@@ -66,6 +70,8 @@ export class Controls {
     this.btnAI = $('#btn-ai');
     this.btnResign = $('#btn-resign');
     this.selDifficulty = $('#select-difficulty');
+    this.rangeAmbient = $('#range-ambient');
+    this.rangeSfx = $('#range-sfx');
 
     this._bindButtons();
     this._bindKeys();
@@ -143,6 +149,16 @@ export class Controls {
 
     this._on(this.selDifficulty, 'change', (ev: Event) => {
       this._call('setDifficulty', Number((ev.target as HTMLSelectElement).value));
+    });
+
+    // 音量滑块（背景 / 棋子，独立于主音量）
+    this._on(this.rangeAmbient, 'input', (ev: Event) => {
+      const v = Number((ev.target as HTMLInputElement).value) / 100;
+      this._call('setAmbientVolume', v);
+    });
+    this._on(this.rangeSfx, 'input', (ev: Event) => {
+      const v = Number((ev.target as HTMLInputElement).value) / 100;
+      this._call('setSFXVolume', v);
     });
   }
 
@@ -239,6 +255,12 @@ export class Controls {
     this.btnSound.setAttribute('aria-pressed', on ? 'true' : 'false');
     const label = this.btnSound.querySelector('.btn-label') || this.btnSound;
     label.textContent = on ? '音效 开' : '音效 关';
+  }
+
+  /** 同步两个音量滑块到当前持久化值（init 时调用） */
+  setVolumeStates(ambientVol: number, sfxVol: number): void {
+    if (this.rangeAmbient) this.rangeAmbient.value = String(Math.round(clamp(ambientVol, 0, 1) * 100));
+    if (this.rangeSfx) this.rangeSfx.value = String(Math.round(clamp(sfxVol, 0, 1) * 100));
   }
 
   setAmbientState(on: boolean): void {

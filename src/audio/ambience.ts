@@ -979,7 +979,8 @@ export class AmbienceSystem {
     const t = i.ctx.currentTime;
     i.ambientBus.gain.cancelScheduledValues(t);
     i.ambientBus.gain.setValueAtTime(FLOOR, t);
-    i.ambientBus.gain.exponentialRampToValueAtTime(0.70, t + 1.5);
+    const av = clamp(SFX.getAmbientVolume != null ? SFX.getAmbientVolume() : 0.34, 0, 1);
+    i.ambientBus.gain.exponentialRampToValueAtTime(Math.min(0.32 * (av / 0.34), 0.50), t + 1.5);
   }
 
   _fadeOut(onComplete?: () => void): void {
@@ -1005,11 +1006,11 @@ export class AmbienceSystem {
     this._breathPhase = 'descending';
     const i = _int();
     // 修复：环境音关闭时不修改 ambientBus 增益（保持静默），否则呼吸循环会
-    // 绕过 _enabled 把总线拉回 ~0.70，导致「环境音关不掉」。定时器链照常推进，
+    // 绕过 _enabled 把总线拉回高位，导致「环境音关不掉」。定时器链照常推进，
     // 重开时 _breathRise 立即恢复呼吸节奏。
     if (i.ready && i.ambientBus && this._enabled) {
       const t = i.ctx.currentTime;
-      const current = i.ambientBus.gain.value || 0.70;
+      const current = i.ambientBus.gain.value || 0.30;
       i.ambientBus.gain.cancelScheduledValues(t);
       i.ambientBus.gain.setValueAtTime(current, t);
       i.ambientBus.gain.linearRampToValueAtTime(current * 0.63, t + 6); // -4dB
@@ -1028,10 +1029,10 @@ export class AmbienceSystem {
     if (!this._active) return;
     this._breathPhase = 'rising';
     const i = _int();
-    // 修复：同上，关闭时不把 ambientBus 拉回 0.70~0.92。
+    // 修复：关闭时不把 ambientBus 拉回高位（背景音量红线：≤0.50）。
     if (i.ready && i.ambientBus && this._enabled) {
       const t = i.ctx.currentTime;
-      const gain = 0.70 + (0.92 - 0.70) * this._tension;
+      const gain = 0.30 + (0.50 - 0.30) * this._tension;
       i.ambientBus.gain.cancelScheduledValues(t);
       i.ambientBus.gain.setValueAtTime(Math.max(i.ambientBus.gain.value, FLOOR), t);
       i.ambientBus.gain.linearRampToValueAtTime(gain, t + 6);
@@ -1049,8 +1050,11 @@ export class AmbienceSystem {
     const t = this._tension;
 
     // 插值
-    const ambientGain = linLerp(
+    let ambientGain = linLerp(
       TENSION_MAP[0.0].ambientGain, TENSION_MAP[1.0].ambientGain, t);
+    // 尊重用户「背景音量」滑块（ambientVol）：整体缩放，且绝不超过红线 0.50
+    const av = clamp(SFX.getAmbientVolume != null ? SFX.getAmbientVolume() : 0.34, 0, 1);
+    ambientGain = Math.min(ambientGain * (av / 0.34), 0.50);
     const drumInterval = geomLerp(
       TENSION_MAP[0.0].drumInterval, TENSION_MAP[1.0].drumInterval, t);
     const drumPeak = linLerp(
@@ -1073,7 +1077,7 @@ export class AmbienceSystem {
       i.ambientBus.gain.linearRampToValueAtTime(FLOOR, ct + 0.8);
     } else {
       i.ambientBus.gain.cancelScheduledValues(ct);
-      i.ambientBus.gain.setValueAtTime(i.ambientBus.gain.value || 0.70, ct);
+      i.ambientBus.gain.setValueAtTime(i.ambientBus.gain.value || 0.30, ct);
       i.ambientBus.gain.linearRampToValueAtTime(ambientGain, ct + 1.0);
     }
 

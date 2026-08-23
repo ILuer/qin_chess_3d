@@ -984,9 +984,9 @@ makeCaptureRecipes();
 
 BEAT_RECIPES['pawn.idle'] = {
   layers: {
-    C: [{ type: 'noise', rate: 1.0, peak: 0.014, attack: 0.02, decay: 0.34, dur: 0.40,
-          filter: { type: 'bandpass', freq: 1800, q: 1.4 } }],
-    B: [{ type: 'osc', oscType: 'sine', freq: 130, peak: 0.0084, attack: 0.04, decay: 0.35, dur: 0.40,
+    C: [{ type: 'noise', rate: 1.0, peak: 0.040, attack: 0.02, decay: 0.34, dur: 0.40,
+          filter: { type: 'bandpass', freq: 1800,  q: 1.4 } }],
+    B: [{ type: 'osc', oscType: 'sine', freq: 130, peak: 0.024, attack: 0.04, decay: 0.35, dur: 0.40,
           sweep: { end: 110, ramp: 'exp', rampTime: 0.35 } }]
   },
   opts: { wet: 0.22, life: 0.7 }
@@ -995,9 +995,9 @@ BEAT_RECIPES['pawn.idle'] = {
 BEAT_RECIPES['horse.idle'] = {
   layers: {
     C: [
-      { type: 'osc', oscType: 'sine', freq: 150, peak: 0.021, attack: 0.03, decay: 0.30, dur: 0.34,
+      { type: 'osc', oscType: 'sine', freq: 150, peak: 0.055, attack: 0.03, decay: 0.30, dur: 0.34,
         sweep: { end: 192, ramp: 'linear', rampTime: 0.12, sweep2: { end: 140, ramp: 'linear', rampTime: 0.18 } } },
-      { type: 'noise', rate: 0.9, peak: 0.0123, attack: 0.01, decay: 0.10, dur: 0.12, offset: 0.02,
+      { type: 'noise', rate: 0.9, peak: 0.036, attack: 0.01, decay: 0.10, dur: 0.12, offset: 0.02,
         filter: { type: 'bandpass', freq: 700, q: 1.2 } }
     ]
   },
@@ -1006,7 +1006,7 @@ BEAT_RECIPES['horse.idle'] = {
 
 BEAT_RECIPES['elephant.idle'] = {
   layers: {
-    B: [{ type: 'osc', oscType: 'sine', freq: 60, peak: 0.0202, attack: 0.06, decay: 0.44, dur: 0.50,
+    B: [{ type: 'osc', oscType: 'sine', freq: 60, peak: 0.055, attack: 0.06, decay: 0.44, dur: 0.50,
           sweep: { end: 72, ramp: 'linear', rampTime: 0.20, sweep2: { end: 54, ramp: 'linear', rampTime: 0.25 } } }]
   },
   opts: { wet: 0.28, life: 1.0 }
@@ -1014,7 +1014,7 @@ BEAT_RECIPES['elephant.idle'] = {
 
 BEAT_RECIPES['advisor.idle'] = {
   layers: {
-    C: [{ type: 'noise', rate: 1.0, peak: 0.0156, attack: 0.03, decay: 0.30, dur: 0.36,
+    C: [{ type: 'noise', rate: 1.0, peak: 0.042, attack: 0.03, decay: 0.30, dur: 0.36,
           filter: { type: 'bandpass', freq: 2600, q: 1.0 } }]
   },
   opts: { wet: 0.26, life: 0.7 }
@@ -1024,12 +1024,12 @@ BEAT_RECIPES['rook.idle'] = {
   // 车：木轮辚辚 + 皮革吱呀 + 甲片轻响（去低频 sawtooth 嗡鸣）
   layers: {
     C: [
-      { type: 'leatherCreak', cf: 210, q: 1.6, peak: 0.010, dur: 0.30, grain: 4 },
-      { type: 'armorClink', n: 3, f0: 2400, f1: 3400, peak: 0.045, spread: 0.10, ring: 0.18 }
+      { type: 'leatherCreak', cf: 210, q: 1.6, peak: 0.030, dur: 0.30, grain: 4 },
+      { type: 'armorClink', n: 3, f0: 2400, f1: 3400, peak: 0.055, spread: 0.10, ring: 0.18 }
     ],
     B: [
-      { type: 'woodKnock', f: 150, peak: 0.010, dur: 0.05 },
-      { type: 'woodKnock', f: 138, peak: 0.007, dur: 0.05, offset: 0.15 }
+      { type: 'woodKnock', f: 150, peak: 0.030, dur: 0.05 },
+      { type: 'woodKnock', f: 138, peak: 0.020, dur: 0.05, offset: 0.15 }
     ]
   },
   opts: { wet: 0.24, life: 0.8 }
@@ -1039,11 +1039,11 @@ BEAT_RECIPES['cannon.idle'] = {
   // 炮：木车吱呀 + 石弹微响（去低频 sawtooth 嗡鸣）
   layers: {
     C: [
-      { type: 'leatherCreak', cf: 172, q: 1.9, peak: 0.010, dur: 0.34, grain: 3 },
-      { type: 'woodKnock', f: 620, peak: 0.008, dur: 0.04, offset: 0.06 }
+      { type: 'leatherCreak', cf: 172, q: 1.9, peak: 0.030, dur: 0.34, grain: 3 },
+      { type: 'woodKnock', f: 620, peak: 0.022, dur: 0.04, offset: 0.06 }
     ],
     B: [
-      { type: 'woodKnock', f: 120, peak: 0.010, dur: 0.055 }
+      { type: 'woodKnock', f: 120, peak: 0.030, dur: 0.055 }
     ]
   },
   opts: { wet: 0.26, life: 0.8 }
@@ -1051,8 +1051,8 @@ BEAT_RECIPES['cannon.idle'] = {
 
 BEAT_RECIPES['king.idle'] = {
   layers: {
-    C: [{ type: 'bronzeBody', freq: 330, peak: 0.017, decayScale: 1.0, partials: 'BELL', vibHz: 0 }],
-    B: [{ type: 'osc', oscType: 'sine', freq: 98, peak: 0.0136, attack: 0.08, decay: 0.45, dur: 0.50 }]
+    C: [{ type: 'bronzeBody', freq: 330, peak: 0.045, decayScale: 1.0, partials: 'BELL', vibHz: 0 }],
+    B: [{ type: 'osc', oscType: 'sine', freq: 98, peak: 0.036, attack: 0.08, decay: 0.45, dur: 0.50 }]
   },
   opts: { wet: 0.30, life: 1.2 }
 };
@@ -1060,7 +1060,7 @@ BEAT_RECIPES['king.idle'] = {
 /* 点名（roster）—— 极轻、公共 */
 BEAT_RECIPES['roster.idle'] = {
   layers: {
-    C: [{ type: 'noise', rate: 1.0, peak: 0.016, attack: 0.015, decay: 0.22, dur: 0.25,
+    C: [{ type: 'noise', rate: 1.0, peak: 0.040, attack: 0.015, decay: 0.22, dur: 0.25,
           filter: { type: 'bandpass', freq: 1400, q: 1.1 } }]
   },
   opts: { wet: 0.34, life: 0.6 }
@@ -1530,22 +1530,22 @@ export const AMBIENT_BEDS: Record<string, {
   replaces?: string;
 }> = {
   wind: {
-    key: 'ambient.loop.wind', gain: 0.10, wet: 0.42, rate: 1.0,
+    key: 'ambient.loop.wind', gain: 0.060, wet: 0.42, rate: 1.0,
     highpass: 48, lowpass: 3200,
     lfo: { freq: 0.071, amp: 0.035 },          // 阵风呼吸（±35%）
-    tensionMul: [0.88, 1.16], crossfade: 2.2, replaces: 'wind'
+    tensionMul: [0.88, 1.10], crossfade: 2.2, replaces: 'wind'
   },
   crowd: {
-    key: 'ambient.loop.crowd', gain: 0.085, wet: 0.60, rate: 1.0,
+    key: 'ambient.loop.crowd', gain: 0.045, wet: 0.60, rate: 1.0,
     highpass: 90, lowpass: 2100,               // 远场：削掉近场高频细节
     lfo: { freq: 0.043, amp: 0.030 },
-    tensionMul: [0.80, 1.45], crossfade: 2.6, replaces: 'crowd'
+    tensionMul: [0.80, 1.30], crossfade: 2.6, replaces: 'crowd'
   },
   march: {
-    key: 'ambient.loop.drum', gain: 0.075, wet: 0.55, rate: 1.0,
+    key: 'ambient.loop.drum', gain: 0.045, wet: 0.55, rate: 1.0,
     highpass: 38, lowpass: 900,                // 远处鼓：只剩膜体低频
     lfo: { freq: 0.029, amp: 0.022 },
-    tensionMul: [0.62, 1.55], crossfade: 3.0
+    tensionMul: [0.62, 1.30], crossfade: 3.0
   }
 };
 
@@ -1563,7 +1563,9 @@ export const TENSION_WEIGHTS = {
 
 export const TENSION_MAP = {
   // TENSION → { ambientGain, drumInterval, drumPeak, crowdPeak, envWet }
-  0.0: { ambientGain: 0.70, drumInterval: 14.0, drumPeak: 0.020, crowdPeak: 0.008, envWet: 0.62 },
-  0.5: { ambientGain: 0.81, drumInterval: 6.3, drumPeak: 0.039, crowdPeak: 0.017, envWet: 0.55 },
-  1.0: { ambientGain: 0.92, drumInterval: 3.2, drumPeak: 0.058, crowdPeak: 0.026, envWet: 0.48 }
+  // 背景音量红线：ambientGain 全程保持明显低于棋子音效（乐器/战吼/动作采样）。
+  // ambientBus 上层已压到 0.32，这里张力拉满也只到 0.50，绝不让背景反客为主。
+  0.0: { ambientGain: 0.26, drumInterval: 14.0, drumPeak: 0.020,  crowdPeak: 0.008, envWet: 0.62 },
+  0.5: { ambientGain: 0.36, drumInterval: 6.3, drumPeak: 0.039, crowdPeak: 0.017, envWet: 0.55 },
+  1.0: { ambientGain: 0.50, drumInterval: 3.2, drumPeak: 0.058, crowdPeak: 0.026, envWet: 0.48 }
 };

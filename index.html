@@ -102,6 +102,8 @@
       padding: 8px 10px; background: rgba(16,17,21,.82); border: 1px solid rgba(201,162,39,.42);
       border-radius: 12px; max-width: 94vw; }
     .control-field { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+    .vol-slider { width: 84px; accent-color: var(--qin-gold); cursor: pointer; }
+    .control-field label { opacity: .8; white-space: nowrap; }
     .btn { font: inherit; cursor: pointer; color: var(--qin-ink); background: rgba(201,162,39,.14);
       border: 1px solid rgba(201,162,39,.45); border-radius: 9px; padding: 8px 12px; letter-spacing: .04em;
       transition: background .15s ease, transform .08s ease; }
@@ -235,6 +237,14 @@
       <button id="btn-ai" class="btn" type="button">人机 开</button>
       <button id="btn-sound" class="btn" type="button" aria-pressed="true">音效 开</button>
       <button id="btn-ambient" class="btn" type="button" aria-pressed="true">环境 开</button>
+      <div class="control-field">
+        <label for="range-ambient">背景</label>
+        <input id="range-ambient" class="vol-slider" type="range" min="0" max="100" step="1" value="34" />
+      </div>
+      <div class="control-field">
+        <label for="range-sfx">棋子</label>
+        <input id="range-sfx" class="vol-slider" type="range" min="0" max="100" step="1" value="100" />
+      </div>
     </div>
   </nav>
 
