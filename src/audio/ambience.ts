@@ -980,7 +980,9 @@ export class AmbienceSystem {
     i.ambientBus.gain.cancelScheduledValues(t);
     i.ambientBus.gain.setValueAtTime(FLOOR, t);
     const av = clamp(SFX.getAmbientVolume != null ? SFX.getAmbientVolume() : 0.34, 0, 1);
-    i.ambientBus.gain.exponentialRampToValueAtTime(Math.min(0.32 * (av / 0.34), 0.50), t + 1.5);
+    const sfxVol = SFX.getSFXVolume != null ? SFX.getSFXVolume() : 1.0;
+    i.ambientBus.gain.exponentialRampToValueAtTime(
+      Math.min(0.32 * (av / 0.34), 0.50, sfxVol / 1.2), t + 1.5);
   }
 
   _fadeOut(onComplete?: () => void): void {
@@ -1052,9 +1054,11 @@ export class AmbienceSystem {
     // 插值
     let ambientGain = linLerp(
       TENSION_MAP[0.0].ambientGain, TENSION_MAP[1.0].ambientGain, t);
-    // 尊重用户「背景音量」滑块（ambientVol）：整体缩放，且绝不超过红线 0.50
+    // 尊重用户「背景音量」滑块（ambientVol）：整体缩放，且绝不超过红线 0.50。
+    // 同时遵守 1.2× 契约：背景 ≤ 棋子总线实际增益 / 1.2（棋子音效应比背景高 1.2×）。
     const av = clamp(SFX.getAmbientVolume != null ? SFX.getAmbientVolume() : 0.34, 0, 1);
-    ambientGain = Math.min(ambientGain * (av / 0.34), 0.50);
+    const sfxVol = SFX.getSFXVolume != null ? SFX.getSFXVolume() : 1.0;
+    ambientGain = Math.min(ambientGain * (av / 0.34), 0.50, sfxVol / 1.2);
     const drumInterval = geomLerp(
       TENSION_MAP[0.0].drumInterval, TENSION_MAP[1.0].drumInterval, t);
     const drumPeak = linLerp(

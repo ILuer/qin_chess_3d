@@ -54,6 +54,13 @@ const IMPACT_PEAKS = {
   W5: 0.72     // 极重
 };
 
+/**
+ * 棋子音效相对背景音效的最小倍数契约（用户硬性要求：棋子音效应比背景高 1.2×）。
+ * 含义：背景绝对增益 ≤ 棋子总线实际增益 / SFX_AMBIENT_MIN_RATIO。
+ * 无论「背景」「棋子」两个独立滑块怎么调，背景永远 ≤ 棋子÷1.2，即棋子 ≥ 背景×1.2。
+ */
+const SFX_AMBIENT_MIN_RATIO = 1.2;
+
 /* --- 音频上下文 --- */
 let ctx: any = null;
 let ready = false;
@@ -1664,10 +1671,11 @@ export const SFX = {
       const t = ctx.currentTime;
       ambientBus.gain.cancelScheduledValues(t);
       ambientBus.gain.setValueAtTime(ambientBus.gain.value, t);
-      // 绝对上限 0.50：系数虽可达 1.0，但基准 0.32 × (1/0.34) ≈ 0.94 会越线，
-      // 故取 min 与红线等效值，确保背景永远低于棋子音效。
-      const target = Math.min(0.32 * (n / 0.34), 0.50);
-      ambientBus.gain.linearRampToValueAtTime(target, t + 0.3);
+      // 背景绝对上限 = 棋子总线实际增益 / 1.2 契约（同时不超过独立红线 0.50）。
+      // 无论滑块如何调，背景始终 ≤ 棋子÷1.2，即棋子 ≥ 背景×1.2。
+      const sfxActual = sfxBus ? sfxBus.gain.value : 1.0;
+      const ceiling = Math.min(0.32 * (n / 0.34), 0.50, sfxActual / SFX_AMBIENT_MIN_RATIO);
+      ambientBus.gain.linearRampToValueAtTime(ceiling, t + 0.3);
     }
     return n;
   },
@@ -1690,6 +1698,16 @@ export const SFX = {
       sfxBus.gain.setValueAtTime(sfxBus.gain.value, t);
       sfxBus.gain.linearRampToValueAtTime(n, t + 0.1);
     }
+    // 棋子调高后，背景仍须满足 ≤ 棋子÷1.2；若背景已越线立即回收。
+    if (ambientBus && ctx) {
+      const t = ctx.currentTime;
+      const ceiling = n / SFX_AMBIENT_MIN_RATIO;
+      if (ambientBus.gain.value > ceiling) {
+        ambientBus.gain.cancelScheduledValues(t);
+        ambientBus.gain.setValueAtTime(ambientBus.gain.value, t);
+        ambientBus.gain.linearRampToValueAtTime(ceiling, t + 0.3);
+      }
+    }
     return n;
   },
 
@@ -1702,7 +1720,9 @@ export const SFX = {
     if (ambientBus && ctx) {
       const t = ctx.currentTime;
       const gain = 0.30 + (0.50 - 0.30) * clamp(level, 0, 1);
-      const target = Math.min(gain * (settings.ambientVol / 0.34), 0.50);
+      const sfxActual = sfxBus ? sfxBus.gain.value : 1.0;
+      // 背景绝对上限：用户滑块红线 0.50 与 1.2× 契约（≤ 棋子÷1.2）取最小。
+      const target = Math.min(gain * (settings.ambientVol / 0.34), 0.50, sfxActual / SFX_AMBIENT_MIN_RATIO);
       ambientBus.gain.cancelScheduledValues(t);
       ambientBus.gain.setValueAtTime(ambientBus.gain.value, t);
       ambientBus.gain.linearRampToValueAtTime(target, t + 0.5);

@@ -1266,6 +1266,20 @@ function applySampleOverlay(): void {
   addSample('pawn.capture.approach',  'C', 'vox.shout.charge', { gain: 0.50, rate: 1.00 });
   addSample('horse.capture.approach', 'C', 'vox.horse.neigh',  { gain: 0.52, rate: 1.00 });
   addSample('rook.capture.approach',  'C', 'vox.horse.neigh',  { gain: 0.40, rate: 0.92, offset: 0.05 }); // 双马齐嘶
+  // 象：冲锋低吼（复用王吼素材作象鸣，比通用 kill 更威、更沉）
+  addSample('elephant.capture.approach', 'C', 'vox.king.roar', { gain: 0.46, rate: 0.84, offset: 0.02 });
+
+  /* ===== 象 B 专属个性配音补全（无专属录音，复用现有真实 vox 素材，零新增文件）=====
+   *  · idle   ：象鼻喷气（重型鼻息 vox.horse.snort），低分量、低概率，区别于马的响鼻
+   *  · move   ：象夫叱喝号子（vox.shout.heave），象本缺 M1 号子，其他兵种均有
+   *  · capture：A2 命中改用更威的象鸣（vox.king.roar）替代通用 kill，见下方 override
+   */
+  addSample('elephant.idle',          'C', 'vox.horse.snort', { gain: 0.22, rate: 0.80, probability: 0.30 }); // 象鼻喷气
+  addSample('elephant.move.launch',   'C', 'vox.shout.heave', { gain: 0.40, rate: 0.84, offset: 0.03, probability: 0.70 }); // 象夫叱喝
+
+  // 象命中：把通用 vox.shout.kill 升级为象鸣（vox.king.roar），更沉更威
+  overrideSample('elephant.capture.clash', 'C', 'vox.shout.kill', 'vox.king.roar',
+    { gain: 0.54, rate: 0.86, busTarget: 'hitBus' });
 
   // 进攻 A2：命中瞬间的吼喝（走 hitBus，不受 hitFreeze 低通压制）
   addSample('pawn.capture.clash',     'C', 'vox.shout.kill', { gain: 0.56, rate: 1.00, busTarget: 'hitBus' });
