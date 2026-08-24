@@ -1,7 +1,8 @@
 /**
  * worker.js —— AI 搜索的 module worker
- * 由 engine.js 以 new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' }) 创建。
- * 只依赖纯逻辑模块（constants / board / rules / search），不触碰 Three.js 与 DOM。
+ * 由 build.mjs 显式第二 entry 打包为 dist/worker.js，engine.ts 以
+ *   new Worker(new URL('./worker.js', import.meta.url), { type: 'module' })
+ * 创建。只依赖纯逻辑模块（constants / board / rules / search），不触碰 Three.js 与 DOM。
  */
 
 import { boardFromFen } from '../core/board.ts';

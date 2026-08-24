@@ -59,15 +59,18 @@ export class AIEngine {
   _initWorker(): void {
     if (typeof Worker === 'undefined') { this._useSliced('浏览器不支持 Web Worker'); return; }
     try {
-      // 内联 new URL 模式：esbuild 识别到 new URL('./worker.js', import.meta.url) 后，
-      // 会自动把 ./worker.ts（源文件，esbuild 按存在解析）打包为独立 chunk，并把这里的
-      // URL 重写成带内容哈希的产物路径（如 ./worker-XXXX.js），从而正确命中 /dist/ 产物、
-      // 避免线上请求不存在的 .ts 而触发 Strict MIME 拒绝。
-      // （分离变量写法会让 esbuild 无法识别，切勿改为 const u = new URL(...) 形式）
-      const w = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
+      // worker 产物由 build.mjs 的【显式第二 entry】产出为 dist/worker.js（与 sw.js
+      // PRECACHE_CORE 硬编码的 './dist/worker.js' 对齐）。此处用变量拼接 workerPath，
+      // 刻意让 esbuild **不**把 new URL 识别为隐式 worker entry（避免与手动 entry 双路
+      // 冲突），运行时仍等价于 new Worker(new URL('./worker.js', import.meta.url))。
+      const workerPath = './worker.js';
+      const w = new Worker(new URL(workerPath, import.meta.url), { type: 'module' });
       w.addEventListener('message', ev => this._onWorkerMessage(ev));
       w.addEventListener('error', err => {
-        console.warn('[AI] Worker 运行出错，降级为主线程时间切片：', err && err.message);
+        const detail = err && (err.filename || err.lineno || err.message)
+          ? `${err.message || ''} @ ${err.filename || '?'}:${err.lineno || '?'}`
+          : '（无 message —— 多为 Worker 脚本加载/解析失败，如 MIME 错误或旧 SW 缓存）';
+        console.warn('[AI] Worker 运行出错，降级为主线程时间切片：', detail);
         this._teardownWorker();
         this._useSliced('Worker 运行出错');
       });

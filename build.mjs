@@ -141,16 +141,30 @@ async function writeManifest() {
 
 async function buildOnce() {
   // 主 bundle：src/main.js → dist/main.js（three 内联；webgpu 动态 chunk）。
-  // AI module worker 由 esbuild 原生处理：engine.ts 里的
-  //   new Worker(new URL('./worker.js', import.meta.url), { type: 'module' })
-  // 会被 esbuild 自动识别为 worker entry，把 src/ai/worker.ts 打包为独立 chunk
-  // （带内容哈希，如 worker-XXXX.js）并重写该 URL —— 无需手动第二 entry，
-  // 否则会出现「手动产物 worker.js 与 esbuild 自动产物命名不一致 / URL 不被改写」的双路冲突。
   await esbuild.build(common);
+
+  // AI module worker：显式第二 entry → dist/worker.js。
+  // 注意：这里必须显式打包，不能依赖 esbuild 对 engine.ts 中
+  //   new Worker(new URL('./worker.js', import.meta.url)) 的「自动识别」——
+  //   实测 CF Pages 构建环境中 esbuild 的隐式 worker 打包不可靠（线上曾缺失
+  //   dist/worker.js，导致 Worker 加载失败降级为主线程）。显式 entry 保证
+  //   每次构建都产出 worker.js，与 engine.ts 的 URL './worker.js' 精确对齐，
+  //   也契合 sw.js PRECACHE_CORE 硬编码的 './dist/worker.js'。
+  await esbuild.build({
+    entryPoints: [resolveEntry('src/ai/worker.js')],
+    bundle: true,
+    format: 'esm',
+    outfile: path.join(OUTDIR, 'worker.js'),
+    target: ['es2022'],
+    sourcemap: false,
+    legalComments: 'none',
+    logLevel: 'info',
+    plugins: [threeVendorPlugin]   // worker 不引 three，但保留插件以防御未来引入
+  });
 
   // 构建产物清单（SW 预缓存契约）
   const manifestPath = await writeManifest();
-  console.log('[build] 产物已写入 dist/（main.js + worker chunk + chunks/）');
+  console.log('[build] 产物已写入 dist/（main.js + worker.js + chunks/）');
   console.log(`[build] assets-manifest.json 已生成 -> ${manifestPath}`);
 }
 
