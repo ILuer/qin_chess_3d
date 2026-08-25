@@ -70,7 +70,7 @@ export class AIEngine {
         const detail = err && (err.filename || err.lineno || err.message)
           ? `${err.message || ''} @ ${err.filename || '?'}:${err.lineno || '?'}`
           : '（无 message —— 多为 Worker 脚本加载/解析失败，如 MIME 错误或旧 SW 缓存）';
-        console.warn('[AI] Worker 运行出错，降级为主线程时间切片：', detail);
+        console.warn('[AI:engine] Worker 运行出错，降级为主线程时间切片', { detail }, err);
         this._teardownWorker();
         this._useSliced('Worker 运行出错');
       });
@@ -79,34 +79,40 @@ export class AIEngine {
       // 探活：1.5s 内没收到 ready/pong 就降级
       this._probeTimer = setTimeout(() => {
         if (!this.ready) {
-          console.warn('[AI] Worker 无响应，降级为主线程时间切片');
+          console.warn('[AI:engine] Worker 无响应（探活超时 1.5s），降级为主线程时间切片');
           this._teardownWorker();
           this._useSliced('Worker 无响应');
         }
       }, 1500);
       w.postMessage({ type: 'ping', id: -1 });
     } catch (err) {
-      console.warn('[AI] 无法创建 module Worker，降级为主线程时间切片：', (err as Error) && (err as Error).message);
+      console.warn('[AI:engine] 无法创建 module Worker，降级为主线程时间切片', { message: (err as Error)?.message }, err);
       this._useSliced('无法创建 Worker');
     }
   }
 
   _onWorkerMessage(ev: MessageEvent): void {
-    const msg = (ev.data || {}) as Record<string, unknown>;
-    if (msg.type === 'ready' || msg.type === 'pong') {
-      if (!this.ready) {
-        this.ready = true;
-        clearTimeout(this._probeTimer);
-        if (this.onModeChange) this.onModeChange('worker');
+    try {
+      const msg = (ev.data || {}) as Record<string, unknown>;
+      if (msg.type === 'ready' || msg.type === 'pong') {
+        if (!this.ready) {
+          this.ready = true;
+          clearTimeout(this._probeTimer);
+          if (this.onModeChange) this.onModeChange('worker');
+        }
+        return;
       }
-      return;
+      const id = msg.id as number;
+      const entry = this._pending.get(id);
+      if (!entry) return;
+      this._pending.delete(id);
+      clearTimeout(entry.timer);
+      if (msg.type === 'error') entry.reject(new Error(String(msg.message || 'AI worker 错误')));
+      else entry.resolve(msg.result || null);
+    } catch (err) {
+      // 畸形消息（如旧 SW 缓存的旧版 worker 回包）不应让主循环崩溃
+      console.warn('[AI:engine] 收到畸形 Worker 消息，忽略本条', { raw: ev.data }, err);
     }
-    const entry = this._pending.get(msg.id as number);
-    if (!entry) return;
-    this._pending.delete(msg.id as number);
-    clearTimeout(entry.timer);
-    if (msg.type === 'error') entry.reject(new Error(String(msg.message || 'AI worker 错误')));
-    else entry.resolve(msg.result || null);
   }
 
   _teardownWorker(): void {
@@ -185,7 +191,7 @@ export class AIEngine {
         result = await searchBestMoveSliced(board, side, { depth: Math.min(depth, 4), timeLimit, randomness });
       }
     } catch (err) {
-      console.warn('[AI] 搜索失败，降级为主线程时间切片：', (err as Error) && (err as Error).message);
+      console.warn('[AI:engine] 搜索失败，降级为主线程时间切片', { message: (err as Error)?.message, fen }, err);
       if (this._cancelled) { this._thinking = false; return null; }
       this._useSliced('搜索异常');
       const board = boardFromFen(fen);

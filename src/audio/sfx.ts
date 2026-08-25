@@ -312,7 +312,9 @@ function setPannerPosition(p: any, pos: { x: number, y: number, z: number }): vo
     } else if (typeof p.setPosition === 'function') {
       p.setPosition(pos.x, pos.y, pos.z);
     }
-  } catch (e) { /* 静默：位置设置失败不影响发声 */ }
+  } catch (e) {
+    console.warn('[AUDIO:sfx] setPannerPosition 位置设置失败（降级为非空间化发声）', e);
+  }
 }
 
 /** 更新 AudioListener 位置与朝向（由 main.js 每帧传相机 world pos；Safari 回退无操作） */
@@ -344,7 +346,9 @@ function setListener(position: { x: number, y: number, z: number },
         l.setOrientation(forward.x, forward.y, forward.z, up.x, up.y, up.z);
       }
     }
-  } catch (e) { /* 静默 */ }
+  } catch (e) {
+    console.warn('[AUDIO:sfx] setListener 监听者设置失败（降级为非空间化发声）', e);
+  }
 }
 
 function makeBus(wet: number, pan: number, life: number, faction: string, busTarget?: string, worldPos?: { x: number, y: number, z: number } | null): any {
@@ -1261,7 +1265,7 @@ function executeInst(inst: any, dest: any, t: number, pit: number, vol: number):
     }
   } catch (e) {
     // 单次合成失败不中断整体
-    console.warn('[SFX] executeInst failed:', inst.type, (e as Error).message);
+    console.error('[AUDIO:sfx] executeInst 合成指令失败（单条跳过，不影响整体事件）', inst.type, (e as Error).message, e);
   }
 }
 
@@ -1334,10 +1338,10 @@ function playEvent(name: string, opts: any = {}): boolean {
           const pName = PIECE_NAMES[opts.piece];
           if (pName && BEAT_RECIPES[`${pName}.select`]) ev = `${pName}.select`;
         }
-        p.then(() => renderEventAt(ev, t0(), opts)).catch(() => {});
+        p.then(() => renderEventAt(ev, t0(), opts)).catch((e: any) => console.warn('[AUDIO:sfx] playEvent: suspended 恢复后渲染失败', e));
         return true;
       }
-    } catch (e) { /* 忽略，落入下方常规路径 */ }
+    } catch (e) { console.warn('[AUDIO:sfx] playEvent: ctx.resume 同步异常（落入常规路径）', e); }
     // resume 同步失败（极少见）→ 仍尝试渲染，浏览器可能已隐式恢复
   }
 
@@ -1390,6 +1394,7 @@ function renderEventAt(eventName: string, t: number, opts: any = {}): boolean {
       worldPos: opts.worldPos
     });
   } catch (e) {
+    console.error('[AUDIO:sfx] renderEventAt 渲染失败', eventName, 'opts=', JSON.stringify({ faction, pan, pit: actualPit, vol }), e);
     return false;
   }
 }
@@ -1434,7 +1439,7 @@ function scheduleSequence(sequence: any, baseT: number, opts: any = {}): Sequenc
   // （已排程节点由 WebAudio 时钟驱动，与 raf 无关）。
   if (ctx.state === 'suspended') {
     // 边界：currentTime 不前进 → 尝试恢复，并把锚点钳到当前（ADR-4 后果）
-    ctx.resume().catch(() => {});
+    ctx.resume().catch((e: any) => console.warn('[AUDIO:sfx] scheduleSequence: resume 失败', e));
     baseT = Math.max(baseT, ctx.currentTime + 0.002);
   }
 
@@ -1463,7 +1468,7 @@ export const SFX = {
 
   init(): boolean {
     if (ready) {
-      if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+      if (ctx && ctx.state === 'suspended') ctx.resume().catch((e: any) => console.warn('[AUDIO:sfx] init: resume 失败', e));
       return true;
     }
     loadSettings();
@@ -1479,7 +1484,7 @@ export const SFX = {
 
       buildGraph();
       ready = true;
-      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+      if (ctx.state === 'suspended') ctx.resume().catch((e: any) => console.warn('[AUDIO:sfx] init: 首次 resume 失败', e));
 
       // C4：采样加载管线绑定 AudioContext + 立即后台预载全清单。
       // 关键：不 await —— 采样未到位期间 Foley 走程序化 fallback、Vocal 静默，
@@ -1488,23 +1493,25 @@ export const SFX = {
       preloadSamples()
         .then(() => {
           const s = sampleStats();
-          console.info(`[SFX] 战场采样就位 ${s.loaded}/${s.total} · ${(s.bytes / 1048576).toFixed(2)}MB`);
+          console.info(`[AUDIO:sampleBank] 战场采样就位 ${s.loaded}/${s.total} · ${(s.bytes / 1048576).toFixed(2)}MB`);
         })
-        .catch(() => {});
+        .catch((e: any) => console.warn('[AUDIO:sampleBank] 采样预载异常', e));
 
       // iOS: visibilitychange 兜底
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden && ctx && ctx.state === 'suspended') {
-          ctx.resume().catch(() => {});
+          ctx.resume().catch((e: any) => console.warn('[AUDIO:sfx] visibilitychange resume 失败', e));
         }
       }, { passive: true });
 
       // 静音 buffer 解锁
-      const silenceBuf = ctx.createBuffer(1, 1, ctx.sampleRate);
-      const silenceSrc = ctx.createBufferSource();
-      silenceSrc.buffer = silenceBuf;
-      silenceSrc.connect(ctx.destination);
-      silenceSrc.start(0);
+      try {
+        const silenceBuf = ctx.createBuffer(1, 1, ctx.sampleRate);
+        const silenceSrc = ctx.createBufferSource();
+        silenceSrc.buffer = silenceBuf;
+        silenceSrc.connect(ctx.destination);
+        silenceSrc.start(0);
+      } catch (e) { console.warn('[AUDIO:sfx] 解锁静音 buffer 失败', e); }
 
       // A3（修复「选中几次后无声 / 背景不持续」）：浏览器会在音频空闲后自动把
       // AudioContext 置为 suspended（省电），届时所有棋子音（playEvent 早返回吞音）
@@ -1515,7 +1522,7 @@ export const SFX = {
       let _gestureBound = false;
       const _wake = () => {
         if (ctx && ctx.state === 'suspended') {
-          try { ctx.resume().catch(() => {}); } catch (e) { /* 忽略 */ }
+          try { ctx.resume().catch((e: any) => console.warn('[AUDIO:sfx] resume 失败', e)); } catch (e) { /* 忽略 */ }
         }
       };
       ctx.onstatechange = () => {
@@ -1533,6 +1540,7 @@ export const SFX = {
 
       return true;
     } catch (e) {
+      console.error('[AUDIO:sfx] init: AudioContext 创建/拓扑构建失败', e);
       ctx = null;
       ready = false;
       return false;
@@ -1682,7 +1690,7 @@ export const SFX = {
     // 修复：开启时若 AudioContext 处于 suspended（浏览器自动暂停策略），先 resume
     // 再返回，避免后续 play() 当帧被 playEvent() 的 suspended 早返回吞掉声音。
     if (v && ctx && ctx.state === 'suspended') {
-      try { ctx.resume().catch(() => {}); } catch (e) { /* 忽略 */ }
+      try { ctx.resume().catch((e: any) => console.warn('[AUDIO:sfx] setEnabled: resume 失败', e)); } catch (e) { /* 忽略 */ }
     }
     saveSettings();
     return settings.enabled;

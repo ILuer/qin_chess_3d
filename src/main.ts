@@ -324,7 +324,7 @@ async function requestAI(): Promise<void> {
     if (!res || !res.from || !res.to) {
       // AI 无着可走。正常情况下 gs 早已判定将死/困毙并结束对局，
       // 能走到这里说明逻辑状态与 AI 认知不同步——重判一次兜底，别让回合死等。
-      console.warn('[AI] 未返回着法，重新判定局面：', gs.status);
+      console.warn('[MAIN:ai] 未返回着法，重新判定局面', { status: gs.status, fen: gs.board.toFen() });
       if (gs.isGameOver()) onGameOver();
       return;
     }
@@ -333,7 +333,7 @@ async function requestAI(): Promise<void> {
     aiBusy = false;
     applyMove(res.from, res.to);
   } catch (e) {
-    console.warn('[AI] 思考异常：', e);
+    console.warn('[MAIN:ai] 思考异常', { fen, side: aiSide }, e);
   } finally {
     aiBusy = false;
     syncControls();
@@ -849,7 +849,7 @@ function onFatal(e: any): void {
     const t = ls && ls.querySelector('.loading-text');
     if (t) t.textContent = msg;
   }
-  console.error('[致命错误]', msg, detail);
+  console.error('[MAIN:fatal]', msg, detail);
   trackError(msg, detail);   // H1：本地埋点错误（不上报外部）
 }
 
@@ -1128,10 +1128,12 @@ function computeTensionState(): any {
 
 function startLoop(): void {
   let last = performance.now();
+  let loopErrCount = 0;
+  let lastLoopErrAt = 0;
   function frame(now: number): void {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
-
+    try {
     // ★ timeScale 集成：hitstop 期间 effectiveDt=0，补间/粒子/震屏全部冻结
     const effectiveDt = dt * animator.timeScale;
 
@@ -1188,7 +1190,17 @@ function startLoop(): void {
     }
     if (sceneSys) sceneSys.render();
     if (hud) hud.updateTimer();
-    requestAnimationFrame(frame);
+    } catch (err) {
+      // 主循环绝不能因单帧异常停摆：记录但继续调度下一帧。
+      loopErrCount++;
+      const t = performance.now();
+      if (t - lastLoopErrAt > 3000) {   // 去抖：同类错误 3s 内只报一次，避免每帧刷屏
+        lastLoopErrAt = t;
+        console.error('[MAIN:loop] 主循环单帧异常（已跳过该帧，循环继续）', { loopErrCount }, err);
+      }
+    } finally {
+      requestAnimationFrame(frame);
+    }
   }
   requestAnimationFrame(frame);
 }
@@ -1207,11 +1219,11 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js', { scope: './' })
       .then((reg) => {
         // 仅调试可观察；正式可静默
-        if (window.console && console.log) console.log('[SW] registered, scope=', reg.scope);
+        if (window.console && console.info) console.info('[MAIN:sw] registered, scope=', reg.scope);
       })
       .catch((err) => {
         // 注册失败不应影响游戏（SW 是渐进增强）
-        if (window.console && console.warn) console.warn('[SW] register failed:', err && err.message);
+        if (window.console && console.warn) console.warn('[MAIN:sw] register failed', { message: err && err.message }, err);
       });
   });
 }

@@ -41,6 +41,7 @@ export function execute(cd: any, attacker: any, victim: any, fromCell: { file: n
   }
 
   return new Promise<void>((resolve) => {
+   try {
     const animator = cd.animator;
     const effects = cd.effects;
     const sceneSys = cd.sceneSys;
@@ -120,7 +121,7 @@ export function execute(cd: any, attacker: any, victim: any, fromCell: { file: n
       if (cd.sfx && cd.sfx._internals && cd.sfx._internals.updateSourceWorldPos) {
         cd.sfx._internals.updateSourceWorldPos({ x: toW.x, y: 0, z: toW.z });
       }
-    } catch (e) { /* sfx 未就绪，忽略 */ }
+    } catch (e) { console.warn('[AUDIO:combat] CaptureAction sfx 调用异常', aTypeKey, e); }
 
     // 音效：plan（若 sfx 就绪）—— C3（ADR-4）：combat.plan 内部已改 ctx 绝对时间渲染（无 setTimeout）
     try {
@@ -136,7 +137,7 @@ export function execute(cd: any, attacker: any, victim: any, fromCell: { file: n
           hitstop: A3, density: 'full', tension: cd._tension || 0
         });
       }
-    } catch (e) { /* sfx 未就绪，忽略 */ }
+    } catch (e) { console.warn('[AUDIO:combat] CaptureAction sfx 调用异常', aTypeKey, e); }
 
     // ── 命中帧集中触发（在 A2 onComplete 中）──
     const fireImpact = () => {
@@ -302,6 +303,13 @@ export function execute(cd: any, attacker: any, victim: any, fromCell: { file: n
     });
 
     animator.seq(steps);
+   } catch (e) {
+    console.error('[ANIM:combat] CaptureAction.execute 吃子演出构建异常', {
+      attackerType: attacker?.userData?.pieceType, victimType: victim?.userData?.pieceType,
+      from: fromCell, to: toCell
+    }, e);
+    throw e;
+   }
   });
 }
 
@@ -320,6 +328,7 @@ export function execute(cd: any, attacker: any, victim: any, fromCell: { file: n
  */
 function executeCannon(cd: any, attacker: any, victim: any, fromCell: { file: number, rank: number }, toCell: { file: number, rank: number }, opts: { aiFast?: boolean, impactLevel?: string, onComplete?: () => void } = {}): Promise<void> {
   return new Promise<void>((resolve) => {
+   try {
     const animator = cd.animator;
     const effects = cd.effects;
     // ★ Sprint 1 速度框架：炮接入 beatSpeedMul(C=0.9 慢)，与 AI 正交相乘。
@@ -401,7 +410,7 @@ function executeCannon(cd: any, attacker: any, victim: any, fromCell: { file: nu
         if (cd.sfx && cd.sfx.captured) {
           cd.sfx.captured(vType, victim.userData.pieceSide, { pan: cellPan(toCell) });
         }
-      } catch (e) { /* sfx 未就绪 */ }
+      } catch (e) { console.warn('[AUDIO:combat] CaptureAction 炮击/被吃 sfx 调用异常', PT.CANNON, e); }
       // 溶解受害者
       try {
         animator.dissolvePiece(v, {
@@ -578,5 +587,12 @@ function executeCannon(cd: any, attacker: any, victim: any, fromCell: { file: nu
     });
 
     animator.seq(steps);
+   } catch (e) {
+    console.error('[ANIM:combat] CaptureAction.executeCannon 炮击演出构建异常', {
+      attackerType: attacker?.userData?.pieceType, victimType: victim?.userData?.pieceType,
+      from: fromCell, to: toCell
+    }, e);
+    throw e;
+   }
   });
 }

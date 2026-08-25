@@ -163,7 +163,10 @@ export async function loadSample(key: string): Promise<AudioBuffer | null> {
       _state.set(key, 'loaded');
       return audio;
     } catch (e) {
-      // 失败静默：不抛错、不打断游戏流程
+      // 失败静默降级：不抛错、不打断游戏流程；但记录上下文便于 QA 真机自检
+      // （key + url + 原始错误）。采样缺失时由 executeInst 自动回退程序化/Foley，
+      // 或 Vocal 静默跳过，不影响战斗进程。
+      console.warn('[AUDIO:sampleBank] 采样加载失败（降级回退）', key, url, (e as Error).message);
       _state.set(key, 'failed');
       return null;
     }

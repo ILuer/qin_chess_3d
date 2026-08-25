@@ -27,6 +27,9 @@
 import * as THREE from 'three';
 import { toWorld } from '../core/constants.ts';
 
+/** 每帧 update 异常日志限流计数（避免连续失败时刷屏） */
+let _camUpdateErrs = 0;
+
 export const FOLLOW_CONFIG = {
   /** 默认跟随半径（棋子特写距离；仅在未提供 fitRadius 时的兜底值） */
   followDistance: 1.45,
@@ -226,6 +229,7 @@ export class FollowCamera {
    * @param {OrbitControls} controls
    */
   update(dt: number, camera: any, controls: any): void {
+   try {
     if (dt <= 0) return;                                  // hitstop / 0 帧长：冻结
     if (!controls || !camera) return;
 
@@ -303,6 +307,9 @@ export class FollowCamera {
 
     // 7) 让 OrbitControls 应用 lookAt 与残留阻尼（本帧即生效，不滞后一帧）
     if (typeof controls.update === 'function') controls.update();
+   } catch (e) {
+    if (_camUpdateErrs < 5) { _camUpdateErrs++; console.error('[RENDER:followCamera] update 相机跟随更新异常（已跳过本帧）', e); }
+   }
   }
 
   _maintainLimits(controls: any, actualRadius: number, radius: number): void {

@@ -107,7 +107,10 @@ export class CombatDirector {
     try {
       await moveExecute(this, piece, fromCell, toCell, opts);
     } catch (e) {
-      console.warn('[CombatDirector] playMove 异常：', e);
+      console.error('[ANIM:combat] playMove 演出异常（已重置 _busy）', {
+        pieceType: piece?.userData?.pieceType,
+        from: fromCell, to: toCell
+      }, e);
       piece.userData._busy = false;
     } finally {
       this._state = 'IDLE';
@@ -145,7 +148,11 @@ export class CombatDirector {
     try {
       await captureExecute(this, attacker, victim, fromCell, toCell, opts);
     } catch (e) {
-      console.warn('[CombatDirector] playCapture 异常：', e);
+      console.error('[ANIM:combat] playCapture 演出异常（已重置 _busy）', {
+        attackerType: attacker?.userData?.pieceType,
+        victimType: victim?.userData?.pieceType,
+        from: fromCell, to: toCell
+      }, e);
       attacker.userData._busy = false;
       if (victim) victim.userData._busy = false;
     } finally {
@@ -211,7 +218,7 @@ export class CombatDirector {
   /** FSM 转移 */
   _fsmTransition(from: string, to: string): void {
     if (this._state !== from) {
-      console.warn(`[CombatDirector] FSM 转移异常：期望 ${from}→${to}，当前 ${this._state}`);
+      console.warn(`[ANIM:combat] FSM 转移异常：期望 ${from}→${to}，当前 ${this._state}`);
     }
     this._state = to;
   }

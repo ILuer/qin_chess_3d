@@ -181,7 +181,7 @@ export class GameState {
     const arr = this._listeners[evt];
     if (!arr) return;
     for (let i = 0; i < arr.length; i++) {
-      try { arr[i]!(payload); } catch (e) { console.error(`[gameState] 监听器 ${evt} 抛错`, e); }
+      try { arr[i]!(payload); } catch (e) { console.error(`[CORE:gameState] 监听器 ${evt} 抛错`, e); }
     }
   }
 

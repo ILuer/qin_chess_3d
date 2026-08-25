@@ -54,7 +54,7 @@ export class BeatSequencer {
       try {
         copy[i]!(...args);
       } catch (e) {
-        console.warn(`[BeatSequencer] 回调异常 beatId="${beatId}" :`, e);
+        console.error(`[ANIM:combat] BeatSequencer.fire 回调异常 beatId="${beatId}"`, e);
       }
     }
   }

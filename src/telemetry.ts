@@ -19,6 +19,17 @@
 const MAX_QUEUE = 20;
 const FPS_BUCKET_SECONDS = 5;
 
+/**
+ * 本地可观测性开关：默认关闭，避免 fps_bucket 等探针每 5s 刷屏控制台。
+ * 调试时加 `?debug` 开启（纯本地、不上报外部）。
+ */
+function telemetryDebugEnabled(): boolean {
+  try {
+    return typeof location !== 'undefined' && /[?&]debug\b/.test(location.search);
+  } catch (e) { return false; }
+}
+const TELEMETRY_DEBUG = telemetryDebugEnabled();
+
 /** 会话 ID：一次页面加载唯一 */
 function makeSessionId() {
   try {
@@ -50,7 +61,7 @@ function trackEvent(name: string, props: Record<string, unknown> = {}): Record<s
   // 本地可观测性：console 输出即「上报」（当前无外部接收端）
   try {
     // eslint-disable-next-line no-console
-    console.log('[telemetry]', name, props);
+    if (TELEMETRY_DEBUG) console.debug('[telemetry]', name, props);
   } catch (e) { /* console 不可用时静默 */ }
   if (queue.length >= MAX_QUEUE) flush();
   return evt;
@@ -69,7 +80,7 @@ function flush(): void {
   const n = queue.length;
   try {
     // eslint-disable-next-line no-console
-    console.log(`[telemetry] flush(${n})`, queue.map(e => e.name));
+    if (TELEMETRY_DEBUG) console.debug(`[telemetry] flush(${n})`, queue.map(e => e.name));
   } catch (e) { /* 静默 */ }
   queue.length = 0;
 }

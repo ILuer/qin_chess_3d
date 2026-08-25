@@ -237,7 +237,7 @@ export class AmbienceSystem {
       pulse.doubleDrum = true;
       if (now - this._lastHeartbeatAt > EVENT_PULSE.HEARTBEAT_GAP_S * 1000) {
         this._lastHeartbeatAt = now;
-        try { SFX.play('king.heartbeat'); } catch (e) { /* 忽略 */ }
+        try { SFX.play('king.heartbeat'); } catch (e) { console.warn('[AUDIO:ambience] 将军心跳播放失败', e); }
       }
     }
 
@@ -302,7 +302,7 @@ export class AmbienceSystem {
       // 加载期间可能已经 stop()，或用户关了环境音 —— 都要老实退出
       if (!b || !this._active || this._beds[name]) return;
       this._beds[name] = this._buildSampleBed(name, cfg, b, cfg.crossfade);
-    }).catch(() => {});
+    }).catch((e) => console.warn('[AUDIO:ambience] 采样环境床加载失败', name, cfg.key, e));
   }
 
   /** 建一条循环床并把被它取代的程序化层淡出（等功率交叉淡化） */
@@ -960,12 +960,17 @@ export class AmbienceSystem {
 
     const timer = setTimeout(() => {
       if (!this._active || !this._enabled) return;
-      if (event === 'banner') this._playBanner();
-      else if (event === 'drum') this._playDrum();
-      else if (event === 'horse') this._playHorse();
-      else if (event === 'horn') this._playHorn();
-      else if (event === 'dust') this._playDust();
-      else if (event === 'shout') this._playShout();
+      try {
+        if (event === 'banner') this._playBanner();
+        else if (event === 'drum') this._playDrum();
+        else if (event === 'horse') this._playHorse();
+        else if (event === 'horn') this._playHorn();
+        else if (event === 'dust') this._playDust();
+        else if (event === 'shout') this._playShout();
+      } catch (e) {
+        // 单拍播放异常：记录上下文，保持其余层不受影响（不额外重排，行为与未捕获一致）
+        console.error('[AUDIO:ambience] 阵发层播放异常', event, e);
+      }
     }, delayMs);
 
     this._timers.push(timer);

@@ -517,6 +517,7 @@ export class Animator {
    */
   tickIdle(group: any, t: number, selected?: boolean, farView?: boolean): void {
     if (!group || !group.userData) return;
+   try {
     const ud = group.userData;
     // 防御：_busy 卡死保险（见 IDLE_BUSY_DEADMAN_S）。基于帧时钟 t（仅主循环运行时推进），
     // 后台标签页/暂停不会误触；超过阈值即释放 _busy，使该棋子待机恢复（绝不中途清战斗通道）。
@@ -602,6 +603,9 @@ export class Animator {
         sub.rotation[ax] += p[2] * IDLE_AMP_SCALE * l2Amp * pulse;
       }
     }
+   } catch (e) {
+    console.error('[ANIM:animator] tickIdle 待机微动异常（已跳过本帧）', { pieceType: group?.userData?.pieceType }, e);
+   }
   }
 
   /**
@@ -810,16 +814,23 @@ export class Animator {
     for (let i = 0; i < list.length; i++) {
       const tw = list[i]!;
       if (tw.dead) continue;
-      if (tw.delay > 0) { tw.delay -= step; if (tw.delay > 0) continue; }
-      if (!tw.started) { tw.started = true; if (tw.onStart) tw.onStart(); }
-      tw.elapsed += step;
-      const raw = Math.min(1, tw.elapsed / tw.duration);
-      const eased = tw.easing(raw);
-      if (tw.onUpdate) tw.onUpdate(eased, raw);
-      if (raw >= 1) {
+      try {
+        if (tw.delay > 0) { tw.delay -= step; if (tw.delay > 0) continue; }
+        if (!tw.started) { tw.started = true; if (tw.onStart) tw.onStart(); }
+        tw.elapsed += step;
+        const raw = Math.min(1, tw.elapsed / tw.duration);
+        const eased = tw.easing(raw);
+        if (tw.onUpdate) tw.onUpdate(eased, raw);
+        if (raw >= 1) {
+          tw.dead = true;
+          if (tw.lock) this._lockCount = Math.max(0, this._lockCount - 1);
+          if (tw.onComplete) tw.onComplete();
+        }
+      } catch (e) {
+        // 单条补间回调异常：标记 dead 防止每帧重复抛错刷屏，并解除输入锁
         tw.dead = true;
         if (tw.lock) this._lockCount = Math.max(0, this._lockCount - 1);
-        if (tw.onComplete) tw.onComplete();
+        console.error('[ANIM:animator] update 补间回调异常（已标记 dead）', e);
       }
     }
     // 清理

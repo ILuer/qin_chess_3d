@@ -616,7 +616,14 @@ function buildLibrary(): any {
  * @returns {object}
  */
 export function getMaterials(): any {
-  if (!_lib) _lib = buildLibrary();
+  if (!_lib) {
+    try {
+      _lib = buildLibrary();
+    } catch (e) {
+      console.error('[RENDER:materials] buildLibrary 材质库构建异常', e);
+      throw e;
+    }
+  }
   return _lib;
 }
 
@@ -624,6 +631,7 @@ export function getMaterials(): any {
  * 旗面材质（双面 + 汉字），按 glyph+side 缓存
  */
 export function getBannerMaterial(glyph: string, side: string): any {
+ try {
   const key = 'banner:' + glyph + ':' + side;
   let m = _extraMats.get(key);
   if (!m) {
@@ -636,6 +644,10 @@ export function getBannerMaterial(glyph: string, side: string): any {
     _extraMats.set(key, m);
   }
   return m;
+ } catch (e) {
+  console.error('[RENDER:materials] getBannerMaterial 旗面材质异常', { glyph, side }, e);
+  throw e;
+ }
 }
 
 function disposeDeep(node: any, seen: Set<any>): void {

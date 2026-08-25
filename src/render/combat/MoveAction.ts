@@ -35,6 +35,7 @@ import {
  */
 export function execute(cd: any, piece: any, fromCell: { file: number, rank: number }, toCell: { file: number, rank: number }, opts: { aiFast?: boolean, onComplete?: () => void } = {}): Promise<void> {
   return new Promise<void>((resolve) => {
+   try {
     const animator = cd.animator;
     const effects = cd.effects;
     const sequencer = cd.sequencer;
@@ -110,8 +111,8 @@ export function execute(cd: any, piece: any, fromCell: { file: number, rank: num
           if (cd.sfx && cd.sfx._internals && cd.sfx._internals.updateSourceWorldPos) {
             cd.sfx._internals.updateSourceWorldPos({ x: toW.x, y: 0, z: toW.z });
           }
-        } catch (e) { /* sfx 未就绪 */ }
-        try { cd.sfx && cd.sfx.move(type, { pan: cellPan(toCell), faction: piece.userData.pieceSide }); } catch (e) { /* sfx 未就绪 */ }
+        } catch (e) { console.warn('[AUDIO:combat] MoveAction updateSourceWorldPos 异常', type, e); }
+        try { cd.sfx && cd.sfx.move(type, { pan: cellPan(toCell), faction: piece.userData.pieceSide }); } catch (e) { console.warn('[AUDIO:combat] MoveAction.move 调用异常', type, e); }
       },
       'M4_start': () => {
         effects.spawnImpactParticles(endPos.clone(), PALETTE.liuJin, { count: 42, ripple: true });
@@ -276,5 +277,11 @@ export function execute(cd: any, piece: any, fromCell: { file: number, rank: num
     });
 
     animator.seq(steps);
+   } catch (e) {
+    console.error('[ANIM:combat] MoveAction.execute 移动演出构建异常', {
+      pieceType: piece?.userData?.pieceType, from: fromCell, to: toCell
+    }, e);
+    throw e;
+   }
   });
 }

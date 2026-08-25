@@ -250,6 +250,7 @@ class Parts {
    *       metalRatio < 12% 回退子组内的少量金属件仍失去高金属光泽（颜色仍在）。
    */
   build(): any {
+   try {
     const mats = getMaterials();
     // 第一步：统计本子组的族分布（matte / metal / 双面特殊件），并分桶
     let matteVerts = 0, metalVerts = 0;
@@ -346,6 +347,10 @@ class Parts {
 
     this.list.length = 0;
     return out;
+   } catch (e) {
+    console.error('[RENDER:pieceFactory] Parts.build 子组合并异常', e);
+    throw e;
+   }
   }
 }
 
@@ -1457,6 +1462,7 @@ const SUBGROUP_PARENTS: Record<string, Record<string, string>> = {
 const _templates = new Map();
 
 function buildTemplate(type: string, side: string, lodLevel: number): any {
+ try {
   // L4b：LOD 段数开关。降段仅作用于 R/C/K 三型（lod-spec §2.2）；
   // P/N/B/A 本期不降段（体量小、辨识风险高），_lodLevel 恒 0，几何与现状逐字节一致。
   _lodLevel = (lodLevel >= 1 && (type === 'R' || type === 'C' || type === 'K')) ? 1 : 0;
@@ -1595,6 +1601,10 @@ function buildTemplate(type: string, side: string, lodLevel: number): any {
   for (const m of meshes) geoms.push(m.geometry);
 
   return { root: root, geoms: geoms, count: 0 };
+ } catch (e) {
+  console.error('[RENDER:pieceFactory] buildTemplate 几何构建异常', { type, side, lodLevel }, e);
+  throw e;
+ }
 }
 
 /**
@@ -1606,6 +1616,7 @@ function buildTemplate(type: string, side: string, lodLevel: number): any {
  * @returns {THREE.Group}
  */
 export function createPieceMesh(type: string, side: string, opts?: any): any {
+ try {
   // L4b：低模模板独立缓存桶（lod0 沿用旧 key，向后兼容）
   const lodLevel = (opts && opts.lodLevel >= 1) ? 1 : 0;
   const key = lodLevel > 0 ? type + side + ':lod1' : type + side;
@@ -1660,6 +1671,10 @@ export function createPieceMesh(type: string, side: string, opts?: any): any {
   };
 
   return group;
+ } catch (e) {
+  console.error('[RENDER:pieceFactory] createPieceMesh 棋子实例化异常', { type, side }, e);
+  throw e;
+ }
 }
 
 /**

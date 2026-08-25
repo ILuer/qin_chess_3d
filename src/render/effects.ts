@@ -355,6 +355,7 @@ export class Effects {
   _selectionNode: any;
   _lastMarkerB: any;
   _checkNode: any;
+  _fxUpdateErrs: number = 0;
 
   /**
    * @param {import('./scene.ts').SceneSystem} sceneSys
@@ -403,6 +404,7 @@ export class Effects {
   _reg(m: any): any { this._materials.push(m); return m; }
 
   _buildMaterials(): void {
+   try {
     const add = THREE.AdditiveBlending;
     this.matSelectRing = this._reg(new THREE.MeshBasicMaterial({
       color: PALETTE.select, transparent: true, opacity: 0.92, blending: add, depthWrite: false, depthTest: false
@@ -434,6 +436,10 @@ export class Effects {
     this.matRipple = this._reg(new THREE.MeshBasicMaterial({
       color: PALETTE.liuJinLight, transparent: true, opacity: 0.9, blending: add, depthWrite: false, side: THREE.DoubleSide
     }));
+   } catch (e) {
+    console.error('[RENDER:effects] _buildMaterials 特效材质初始化异常', e);
+    throw e;
+   }
   }
 
   // -------------------------------------------------------------------------
@@ -772,6 +778,7 @@ export class Effects {
   // -------------------------------------------------------------------------
 
   update(dt: number): void {
+   try {
     this._time += dt;
     const t = this._time;
 
@@ -943,6 +950,9 @@ export class Effects {
         c.scale.y += 0.5 * dt;
       }
     }
+   } catch (e) {
+    if (this._fxUpdateErrs < 5) { this._fxUpdateErrs++; console.error('[RENDER:effects] update 每帧特效更新异常（已跳过本帧）', e); }
+   }
   }
 
   // -------------------------------------------------------------------------

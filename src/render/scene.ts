@@ -144,7 +144,7 @@ async function createRenderer(): Promise<{ renderer: any, backend: string }> {
         return { renderer, backend: 'webgpu' };
       }
     } catch (e) {
-      console.warn('[renderer] WebGPU 初始化失败，回退 WebGL：', (e as Error) && (e as Error).message);
+      console.warn('[RENDER:scene] WebGPU 初始化失败，回退 WebGL', { message: (e as Error)?.message }, e);
     }
   }
   return {
@@ -669,6 +669,7 @@ export class SceneSystem {
 
   /** 每帧更新（不含 render） */
   update(dt: number): void {
+   try {
     // 视角插值
     if (this._viewTween) {
       const tw = this._viewTween;
@@ -694,6 +695,9 @@ export class SceneSystem {
     this._updateCombatLight(dt);
     this._updateDistanceLod(dt);   // L4a：节流 0.25s 评估相机距离 → 棋子 castShadow / farView
     this._trackFps(dt);
+   } catch (e) {
+    console.error('[RENDER:scene] update 每帧场景更新异常（已跳过本帧）', e);
+   }
   }
 
   /** 渲染一帧（含震动偏移） */
