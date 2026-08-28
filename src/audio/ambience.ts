@@ -2,7 +2,7 @@
  * qin-chess-3d · src/audio/ambience.js
  * 秦风 · 战场环境氛围系统
  *
- * 设计引用: design/audio-system-v2.md §4
+ * 设计引用: docs/design/audio-system-v2.md §4
  *
  * 职责:
  *   - L0 五层常驻环境床（风/旌旗/远鼓/人群/马）

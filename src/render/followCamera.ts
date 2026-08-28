@@ -12,7 +12,7 @@
  *  - 独立模块、纯逻辑可测：不依赖 DOM / 真实 OrbitControls 实例。
  *    update(dt, camera, controls) 只读写 camera.position / controls.target /
  *    controls.minDistance / controls.maxDistance / controls.enabled，
- *    可注入假对象在 Node 中测试（见 _qa/camera/follow-camera-probe.mjs）。
+ *    可注入假对象在 Node 中测试（见 qa/probes/camera/follow-camera-probe.mjs）。
  *  - 状态机：fixed（默认，现状）↔ follow；fixed 稳态 update() 直接返回，
  *    零开销、绝不干扰现有视角行为。
  *  - 距离 clamp：跟随区间 min/max 由本模块切到 controls（0.8 / 26，

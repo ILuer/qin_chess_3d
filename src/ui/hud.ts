@@ -37,7 +37,7 @@ export const SHORTCUTS = [
   ['Esc', '取消当前选择']
 ];
 
-/** L2：复盘模式快捷键（design/gameplay/review-export-design.md §5.6，追加到帮助面板） */
+/** L2：复盘模式快捷键（docs/design/review-export-design.md §5.6，追加到帮助面板） */
 export const REVIEW_SHORTCUTS = [
   ['← / →', '复盘：上一 / 下一步'],
   ['Shift+← / Shift+→ 或 Home / End', '复盘：跳到开始 / 结尾'],

@@ -5,14 +5,6 @@ build/
 *.log
 npm-debug.log*
 
-# ---- 测试工具链 ----
-# 2026-08-17 用户拍板变更（部署模式 B：CF Pages 构建命令 npm ci && npm run build）：
-# package.json / package-lock.json 由「暂不入库」改为「必须入库」——
-# CF 构建环境靠它们安装 esbuild 并执行构建；tests/ 仍不入库（保持）。
-tests/
-coverage/
-.nyc_output/
-
 # ---- 编辑器 / 系统 ----
 .vscode/
 .idea/
@@ -28,44 +20,19 @@ desktop.ini
 # 注意：不要在此忽略下划线开头的文件。
 # _headers 是 Cloudflare Pages 的响应头配置，必须入库。
 
-# ---- Sprint 临时构建副本（规避预览进程锁定的 dist/ 时用的替代输出目录）----
-dist-sprint1/
-dist-sprint2/
-dist-sprint3/
-dist-sprint4/
-dist-sprint5/
-
-# ---- 工作室 SOP 产物（设计/文档/QA 计划不入库，仅本地留档）----
-production/
-
-# ---- 本地验证生成的临时副本（由 dev/transform_phase3.mjs 重新生成，不入库）----
-_qa/p3out/animator_test.mjs
-_qa/p3out/constants_test.mjs
-_qa/p3out/sfx_test.mjs
-_qa/p3out/animator.mjs
-_qa/p3out/main.mjs
-_qa/p3out/sfx.mjs
-_qa/p3out/constants.mjs
-_qa/p3out/pieceFactory.mjs
-_qa/p3out/err.txt
-.cache/
-
-# ---- QA 冒烟产物（cdp-smoke / build / check-vendor 输出，2026-08-17 起整目录不入库）----
-_qa/
-
-# ---- 本地工作区 / 设计规格 / 脚本工具（不入库，本地 QA/工作室产物）----
-design/
-scripts/
-.workbuddy/
-
-# ---- 临时构建副本（规避预览进程锁定的 dist/ 时用的替代输出目录）----
+# ---- 历史构建副本 / 本地缓存（本地留档，不入库）----
+# 2026-08-28 重构：设计规格、QA 探针、测试、Sprint 计划、素材工具
+# 已全部迁出本仓库，落至工作区根的 docs/ qa/ production/ tools/。
+# 本仓库只保留「构建并运行项目所必需」的内容。
 dist-sprint1/
 dist-sprint1-locked/
 dist-sprint1-locked-2/
 dist-sprint2/
 dist-sprint3/
 dist-sprint4/
+dist-sprint5/
 dist-qa-verify/
+.cache/
 
 # ---- 音频探针/合成临时产物（不入库）----
 assets/audio/foley/_probe_tmp.txt

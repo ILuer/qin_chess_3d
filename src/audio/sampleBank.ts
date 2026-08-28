@@ -2,7 +2,7 @@
  * qin-chess-3d · src/audio/sampleBank.ts
  * 秦风 · 采样加载管线（C4：sample / sampleLoop 指令的数据源）
  *
- * 设计引用: design/audio/piece-sfx-design.md §4.2（采样/合成混合策略）
+ * 设计引用: docs/design/audio/piece-sfx-design.md §4.2（采样/合成混合策略）
  *
  * 职责:
  *   - SAMPLE_MANIFEST 采样清单（key → 资源 URL；现已登记 29 个战场采样：
@@ -39,11 +39,11 @@ export const MAX_SAMPLE_BYTES = 12 * 1024 * 1024;
  *  0.6-1.0s。新增 9 key（vox.king.idle / vox.king.capture / vox.advisor.capture /
  *  foley.king.move / foley.pawn.idle / foley.pawn.move / foley.pawn.capture /
  *  foley.advisor.idle / foley.advisor.move），磁盘合计 ~0.84MB。CC0 协议记录见
- *  assets/audio/ATTRIBUTION.md。详见 design/audio/sprint1-real-sfx-integration.md。
+ *  assets/audio/ATTRIBUTION.md。详见 docs/design/audio/sprint1-real-sfx-integration.md。
  *
  *  Sprint2 真实录音（R/C 六事件）：来源 Freesound.org CC0 预览（mp3），新增 6 key
  *  （foley.rook.idle/move/capture / foley.cannon.idle/move/capture）。CC0 协议记录见
- *  ATTRIBUTION.md。详见 _qa/audio/freesound-fetch.mjs（拉取脚本，gitignore 不入库）。
+ *  ATTRIBUTION.md。详见 qa/probes/audio/freesound-fetch.mjs（拉取脚本，gitignore 不入库）。
  */
 export const SAMPLE_MANIFEST: Record<string, string> = {
   /* ---- Foley：材质接触（决定「是什么在动」）---- */

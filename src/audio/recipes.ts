@@ -5,7 +5,7 @@
  * 本文件是音效系统的"后端数据"：定义所有音效事件的四层 T/C/B/S 参数、
  * 演出序列编排、电平与混响映射。sfx.js 的 renderBeat() 按本表数据执行。
  *
- * 设计引用: design/audio-system-v2.md
+ * 设计引用: docs/design/audio-system-v2.md
  * ========================================================================== */
 
 /* --------------------------------------------------------------------------
@@ -1372,7 +1372,7 @@ applySprint2RealSamples();
  *
  *  落地状态：本环境无法联网取 Kenney 源、无本地 ogg、无离线转码工具，故
  *  foley.rook.* / foley.cannon.* 的 wav 暂未落盘（详见 sampleBank.ts 头部注释与
- *  design/audio/sprint1-real-sfx-integration.md §0）。MANIFEST 键已就位；待 Kenney
+ *  docs/design/audio/sprint1-real-sfx-integration.md §0）。MANIFEST 键已就位；待 Kenney
  *  源到位即自动接管，无需再改本函数。 */
 function applySprint2RealSamples(): void {
   // ---- 车 R ----

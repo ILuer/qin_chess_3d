@@ -2,9 +2,9 @@
  * CombatConstants.js — 战场演出参数表（纯数据模块）
  *
  * 所有数值的唯一真相源。来源：
- *   design/action-system.md §2 §3 §4
- *   design/combat-feel-spec.md §5 §6
- *   design/audio-system-v2.md §2.2
+ *   docs/design/action-system.md §2 §3 §4
+ *   docs/design/combat-feel-spec.md §5 §6
+ *   docs/design/audio-system-v2.md §2.2
  *
  * 此文件零依赖，被所有 combat/ 模块 import。
  */
@@ -17,8 +17,8 @@ import { PT, PALETTE } from '../../core/constants.ts';
 
 /**
  * 全盘 draw call 预算上限（Phase D4 / 验收 V8）。
- * 依据：design/art/piece-animation-spec.md §5.2 性能预算（新增子组后总 draw call ≤155，现 141~145）。
- * 用途：性能剖析门禁（tests/node/perf-contract.test.js PERF-001）+ 浏览器 profiling 对照基准。
+ * 依据：docs/design/piece-animation-spec.md §5.2 性能预算（新增子组后总 draw call ≤155，现 141~145）。
+ * 用途：性能剖析门禁（qa/tests/node/perf-contract.test.js PERF-001）+ 浏览器 profiling 对照基准。
  */
 export const DRAW_CALL_BUDGET = 155;
 
@@ -531,8 +531,8 @@ export const IDLE_PIECE = {
 /**
  * 兵种姿态四元组数据表：每兵种 × 三态（idle/move/capture）× 三段式（anticipation/action/recovery）。
  *
- * 来源：design/art/piece-animation-spec.md §3（每兵种关键帧/时长/缓动/子组四元组）、§4.3（子组命名）、
- *       design/gameplay/piece-combat-action-design.md §4（节奏表，总长锚定 MOVE_TOTAL/CAPTURE_TOTAL）。
+ * 来源：docs/design/piece-animation-spec.md §3（每兵种关键帧/时长/缓动/子组四元组）、§4.3（子组命名）、
+ *       docs/design/piece-combat-action-design.md §4（节奏表，总长锚定 MOVE_TOTAL/CAPTURE_TOTAL）。
  *
  * 字段约定（A3 验收：姿态/时长/缓动/子组通道 四元组）：
  *   sub        —— 子组通道峰值（rotation/position/scale，数值=峰值幅度，动画按阶段包络应用）

@@ -64,11 +64,38 @@
 
 ## 🔒 隐私与数据（H1 埋点披露）
 
-本游戏内置**本地埋点**（`src/telemetry.js`），用于在开发期观测错误、启动耗时与帧率表现。
+本游戏内置**本地埋点**（`src/telemetry.ts`），用于在开发期观测错误、启动耗时与帧率表现。
 
 - **不上报任何外部服务**：埋点事件仅写入浏览器内存队列并输出到 DevTools 控制台（`[telemetry]` 前缀），关闭页面即丢失。
 - **不采集个人身份信息（PII）**：无账号、无设备指纹、无 IP、无定位；事件仅包含对局结果、回合数、难度、帧率分桶、启动耗时等游戏运行数据。
 - 若未来接入数据平台，将先更新本披露并征得用户同意。
+
+---
+
+## 🛠 开发者
+
+本仓库**只包含构建并运行游戏所必需的内容**。设计规格、QA 探针、测试用例、素材工具与 Sprint 计划等工作室产物不在此仓库内。
+
+| 目录 / 文件 | 说明 |
+| :--- | :--- |
+| `src/` | TypeScript 源码：核心规则、渲染、编舞、音频、AI、UI |
+| `assets/audio/` | 运行时音频采样（foley / vox / ambient） |
+| `vendor/three-r185/` | Three.js r185 运行时依赖，按版本分目录，不原地覆盖 |
+| `styles/`、`index.html`、`sw.js` | 样式、入口与 Service Worker |
+| `build.mjs`、`package.json`、`tsconfig.json` | 构建与类型检查配置 |
+| `.github/workflows/` | CI 门禁（typecheck + build） |
+| `_headers` | Cloudflare Pages 响应头配置 |
+
+常用命令：
+
+```bash
+npm ci              # 安装构建依赖
+npm run typecheck   # 类型检查
+npm run build       # 产出 dist/
+npm run dev         # 本地开发服务器
+```
+
+CI 由 GitHub Actions 执行类型检查与构建门禁，部署由 Cloudflare Pages 的 Git 集成自动完成。
 
 ---
 

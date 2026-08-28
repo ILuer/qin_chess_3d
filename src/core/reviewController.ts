@@ -1,7 +1,7 @@
 /**
  * reviewController.js —— 复盘状态机（纯逻辑，无 DOM / Three 依赖）
  *
- * 依据：design/gameplay/review-export-design.md §5
+ * 依据：docs/design/review-export-design.md §5
  *   - 全局双模式：PLAY（live gs）↔ REVIEW（scratch 重放）
  *   - REVIEW 内子状态：idle（游标等待）/ playing（自动播放）
  *   - 事件迁移表 E1~E10

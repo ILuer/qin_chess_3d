@@ -69,7 +69,7 @@ const _listenerFwd = new THREE.Vector3();
 // L4b · 当前应用中的几何 LOD 档位（null=尚未评估；true=低模/远景）
 let currentLodFar: boolean | null = null;
 
-// L2 · REVIEW 复盘状态（design/gameplay/review-export-design.md §5）
+// L2 · REVIEW 复盘状态（docs/design/review-export-design.md §5）
 let reviewCtrl: any = null;        // ReviewController（纯逻辑状态机，boot 中创建）
 let reviewGs: any = null;          // scratch 局面：从 gs.startFen 重放 history[0..cursor)
 let renderGs: any = null;          // 显示局面：PLAY=gs，REVIEW=reviewGs（rebuildPieces/updateCheckRing 读它）
@@ -505,7 +505,7 @@ function previewMove(idx: number): void {
 }
 
 // ---------------------------------------------------------------------------
-// L2 · REVIEW 复盘 / 棋谱导出（design/gameplay/review-export-design.md §4-§5）
+// L2 · REVIEW 复盘 / 棋谱导出（docs/design/review-export-design.md §4-§5）
 // ---------------------------------------------------------------------------
 
 /**

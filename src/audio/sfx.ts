@@ -2,7 +2,7 @@
  * qin-chess-3d · src/audio/sfx.js
  * 秦风 · 中国象棋 —— 纯 WebAudio 程序化战场音效引擎 v2
  *
- * 设计文档: design/audio-system-v2.md
+ * 设计文档: docs/design/audio-system-v2.md
  * 数据表:   ./recipes.js
  *
  * 核心设计:
