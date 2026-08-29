@@ -821,21 +821,54 @@ function raf(): Promise<void> {
 /**
  * 图形后端门禁：WebGPU 或 WebGL **任一可用**即放行，实际后端由 createRenderer() 决定。
  *
- * 【2026-08-29 线上事故修复】原实现只探测 `getContext('webgl')`，而渲染器工厂是
- * 「WebGPU 优先、WebGL 回退」。Edge 151 上存在 WebGPU 可用但 WebGL context 创建失败
- * 的环境（GPU 进程/驱动层 WebGL 被禁），旧门禁会把这类浏览器直接拒之门外，
- * 明明 WebGPU 路径可以正常渲染。现在判定与真实渲染路径对齐：任一可用即通过。
+ * 【2026-08-29 线上事故修复 + 精准降级】原实现只探测 `getContext('webgl')`，而渲染器
+ * 工厂是「WebGPU 优先、WebGL 回退」；Edge 151 上 WebGPU 可用但 WebGL 被禁时会被误杀。
+ * 现判定与渲染路径对齐：任一可用即通过。
+ *
+ * 两者都不可用时，按探测细节给出**精准**指引而非笼统的「请开启硬件加速」：
+ * - 若 navigator.gpu 存在但两端都起不来 → 典型「GPU 进程崩溃后被强制禁用」场景，
+ *   此时用户即使已开硬件加速也救不了，必须去 edge://gpu 看崩溃原因 + 更新驱动。
+ * - 否则 → 常规「未启用/不支持」提示，给出开启硬件加速的链接。
  */
-async function graphicsGate(): Promise<{ webgpu: boolean; webgl: boolean }> {
+async function graphicsGate(): Promise<{
+  webgpu: boolean; webgl: boolean; webgl2: boolean; gpuApi: boolean; gpuAdapter: boolean;
+}> {
   const caps = await probeGraphics();
-  if (!caps.webgpu && !caps.webgl) {
-    throw new Error(
-      '当前浏览器未启用 WebGL 或 WebGPU，无法渲染 3D 画面。' +
-      '请在浏览器设置中开启硬件加速（Edge/Chrome：设置 → 系统 → 使用硬件加速）后重启浏览器；' +
-      '若已开启，请更新显卡驱动或改用较新版本的 Chrome / Edge / Firefox / Safari。'
+  if (caps.webgpu || caps.webgl) return caps;
+
+  if (caps.gpuApi) {
+    const e = new Error(
+      '当前浏览器的 GPU 加速已被强制关闭——WebGPU 与 WebGL 均无法初始化。' +
+      '这通常是因为 GPU 进程反复崩溃后，浏览器出于保护自动禁用了所有图形硬件加速；' +
+      '即便已在「设置 → 系统」中打开硬件加速，该崩溃保护仍会强制关闭，并非开关没开。'
     );
+    (e as any).kind = 'graphics-gate';
+    (e as any).detail =
+      '建议排查步骤：\n' +
+      '① 关闭所有 Edge 窗口后重新打开（崩溃计数器会在新会话重置）；\n' +
+      '② 打开 edge://gpu，查看顶部 Graphics Feature Status 与底部 “Problems Detected”；\n' +
+      '③ 若显示 “GPU process crashed too many times”，删除 Edge 的 ShaderCache 目录后重启；\n' +
+      '④ 更新显卡驱动（务必用官网完整版，勿用 Windows 更新的精简驱动）；\n' +
+      '⑤ 排查是否在快捷方式 / 注册表中加了 --disable-gpu 等命令行参数。';
+    (e as any).links = [
+      { label: '在地址栏访问 edge://gpu 查看诊断', url: 'edge://gpu' },
+      { label: 'Chromium GPU 故障排查文档（新窗口）', url: 'https://support.google.com/chrome/answer/95290' }
+    ];
+    throw e;
   }
-  return caps;
+
+  const e = new Error(
+    '当前浏览器未启用 WebGL 或 WebGPU，无法渲染 3D 画面。' +
+    '请在「设置 → 系统 → 使用硬件加速」中开启后重启浏览器，' +
+    '或改用较新版本的 Chrome / Edge / Firefox / Safari。'
+  );
+  (e as any).kind = 'graphics-gate';
+  (e as any).detail = '';
+  (e as any).links = [
+    { label: 'Chrome 帮助：启用硬件加速', url: 'https://support.google.com/chrome/answer/14087447' },
+    { label: 'Firefox 帮助：硬件加速', url: 'https://support.mozilla.org/kb/use-hardware-acceleration' }
+  ];
+  throw e;
 }
 
 /**
@@ -1090,6 +1123,17 @@ async function boot(): Promise<void> {
     trackEvent('tti', { ms: elapsedMs(), backend: sceneSys.backend });
     trackEvent('game_start', { aiEnabled, difficulty });
   } catch (err) {
+    // 图形门禁失败：精准指引 + 诊断链接已在 graphicsGate 内构造，直接透传给加载屏，
+    // 不走通用 onFatal（否则 links / detail 丢失，且会被当成未分类错误）。
+    if ((err as any)?.kind === 'graphics-gate') {
+      const msg = ((err as Error)?.message) || '当前浏览器不支持 3D 渲染';
+      const detail = (err as any)?.detail || '';
+      const links = (err as any)?.links || [];
+      if (hud) hud.showFatalError(msg, detail, links);
+      trackError('graphics_gate_failed', msg);
+      console.error('[MAIN:boot] 图形门禁未通过', msg);
+      return;
+    }
     onFatal({ message: ((err as Error) && (err as Error).message) || '初始化失败', error: err });
   }
 }

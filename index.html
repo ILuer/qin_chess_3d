@@ -59,6 +59,12 @@
     .loading-error { display: none; max-width: min(680px, 86vw); max-height: 40vh; overflow: auto;
       white-space: pre-wrap; font-size: 12px; line-height: 1.5; color: #ff8a7a;
       background: rgba(40,12,10,.6); border: 1px solid rgba(255,43,29,.4); border-radius: 8px; padding: 10px 12px; }
+    .loading-links { display: none; flex-wrap: wrap; gap: 10px; justify-content: center; max-width: min(680px, 86vw); }
+    .loading-link { display: inline-flex; align-items: center; padding: 8px 14px; border-radius: 8px;
+      font-size: 13px; text-decoration: none; color: #0a0b0e; font-weight: 600; cursor: pointer;
+      background: linear-gradient(90deg, #c9a227, #e8cf72); box-shadow: 0 4px 14px rgba(201,162,39,.35);
+      transition: transform .15s ease; }
+    .loading-link:hover { transform: translateY(-1px); }
 
     /* HUD / 面板：默认布局兜底，art CSS 会覆盖美化 */
     #hud { position: fixed; top: 14px; left: 14px; z-index: 20; display: flex; flex-direction: column;

@@ -299,8 +299,12 @@ export class HUD {
     });
   }
 
-  /** 在加载界面显示可读错误（替代白屏） */
-  showFatalError(message: string, detail?: string): void {
+  /**
+   * 在加载界面显示可读错误（替代白屏）。
+   * @param links 可选诊断链接（白名单：仅允许 edge:// chrome:// https:// http://），
+   *              渲染为可点击按钮，避免误导用户仅靠「开启硬件加速」无法解决时无处着手。
+   */
+  showFatalError(message: string, detail?: string, links?: { label: string; url: string }[]): void {
     if (this.loadingScreen) {
       this.loadingScreen.style.display = '';
       this.loadingScreen.classList.remove('is-hidden');
@@ -316,6 +320,43 @@ export class HUD {
       p.className = 'loading-error';
       p.textContent = detail || '';
       this.loadingScreen.appendChild(p);
+    }
+    // 诊断链接（白名单，杜绝 XSS）
+    const ALLOW = /^(edge:\/\/|chrome:\/\/|https:\/\/|http:\/\/)/i;
+    const box0 = this.loadingScreen?.querySelector('.loading-links') as HTMLElement | null;
+    let box = box0;
+    if (links && links.length) {
+      if (!box && this.loadingScreen) {
+        const inner = this.loadingScreen.querySelector('.loading-inner');
+        box = document.createElement('div');
+        box.className = 'loading-links';
+        if (inner) inner.appendChild(box); else this.loadingScreen.appendChild(box);
+      }
+      if (box) {
+        box.innerHTML = '';
+        box.style.display = 'flex';
+        for (const l of links) {
+          if (!ALLOW.test(l.url)) continue;
+          const a = document.createElement('a');
+          a.className = 'loading-link';
+          a.textContent = l.label;
+          a.href = l.url;
+          // 浏览器禁止网页直接跳转内部页（edge:// chrome://），改为点击复制地址并提示手动访问
+          if (/^(edge:\/\/|chrome:\/\/)/i.test(l.url)) {
+            a.addEventListener('click', (ev) => {
+              ev.preventDefault();
+              try { navigator.clipboard?.writeText(l.url); } catch (e) { /* 忽略 */ }
+              a.textContent = `已复制地址，请在地址栏粘贴访问：${l.url}`;
+            });
+          } else {
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+          }
+          box.appendChild(a);
+        }
+      }
+    } else if (box) {
+      box.style.display = 'none';
     }
   }
 

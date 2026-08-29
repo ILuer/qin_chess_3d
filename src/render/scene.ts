@@ -119,51 +119,67 @@ export const SHADOW_DIST_INTERVAL = 0.25; // update 节流周期（秒）
 // L5 · 异步渲染器工厂（动态 import 双后端）
 // ---------------------------------------------------------------------------
 
-/** WebGPU 是否可用（navigator.gpu + requestAdapter 成功） */
-async function webgpuAvailable(): Promise<boolean> {
+/** WebGPU 探测：返回 API 是否存在 + 是否能拿到 adapter，用于精准区分两种失败场景。 */
+async function webgpuProbe(): Promise<{ api: boolean; adapter: boolean }> {
   try {
     if (typeof navigator === 'undefined' || !(navigator as any).gpu ||
-        typeof (navigator as any).gpu.requestAdapter !== 'function') return false;
+        typeof (navigator as any).gpu.requestAdapter !== 'function') {
+      return { api: false, adapter: false };
+    }
     const adapter = await (navigator as any).gpu.requestAdapter();
-    return !!adapter;
-  } catch (e) { return false; }
+    return { api: true, adapter: !!adapter };
+  } catch (e) { return { api: true, adapter: false }; }
+}
+
+/** WebGPU 是否可拿到 adapter（createRenderer 实际走这条路径判定后端可用性）。 */
+async function webgpuAvailable(): Promise<boolean> {
+  return (await webgpuProbe()).adapter;
 }
 
 /**
- * WebGL 是否可创建 context。
- *
- * 探测成功后立即用 WEBGL_lose_context 释放该 context：Chromium 对同时存活的
- * WebGL context 有约 16 个的配额上限，探测用的 canvas 若不释放会白占一个名额。
+ * WebGL 探测：分别探测 WebGL1 / WebGL2，并立即用 WEBGL_lose_context 释放。
+ * Chromium 对同时存活的 WebGL context 有约 16 个的配额上限，探测 canvas 必须释放。
+ * 同一 canvas 不能交替 getContext('webgl') / getContext('webgl2')，故用两个独立 canvas。
  */
-function webglAvailable(): boolean {
-  try {
-    const c = document.createElement('canvas');
-    const gl = (c.getContext('webgl') ||
-      c.getContext('experimental-webgl')) as WebGLRenderingContext | null;
-    if (!gl) return false;
-    try {
-      const lose = gl.getExtension('WEBGL_lose_context');
-      if (lose) lose.loseContext();
-    } catch (e) { /* 释放失败不影响可用性判定 */ }
-    return true;
-  } catch (e) { return false; }
+function probeWebGL(): { any: boolean; webgl2: boolean } {
+  const c2 = document.createElement('canvas');
+  let webgl2 = false;
+  try { webgl2 = !!c2.getContext('webgl2'); } catch (e) { /* noop */ }
+  if (webgl2) {
+    try { (c2.getContext('webgl2') as WebGLRenderingContext | null)?.getExtension?.('WEBGL_lose_context')?.loseContext(); } catch (e) { /* noop */ }
+  }
+
+  const c1 = document.createElement('canvas');
+  let webgl1 = false;
+  try { webgl1 = !!(c1.getContext('webgl') || c1.getContext('experimental-webgl')); } catch (e) { /* noop */ }
+  if (webgl1) {
+    try { (c1.getContext('webgl') as WebGLRenderingContext | null)?.getExtension?.('WEBGL_lose_context')?.loseContext(); } catch (e) { /* noop */ }
+  }
+
+  return { any: webgl1 || webgl2, webgl2 };
 }
 
 /**
  * 图形后端能力探测（供 boot 前置门禁使用）。
  *
- * 【2026-08-29 线上事故修复】Edge 151 存在「WebGPU 可用但 getContext('webgl') 返回 null」
- * 的环境——GPU 进程或驱动层禁用 WebGL 时，Chromium 的 WebGL 会退化为不可用，
- * 而 WebGPU（Dawn）走独立路径仍可正常工作。原门禁只探测 WebGL，把这类浏览器
- * 误杀在启动门口；但 createRenderer() 实际是「WebGPU 优先、WebGL 回退」。
- *
- * 因此门禁判定必须与实际渲染路径对齐：**任一后端可用即放行**，
- * 具体用哪个后端交给 createRenderer() 在运行期决定。
+ * 【2026-08-29 线上事故修复 + 精准降级】返回字段细粒度区分「功能根本不支持」与
+ * 「已开启但 GPU 进程崩溃被强制禁用」两类场景，供 main.ts 生成对应指引：
+ * - gpuApi：navigator.gpu 是否存在（存在说明浏览器较新，本不该是「功能缺失」）
+ * - gpuAdapter：requestAdapter 是否成功（api 存在但 adapter 拿不到 → 多半被 blocklist / 崩溃禁用）
+ * - webgl / webgl2：WebGL 实际可创建性
+ * 门禁判定与 createRenderer() 实际「WebGPU 优先、WebGL 回退」路径对齐：任一可用即通过。
  */
-export async function probeGraphics(): Promise<{ webgpu: boolean; webgl: boolean }> {
+export async function probeGraphics(): Promise<{
+  webgpu: boolean; webgl: boolean; webgl2: boolean; gpuApi: boolean; gpuAdapter: boolean;
+}> {
+  const gpu = await webgpuProbe();
+  const gl = probeWebGL();
   return {
-    webgpu: await webgpuAvailable(),
-    webgl: webglAvailable()
+    webgpu: gpu.adapter,
+    webgl: gl.any,
+    webgl2: gl.webgl2,
+    gpuApi: gpu.api,
+    gpuAdapter: gpu.adapter
   };
 }
 
