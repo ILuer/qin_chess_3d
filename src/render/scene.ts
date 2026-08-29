@@ -130,6 +130,44 @@ async function webgpuAvailable(): Promise<boolean> {
 }
 
 /**
+ * WebGL 是否可创建 context。
+ *
+ * 探测成功后立即用 WEBGL_lose_context 释放该 context：Chromium 对同时存活的
+ * WebGL context 有约 16 个的配额上限，探测用的 canvas 若不释放会白占一个名额。
+ */
+function webglAvailable(): boolean {
+  try {
+    const c = document.createElement('canvas');
+    const gl = (c.getContext('webgl') ||
+      c.getContext('experimental-webgl')) as WebGLRenderingContext | null;
+    if (!gl) return false;
+    try {
+      const lose = gl.getExtension('WEBGL_lose_context');
+      if (lose) lose.loseContext();
+    } catch (e) { /* 释放失败不影响可用性判定 */ }
+    return true;
+  } catch (e) { return false; }
+}
+
+/**
+ * 图形后端能力探测（供 boot 前置门禁使用）。
+ *
+ * 【2026-08-29 线上事故修复】Edge 151 存在「WebGPU 可用但 getContext('webgl') 返回 null」
+ * 的环境——GPU 进程或驱动层禁用 WebGL 时，Chromium 的 WebGL 会退化为不可用，
+ * 而 WebGPU（Dawn）走独立路径仍可正常工作。原门禁只探测 WebGL，把这类浏览器
+ * 误杀在启动门口；但 createRenderer() 实际是「WebGPU 优先、WebGL 回退」。
+ *
+ * 因此门禁判定必须与实际渲染路径对齐：**任一后端可用即放行**，
+ * 具体用哪个后端交给 createRenderer() 在运行期决定。
+ */
+export async function probeGraphics(): Promise<{ webgpu: boolean; webgl: boolean }> {
+  return {
+    webgpu: await webgpuAvailable(),
+    webgl: webglAvailable()
+  };
+}
+
+/**
  * 创建渲染器：WebGPU 可用 → await import('three/webgpu') 用 WebGPURenderer（r185 双后端，
  * 标准材质/阴影/色调映射与本项目使用面完全兼容）；否则 WebGLRenderer（主 bundle 内联）。
  * WebGL 浏览器不下载 webgpu chunk（动态 import 按需加载）。
@@ -147,15 +185,21 @@ async function createRenderer(): Promise<{ renderer: any, backend: string }> {
       console.warn('[RENDER:scene] WebGPU 初始化失败，回退 WebGL', { message: (e as Error)?.message }, e);
     }
   }
-  return {
-    renderer: new THREE.WebGLRenderer({
-      antialias: true,
-      alpha: false,
-      powerPreference: 'high-performance',
-      stencil: false
-    }),
-    backend: 'webgl'
-  };
+  try {
+    return {
+      renderer: new THREE.WebGLRenderer({
+        antialias: true,
+        alpha: false,
+        powerPreference: 'high-performance',
+        stencil: false
+      }),
+      backend: 'webgl'
+    };
+  } catch (e) {
+    // 两个后端都失败：给 boot 的门限一个可诊断的错误，而不是让 THREE 抛模糊信息。
+    console.error('[RENDER:scene] WebGL 渲染器创建失败', { message: (e as Error)?.message }, e);
+    throw new Error(`WebGPU 与 WebGL 均无法初始化（${(e as Error)?.message || '未知原因'}）`);
+  }
 }
 
 export class SceneSystem {

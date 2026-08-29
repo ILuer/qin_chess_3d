@@ -17,7 +17,7 @@ import {
 import { GameState } from './core/gameState.ts';
 import { ReviewController } from './core/reviewController.ts';   // L2：复盘状态机（纯逻辑）
 import { loadSave, writeSave, clearSave, buildSave } from './core/save.ts';   // M4 对局存档/恢复
-import { createSceneSystem } from './render/scene.ts';
+import { createSceneSystem, probeGraphics } from './render/scene.ts';
 import { createEffects } from './render/effects.ts';
 import { animator, updateTweens } from './render/animator.ts';
 import { createFollowCamera, computeFollowFitRadius } from './render/followCamera.ts';
@@ -818,14 +818,24 @@ function raf(): Promise<void> {
   return new Promise((r) => requestAnimationFrame(() => r()));
 }
 
-function webglAvailable(): boolean {
-  try {
-    const c = document.createElement('canvas');
-    return !!(window.WebGLRenderingContext &&
-      (c.getContext('webgl') || c.getContext('experimental-webgl')));
-  } catch (e) {
-    return false;
+/**
+ * 图形后端门禁：WebGPU 或 WebGL **任一可用**即放行，实际后端由 createRenderer() 决定。
+ *
+ * 【2026-08-29 线上事故修复】原实现只探测 `getContext('webgl')`，而渲染器工厂是
+ * 「WebGPU 优先、WebGL 回退」。Edge 151 上存在 WebGPU 可用但 WebGL context 创建失败
+ * 的环境（GPU 进程/驱动层 WebGL 被禁），旧门禁会把这类浏览器直接拒之门外，
+ * 明明 WebGPU 路径可以正常渲染。现在判定与真实渲染路径对齐：任一可用即通过。
+ */
+async function graphicsGate(): Promise<{ webgpu: boolean; webgl: boolean }> {
+  const caps = await probeGraphics();
+  if (!caps.webgpu && !caps.webgl) {
+    throw new Error(
+      '当前浏览器未启用 WebGL 或 WebGPU，无法渲染 3D 画面。' +
+      '请在浏览器设置中开启硬件加速（Edge/Chrome：设置 → 系统 → 使用硬件加速）后重启浏览器；' +
+      '若已开启，请更新显卡驱动或改用较新版本的 Chrome / Edge / Firefox / Safari。'
+    );
   }
+  return caps;
 }
 
 /**
@@ -905,9 +915,9 @@ async function boot(): Promise<void> {
   });
 
   try {
-    if (!webglAvailable()) {
-      throw new Error('当前浏览器不支持 WebGL，请使用 Chrome / Edge / Firefox / Safari 等现代浏览器。');
-    }
+    // 图形后端门禁：任一可用即放行（WebGPU 优先，详见 graphicsGate 注释）
+    const caps = await graphicsGate();
+    console.info('[MAIN:boot] 图形后端探测', caps);
 
     hud.setLoadingProgress(0.05, '正在搭建秦风棋枰…');
     await raf();
