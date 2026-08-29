@@ -321,7 +321,14 @@ export function createTextTexture(text: string, opts: Record<string, any> = {}):
     }
     x += adv;
   }
-  return toTexture(cv, { wrap: THREE.ClampToEdgeWrapping });
+  const tex = toTexture(cv, { wrap: THREE.ClampToEdgeWrapping });
+  // 文字贴图透明区域为 rgba(0,0,0,0)，CanvasTexture 默认 mipmap 降采样会把
+  // 黑色 RGB 混入低层 mip → alpha>0 的像素 RGB 接近黑 → 整个平面呈现半透明
+  // 黑雾矩形（视觉上像"打了补丁"）。文字分辨率已足够高（512×256），关掉
+  // mipmap 改用 LinearFilter 即可彻底消除。
+  tex.generateMipmaps = false;
+  tex.minFilter = /* LinearFilter */ 9729;
+  return tex;
 }
 
 /**
