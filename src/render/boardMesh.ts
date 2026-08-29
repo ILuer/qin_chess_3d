@@ -173,7 +173,7 @@ export function createBoard(): any {
   lines.castShadow = false;
   group.add(lines);
 
-  /* ---- 4. 河界文字：楚河 / 漢界 ---- */
+  /* ---- 4. 河界文字：秦扫 / 六合 ---- */
   const mkText = (mat: any, x: number) => {
     const g = new THREE.PlaneGeometry(1.72, 0.86);
     g.rotateX(-Math.PI / 2);
@@ -184,10 +184,10 @@ export function createBoard(): any {
     m.castShadow = false;
     return m;
   };
-  const t1 = mkText(B.riverText, -1.95);   // 楚河（红方视角左）
-  const t2 = mkText(B.riverText2, 1.95);   // 漢界（红方视角右）
-  t1.name = 'riverTextChu';
-  t2.name = 'riverTextHan';
+  const t1 = mkText(B.riverText, -1.95);   // 秦扫（红方视角左）
+  const t2 = mkText(B.riverText2, 1.95);   // 六合（红方视角右）
+  t1.name = 'riverTextQin';
+  t2.name = 'riverTextLiuhe';
   group.add(t1, t2);
 
   /* ---- 5. 朱漆外框 + 鎏金角 ---- */

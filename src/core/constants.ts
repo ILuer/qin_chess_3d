@@ -222,7 +222,7 @@ export const PALETTE = {
   boardEdge: 0x1a1209,      // 外框
   boardLine: 0xc9a227,      // 界线（鎏金细线）
   boardLineSoft: 0x8a7030,
-  riverText: 0xb9a06a,      // 楚河汉界文字
+  riverText: 0xb9a06a,      // 河界文字（秦扫 / 六合）
   palaceLine: 0xc07a2c,
 
   // —— 红方棋子 ——

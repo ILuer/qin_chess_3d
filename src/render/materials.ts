@@ -270,7 +270,7 @@ export function createWoodTexture(opts: Record<string, any> = {}): any {
 }
 
 /**
- * 透明底的文字贴图（河界"楚河/漢界"、UI 牌匾等）
+ * 透明底的文字贴图（河界"秦扫/六合"、UI 牌匾等）
  */
 export function createTextTexture(text: string, opts: Record<string, any> = {}): any {
   const {
@@ -529,7 +529,7 @@ function buildLibrary(): any {
     ground:   std(PALETTE.ground, 1.0, 0.0),
     platform: std(PALETTE.stone, 0.92, 0.05),
     riverText: new THREE.MeshStandardMaterial({
-      map: createTextTexture('楚河', { color: '#efe4c4', glow: PALETTE.gold }),
+      map: createTextTexture('秦扫', { color: '#efe4c4', glow: PALETTE.gold }),
       transparent: true,
       roughness: 0.7,
       metalness: 0.05,
@@ -537,7 +537,7 @@ function buildLibrary(): any {
       side: THREE.FrontSide
     }),
     riverText2: new THREE.MeshStandardMaterial({
-      map: createTextTexture('漢界', { color: '#efe4c4', glow: PALETTE.gold }),
+      map: createTextTexture('六合', { color: '#efe4c4', glow: PALETTE.gold }),
       transparent: true,
       roughness: 0.7,
       metalness: 0.05,
