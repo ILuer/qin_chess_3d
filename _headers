@@ -46,7 +46,9 @@
 /dist/*
   Cache-Control: public, max-age=0, must-revalidate
 
-# 战场音频采样（assets/audio/**，29 个 WAV / 磁盘 1.85MB）。
+# 战场音频采样（assets/audio/**：SAMPLE_MANIFEST 登记 44 条 = 38 WAV + 6 MP3，
+# 磁盘 3.989MB / 解码 float32 37.605MB；另含 1 份 ATTRIBUTION.md）。
+# 注意：磁盘上另有若干未被清单引用的早期 WAV，不计入加载量。
 # 文件名不带内容哈希（用户可用同名真实录音热替换），因此**不能** immutable ——
 # 否则替换后的录音一年内到不了用户耳朵（与 /vendor/* 的 immutable 纪律形成对照）。
 # 走 must-revalidate + ETag：未变更命中 304，替换后立刻生效。

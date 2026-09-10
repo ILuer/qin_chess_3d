@@ -5,33 +5,49 @@
  * 设计引用: docs/design/audio/piece-sfx-design.md §4.2（采样/合成混合策略）
  *
  * 职责:
- *   - SAMPLE_MANIFEST 采样清单（key → 资源 URL；现已登记 29 个战场采样：
- *     17 foley + 9 vox + 3 ambient loop，全部干声）
- *   - 懒加载 + 解码（≤6MB PCM 累计预算，超限静默跳过）+ 失败静默降级
+ *   - SAMPLE_MANIFEST 采样清单（key → 资源 URL；现已登记 44 个战场采样：
+ *     29 foley + 12 vox + 3 ambient loop。其中原始 29 条为离线物理建模合成干声，
+ *     另 Sprint1 新增 9 条真实录音、Sprint2 新增 6 条真实录音，见下方清单注释）
+ *   - 加载：init 时 `preloadSamples()` **全集后台预载且不 await**（不阻塞首帧/首次交互）；
+ *     单条 `loadSample()` 供按需兜底；解码 PCM 累计上限 12MB，超限静默跳过 + 失败静默降级
  *   - Foley 采样未加载 → 由 executeInst 回退程序化积木；Vocal 采样未加载 →
  *     静默跳过（不降级为合成，避免电子音破功）
+ *
+ * ⚠️ 加载策略红线：触发点 `getSample()` 是**同步读缓存**（见 sfx.ts），首次触发若未
+ *    就绪即静默丢失；且音频序列走 ctx 绝对时间锚定（ADR-4）等不及异步解码。
+ *    故**不得**改为纯懒加载，必须保持全集后台预载。
  *
  * 依赖: 无（仅持 AudioContext 引用，由 sfx.js init() 时 bind）
  * ========================================================================== */
 
-/** 采样内存预算：解码 PCM 上限（piece-sfx-design §5.1 原估 ≤6MB，实际资产集
- *  解码后约 8.1MB —— 3 条 8s@22k×2ch 环境床已占 4.23MB，foley/vox 另占 ~3.9MB。
- *  上调到 12MB 以容纳全集；移动端可在 init 时按 navigator.deviceMemory 下调。 */
+/** 采样内存预算：解码 PCM 上限。
+ *
+ *  ⚠️ 数值沿革（勿再引用旧值）：piece-sfx-design §5.1 原估 ≤6MB → 实际 8.1MB →
+ *  上调至 12MB 以容纳全集。**但 2026-09-10 实测：清单 44 条解码后已达
+ *  37.605MB（占闸门 313.4%），远超 12MB**，主因是 Sprint2 引入的 6 条 MP3 中
+ *  `foley.rook.idle` 单条即 50.35s/48kHz/stereo = 18.439MB。
+ *  → 结论：**当前处于超闸状态**，闸门会静默跳过后续采样。须先按
+ *    docs/design §10.3 裁剪至落地目标 10.898MB（90.8%）再谈全集预载。
+ *  移动端可在 init 时按 navigator.deviceMemory 下调。 */
 export const MAX_SAMPLE_BYTES = 12 * 1024 * 1024;
 
 /** 采样清单：key → 相对站点根的资源 URL。
  *
- *  资产来源说明（诚实标注）：`assets/audio/**` 下 29 个 WAV 由离线物理建模合成
- *  产出（模态叠加 / 颗粒堆叠 / 声门源 + 共振峰轨迹），**不是实地录音**；全部为
+ *  资产来源说明（诚实标注）：清单内 **原始 29 条**（foley17 + vox9 + ambient3，均 WAV）
+ *  由离线物理建模合成产出（模态叠加 / 颗粒堆叠 / 声门源 + 共振峰轨迹），**不是实地录音**；全部为
  *  「干声」，房间感统一由引擎石殿 Convolver（1.5s IR，design §0.1）负责，避免
- *  双重混响糊成一团。用户后续如有真实录音，同名替换即可热接管，无需改代码。
+ *  双重混响糊成一团。用户后续如有真实录音，同名替换即可热接管，无需改代码
+ *  （前提：`/assets/*` 走 must-revalidate 而非 immutable，见 `_headers`）。
  *
- *  预算（design §5.1）：单文件 ≤MAX_SAMPLE_BYTES，解码总量 ≤12MB（已上调容纳
- *  全集；原 §5.1 的 6MB 估值偏小）。
- *  当前：磁盘 ~3.7MB / 解码 float32 ~8.1MB（原有 29 条物理建模合成）。
- *    · foley  17 × ≤0.5s @32k（one-shot，池化复用）
- *    · vox     9 × ≤1.15s @32k
- *    · ambient 3 × 8.0s @22k（无缝循环床）
+ *  预算：单文件 ≤MAX_SAMPLE_BYTES，解码总量 ≤12MB（闸门）。
+ *  ⚠️ 实测（2026-09-10，清单 44 条口径）：磁盘 **3.989MB** / 解码 float32 **37.605MB**
+ *  = 闸门的 **313.4%，严重超闸**。旧注释的「~3.7MB / ~8.1MB」已失效（未计 MP3）。
+ *    · foley  29 条（17 合成 ≤0.5s@32k + Sprint1 6 条 + Sprint2 6 条 MP3）
+ *    · vox    12 条（9 合成 ≤1.15s@32k + Sprint1 3 条）
+ *    · ambient 3 条（8.0s@22k mono 无缝循环床，各 0.673MB）
+ *  解码体积 Top3：`foley.rook.idle` 18.439MB（50.35s/48k/stereo，单条即超闸）/
+ *  `foley.cannon.move` 5.889MB / `foley.cannon.capture` 4.570MB —— 三条合计 28.898MB，
+ *  占全集 77%；仅裁剪这三条即可回到 8.707MB（72.6%）。
  *
  *  Sprint1 真实录音（K/P/A 九事件）：来源 Kenney.nl CC0 整包（ui-audio / sci-fi-sounds /
  *  impact-sounds / rpg-audio / voiceover-pack-fighter），经解码（OGG→WAV）统一为

@@ -52,6 +52,36 @@ const clamp = (v: number, lo: number, hi: number) => ((v < lo) ? lo : (v > hi ? 
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 const _int = (): any => SFX._internals || {};
 
+/** 阵发声部：全部走统一的 lookahead 排程（不再各自 setTimeout 递归） */
+const BURST_EVENTS = ['banner', 'drum', 'horse', 'horn', 'dust', 'shout'];
+
+/** lookahead 双时钟（Chris Wilson）：粗唤醒周期 / 前瞻窗口 / 单 tick 最大补播数 */
+const TICK_MS = 250;
+const LOOKAHEAD_S = 0.5;
+const MAX_CATCHUP = 4;
+/** 落后超过该秒数 → 判定为后台节流积压，直接丢弃重排（绝不补播历史，否则切回前台会爆音墙） */
+const RESYNC_S = 2.0;
+
+/**
+ * 指数分布（无记忆过程）—— 阵发间隔不该用均匀分布。
+ * 均匀分布方差小且有硬边界 → 可预测、机械；指数分布无记忆：刚响过不代表接下来会安静，
+ * 且偶尔给出超长间隔，这个「意外性」正是自然感的来源。
+ * θ=(hi-lo)/2.5 → 约 92% 样本落在 [lo,hi]，长尾截断到 hi×1.6。
+ * 实测（dust 9–24s）：均匀 sd=4.33/max=24.0；指数 sd=5.77/max=38.4。
+ */
+function expInterval(lo: number, hi: number): number {
+  const theta = Math.max(0.1, (hi - lo) / 2.5);
+  return Math.min(lo + (-Math.log(1 - Math.random())) * theta, hi * 1.6);
+}
+
+/**
+ * 均值保持为 1 的指数抖动：因 mean(−ln(1−U))=1，故 mean(j)=(1−scale)+scale=1。
+ * 给「张力驱动的单点间隔」加不规则性，同时不偏移张力设定的均值。
+ */
+function expJitter(scale = 0.45, lo = 0.55, hi = 2.2): number {
+  return clamp((1 - scale) + (-Math.log(1 - Math.random())) * scale, lo, hi);
+}
+
 /** 一阶低通平滑 */
 function lerpSmooth(current: number, target: number, dt: number, tau: number): number {
   if (tau <= 0) return target;
@@ -81,6 +111,10 @@ export class AmbienceSystem {
   /** 采样环境床（风沙/远处军阵/行军鼓），解码完成后异步挂载 */
   _beds: Record<string, any>;
   _timers: Array<ReturnType<typeof setTimeout>>;
+  /** 阵发层下一次触发的 ctx 绝对时刻（秒）—— lookahead 排程的唯一真相源 */
+  _nextAt: Record<string, number>;
+  /** lookahead 心跳定时器（全局唯一，取代旧式每事件一个 timer） */
+  _tickTimer: ReturnType<typeof setTimeout> | 0;
   _nodes: any[];
   _tension: number;
   _tensionRaw: number;
@@ -100,7 +134,9 @@ export class AmbienceSystem {
     this._enabled = true;       // 独立静音
     this._layers = {};          // 五层运行时状态
     this._beds = {};            // 采样环境床运行时状态（异步挂载）
-    this._timers = [];          // 定时器 ID
+    this._timers = [];          // 定时器 ID（仅呼吸周期等非阵发用途）
+    this._nextAt = {};          // 阵发层下次触发的绝对时刻
+    this._tickTimer = 0;        // lookahead 心跳（全局唯一）
     this._nodes = [];           // 音频节点引用
     this._tension = 0.12;       // 当前张力（平滑后）
     this._tensionRaw = 0.12;
@@ -562,13 +598,13 @@ export class AmbienceSystem {
 
   /* ---- 阵发声部 ---- */
 
-  _playBanner(): void {
+  _playBanner(when?: number): void {
     const i = _int();
     if (!i.ready || !i.ambientBus) return;
     if (i.degradation === 'lean') return; // lean 模式不播 banner
 
     const layer = AMBIENT_LAYERS.banner;
-    const t = i.ctx.currentTime + 0.002;
+    const t = (when != null) ? when : (i.ctx.currentTime + 0.002);
     const ambBus = i.ambientBus;
 
     const n = Math.floor(rand(layer.params.nMin, layer.params.nMax + 0.99));
@@ -608,15 +644,14 @@ export class AmbienceSystem {
       this._nodes.push(noise, bp, g, send);
     }
 
-    this._scheduleNext('banner');
   }
 
-  _playDrum(tOverride?: number, f0Override?: number, durOverride?: number): void {
+  _playDrum(when?: number, f0Override?: number, durOverride?: number, isSecondHit?: boolean): void {
     const i = _int();
     if (!i.ready || !i.ambientBus) return;
 
     const layer = AMBIENT_LAYERS.drum;
-    const t = tOverride || (i.ctx.currentTime + 0.002);
+    const t = (when != null) ? when : (i.ctx.currentTime + 0.002);
     const ambBus = i.ambientBus;
 
     const f0 = f0Override || rand(layer.params.f0Min, layer.params.f0Max);
@@ -660,22 +695,20 @@ export class AmbienceSystem {
 
     this._nodes.push(osc, lp, g, ls, send);
 
-    if (tOverride) return; // 双连击第二击：不重排定时器
+    if (isSecondHit) return; // 双连击第二击：不再触发二次连击
 
     // D2 将军：远鼓双连击（第二击紧跟）
     if (this._pulse && this._pulse.doubleDrum) {
-      this._playDrum(t + EVENT_PULSE.DRUM_DOUBLE_GAP_S, f0 * 1.1, dur * 0.8);
+      this._playDrum(t + EVENT_PULSE.DRUM_DOUBLE_GAP_S, f0 * 1.1, dur * 0.8, true);
     }
-
-    this._scheduleNext('drum');
   }
 
-  _playHorse(): void {
+  _playHorse(when?: number): void {
     const i = _int();
     if (!i.ready || !i.ambientBus) return;
 
     const layer = AMBIENT_LAYERS.horse;
-    const t = i.ctx.currentTime + 0.002;
+    const t = (when != null) ? when : (i.ctx.currentTime + 0.002);
     const ambBus = i.ambientBus;
 
     const f = rand(layer.params.fMin, layer.params.fMax);
@@ -739,16 +772,15 @@ export class AmbienceSystem {
       this._nodes.push(osc, g, send);
     }
 
-    this._scheduleNext('horse');
   }
 
   /** 远处喊杀（D1 新增层：crowdBed 变体，更宽更远；连杀时峰值 ×1.5） */
-  _playShout(): void {
+  _playShout(when?: number): void {
     const i = _int();
     if (!i.ready || !i.ambientBus) return;
 
     const layer = AMBIENT_LAYERS.shout;
-    const t = i.ctx.currentTime + 0.002;
+    const t = (when != null) ? when : (i.ctx.currentTime + 0.002);
     const ambBus = i.ambientBus;
     const p = layer.params;
 
@@ -777,16 +809,15 @@ export class AmbienceSystem {
 
     this._nodes.push(src, bp, g);
 
-    this._scheduleNext('shout');
   }
 
   /** 号角（D1 新增层：双锯齿微失谐 + 低通吹口扫频 + 低八度垫 + 气声；残局/将军加密） */
-  _playHorn(): void {
+  _playHorn(when?: number): void {
     const i = _int();
     if (!i.ready || !i.ambientBus) return;
 
     const layer = AMBIENT_LAYERS.horn;
-    const t = i.ctx.currentTime + 0.002;
+    const t = (when != null) ? when : (i.ctx.currentTime + 0.002);
     const ambBus = i.ambientBus;
     const f = rand(layer.params.freqMin, layer.params.freqMax);
     const dur = layer.params.dur;
@@ -859,12 +890,12 @@ export class AmbienceSystem {
   }
 
   /** 尘土滚地（D1 新增层：远场低通噪声缓慢扫频） */
-  _playDust(): void {
+  _playDust(when?: number): void {
     const i = _int();
     if (!i.ready || !i.ambientBus) return;
 
     const layer = AMBIENT_LAYERS.dust;
-    const t = i.ctx.currentTime + 0.002;
+    const t = (when != null) ? when : (i.ctx.currentTime + 0.002);
     const ambBus = i.ambientBus;
     const p = layer.params;
 
@@ -903,77 +934,115 @@ export class AmbienceSystem {
 
   _startTimers(): void {
     if (!this._enabled) return;
-    this._scheduleNext('banner');
-    this._scheduleNext('drum');
-    this._scheduleNext('horse');
-    this._scheduleNext('horn');
-    this._scheduleNext('dust');
-    this._scheduleNext('shout');
+    const i = _int();
+    if (!i.ready || !i.ctx) return;
+
+    // 首次触发错开：避免开局六个声部齐鸣（听感是「炸场」而非「环境」）
+    const now = i.ctx.currentTime;
+    this._nextAt = {};
+    for (const ev of BURST_EVENTS) {
+      this._nextAt[ev] = now + this._interval(ev) * rand(0.35, 1.0);
+    }
+    this._startTick();
     this._startBreathCycle();
   }
 
   _stopTimers(): void {
     this._timers.forEach(t => clearTimeout(t));
     this._timers = [];
+    if (this._tickTimer) { clearTimeout(this._tickTimer); this._tickTimer = 0; }
+    this._nextAt = {};
   }
 
-  _scheduleNext(event: string): void {
+  /** 启动 lookahead 心跳（幂等：全局只维持一个 timer） */
+  _startTick(): void {
+    if (this._tickTimer) return;
+    this._tickTimer = setTimeout(() => this._tick(), TICK_MS);
+  }
+
+  /**
+   * lookahead 心跳：粗唤醒只负责「看看未来 0.5s 内有没有该响的」，
+   * 真正发声用 ctx 绝对时刻锚定 src.start(when)，与 ADR-4 一致。
+   * 主线程卡顿 / 后台标签页节流都不会让节奏漂——最坏只是延迟到下一个 tick，
+   * 而发声时刻仍由 AudioContext 时钟保证。
+   */
+  _tick(): void {
+    this._tickTimer = 0;
     if (!this._active || !this._enabled) return;
+    const i = _int();
+    if (!i.ready || !i.ctx) return;
 
-    let delayMs: number;
-    const layer = (AMBIENT_LAYERS as Record<string, any>)[event];
-    const tension = this._tension;
+    for (const ev of BURST_EVENTS) {
+      const now = i.ctx.currentTime;
+      // noUncheckedIndexedAccess：显式 number 类型，避免整段反复判空
+      let at: number = (this._nextAt[ev] != null) ? this._nextAt[ev] : 0;
+      if (!(at > 0)) { at = now + this._interval(ev); this._nextAt[ev] = at; }
 
-    switch (event) {
-      case 'banner':
-        delayMs = rand(layer.interval.lo, layer.interval.hi) * 1000;
-        break;
-      case 'drum': {
-        // 张力驱动间隔 + D2 事件脉冲（连杀/残局加密）
-        const t0 = TENSION_MAP[0.0].drumInterval;
-        const t1 = TENSION_MAP[1.0].drumInterval;
-        let iv = geomLerp(t0, t1, tension);
-        if (this._pulse && this._pulse.drumMul != null) iv *= this._pulse.drumMul;
-        delayMs = iv * 1000;
-        break;
+      // 后台节流积压 → 丢弃历史、近期重排（不补播，否则切回前台是一堵音墙）
+      if (at < now - RESYNC_S) {
+        this._nextAt[ev] = now + this._interval(ev) * rand(0.2, 0.8);
+        continue;
       }
-      case 'horse':
-        delayMs = rand(layer.interval.lo, layer.interval.hi) * 1000;
-        break;
-      case 'horn': {
-        // 张力驱动 + D2 事件脉冲（残局/将军：号角加密 → 接近循环）
-        const base = geomLerp(60.0, 26.0, tension);
-        let iv = base;
-        if (this._pulse && this._pulse.hornMul != null) iv *= this._pulse.hornMul;
-        delayMs = iv * 1000;
-        break;
+
+      let guard = 0;
+      while (at < now + LOOKAHEAD_S && guard++ < MAX_CATCHUP) {
+        const when = Math.max(now, at);
+        try {
+          this._fireBurst(ev, when);
+        } catch (e) {
+          // 单拍异常：记录上下文，其余层与后续排程不受影响（排程已与播放解耦）
+          console.error('[AUDIO:ambience] 阵发层播放异常', ev, e);
+        }
+        at = when + this._interval(ev);
+        this._nextAt[ev] = at;
       }
-      case 'dust':
-        delayMs = rand(layer.interval.lo, layer.interval.hi) * 1000;
-        break;
-      case 'shout':
-        delayMs = rand(layer.interval.lo, layer.interval.hi) * 1000;
-        break;
-      default:
-        return;
     }
 
-    const timer = setTimeout(() => {
-      if (!this._active || !this._enabled) return;
-      try {
-        if (event === 'banner') this._playBanner();
-        else if (event === 'drum') this._playDrum();
-        else if (event === 'horse') this._playHorse();
-        else if (event === 'horn') this._playHorn();
-        else if (event === 'dust') this._playDust();
-        else if (event === 'shout') this._playShout();
-      } catch (e) {
-        // 单拍播放异常：记录上下文，保持其余层不受影响（不额外重排，行为与未捕获一致）
-        console.error('[AUDIO:ambience] 阵发层播放异常', event, e);
-      }
-    }, delayMs);
+    this._startTick();
+  }
 
-    this._timers.push(timer);
+  /** 按事件分发到对应阵发声部（when = ctx 绝对时刻） */
+  _fireBurst(event: string, when: number): void {
+    switch (event) {
+      case 'banner': this._playBanner(when); break;
+      case 'drum': this._playDrum(when); break;
+      case 'horse': this._playHorse(when); break;
+      case 'horn': this._playHorn(when); break;
+      case 'dust': this._playDust(when); break;
+      case 'shout': this._playShout(when); break;
+    }
+  }
+
+  /**
+   * 取该事件下一次的间隔（秒）。
+   * 固定区间（banner/horse/dust/shout）走指数分布；
+   * 张力驱动型：drum 保持确定（行军鼓有节奏感，抖动反而散），horn 加均值保持的指数抖动。
+   */
+  _interval(event: string): number {
+    const layer = (AMBIENT_LAYERS as Record<string, any>)[event];
+    const tension = this._tension;
+    let iv: number;
+
+    switch (event) {
+      case 'drum': {
+        iv = geomLerp(TENSION_MAP[0.0].drumInterval, TENSION_MAP[1.0].drumInterval, tension);
+        if (this._pulse && this._pulse.drumMul != null) iv *= this._pulse.drumMul;
+        break;
+      }
+      case 'horn': {
+        const base = geomLerp(60.0, 26.0, tension);
+        iv = base * ((this._pulse && this._pulse.hornMul != null) ? this._pulse.hornMul : 1)
+          * expJitter();
+        break;
+      }
+      default: {
+        const it = layer && layer.interval;
+        if (!it) return 0;
+        iv = expInterval(it.lo, it.hi);
+        break;
+      }
+    }
+    return Math.max(0.25, iv);
   }
 
   /* ---- 淡入淡出 ---- */
@@ -1090,7 +1159,7 @@ export class AmbienceSystem {
       i.ambientBus.gain.linearRampToValueAtTime(ambientGain, ct + 1.0);
     }
 
-    // 存储更新的鼓间隔/峰值，供下次 _scheduleNext 使用
+    // 存储更新的鼓间隔/峰值，供下次 _interval 计算使用
     this._drumInterval = drumInterval;
     this._drumPeak = drumPeak;
     this._crowdPeak = crowdPeak;
