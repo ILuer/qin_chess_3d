@@ -306,6 +306,16 @@ export const DRAW_HALFMOVE_HINT = 120;
 /** 自动判和阈值（半回合数） */
 export const DRAW_HALFMOVE_LIMIT = 240;
 
+/**
+ * 局面重复判和阈值（同一局面（棋子布局 + 走子方）第 N 次出现即判定）。
+ *
+ * 中国象棋正式规则：同一局面出现三次 → 需判定「长将 / 长捉」归属：
+ *   - 一方长将（每步都将军）→ 该方**判负**（见 END_REASON.PERPETUAL_CHECK）；
+ *   - 双方均长将、或双方均无违规 → **判和**（见 END_REASON.DRAW_REPETITION）。
+ * 判定实现见 `gameState.ts` 的 `_checkRepetition()`。
+ */
+export const REPETITION_LIMIT = 3;
+
 // ---------------------------------------------------------------------------
 // 10. 战场演出节拍参数（来源：docs/design/action-system.md §2.2 / §3.2 / §5.4）
 // ---------------------------------------------------------------------------

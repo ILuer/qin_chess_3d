@@ -7,7 +7,7 @@ import {
   RED, BLACK, PT, opposite,
   PIECE_NAMES, SIDE_NAMES, FILE_NAMES_RED, FILE_NAMES_BLACK,
   CN_NUM, AR_NUM, MOVE_VERB, INITIAL_FEN,
-  DRAW_HALFMOVE_HINT, DRAW_HALFMOVE_LIMIT
+  DRAW_HALFMOVE_HINT, DRAW_HALFMOVE_LIMIT, REPETITION_LIMIT
 } from './constants.ts';
 import { Board, createInitialBoard, boardFromList, boardFromFen, type Piece } from './board.ts';
 import {
@@ -77,6 +77,25 @@ export function getMoveNotation(board: Board, from: { file: number, rank: number
 }
 
 // ---------------------------------------------------------------------------
+// 局面键（三次重复局面 / 长将判定）
+// ---------------------------------------------------------------------------
+
+/**
+ * 生成「局面键」：棋子布局 + 走子方。
+ *
+ * 为什么必须带 sideToMove：`Board.hash()`（= `toFen()`）只含棋子布局，
+ * 而同一布局在不同走子方下是**不同局面**——若只用布局，「A 走完的布局」与
+ * 「B 走完的同一布局」会被误判为重复，导致提前判和。
+ *
+ * @param {Board} board
+ * @param {string} sideToMove
+ * @returns {string}
+ */
+function positionKey(board: Board, sideToMove: string): string {
+  return `${board.hash()}|${sideToMove}`;
+}
+
+// ---------------------------------------------------------------------------
 // GameState
 // ---------------------------------------------------------------------------
 
@@ -87,7 +106,11 @@ export const END_REASON = {
   RESIGN: 'resign',
   DRAW_MATERIAL: 'draw-material',
   DRAW_HALFMOVE: 'draw-halfmove',
-  DRAW_AGREE: 'draw-agree'
+  DRAW_AGREE: 'draw-agree',
+  /** 三次重复局面判和（双方均无长将） */
+  DRAW_REPETITION: 'draw-repetition',
+  /** 长将判负（一方连续将军导致局面重复） */
+  PERPETUAL_CHECK: 'perpetual-check'
 };
 
 /** 一条走子记录（history 元素） */
@@ -106,7 +129,12 @@ export interface MoveRecord {
   statusAfter: string;
 }
 
-export type GameStatus = 'playing' | 'check' | 'checkmate' | 'stalemate' | 'draw' | 'resigned';
+/**
+ * 对局状态。
+ * 注意 `'perpetual'`：**长将判负**（一方连续将军致局面重复）——是「分胜负」而非和棋，
+ * 与 `'checkmate' / 'stalemate' / 'resigned'` 同属终局；`winner` 为长将被判负方的对手。
+ */
+export type GameStatus = 'playing' | 'check' | 'checkmate' | 'stalemate' | 'draw' | 'resigned' | 'perpetual';
 
 export class GameState {
   board: Board;
@@ -115,6 +143,12 @@ export class GameState {
   history: MoveRecord[];
   halfMoveClock: number;
   _drawHinted: boolean;
+  /**
+   * 局面键序列：`_posKeys[i]` = 下完 `history[i-1]` 步后的局面（`_posKeys[0]` = 起始局面）。
+   * 因此恒有 `_posKeys.length === history.length + 1`。
+   * 仅供「三次重复局面 / 长将」判定使用（见 `_checkRepetition`）。
+   */
+  _posKeys: string[];
   status: GameStatus;
   winner: string | null;
   endReason: string | null;
@@ -137,7 +171,9 @@ export class GameState {
     this.halfMoveClock = 0;
     /** 已提示过 60 回合无吃子 */
     this._drawHinted = false;
-    /** @type {'playing'|'check'|'checkmate'|'stalemate'|'draw'|'resigned'} */
+    /** 局面键序列（三次重复 / 长将判定用）：长度恒为 history.length + 1 */
+    this._posKeys = [positionKey(this.board, this.sideToMove)];
+    /** @type {'playing'|'check'|'checkmate'|'stalemate'|'draw'|'resigned'|'perpetual'} */
     this.status = 'playing';
     this.winner = null;
     this.endReason = null;
@@ -206,7 +242,8 @@ export class GameState {
 
   isGameOver(): boolean {
     return this.status === 'checkmate' || this.status === 'stalemate'
-      || this.status === 'draw' || this.status === 'resigned';
+      || this.status === 'draw' || this.status === 'resigned'
+      || this.status === 'perpetual';
   }
 
   canUndo(): boolean { return this.history.length > 0 && !this._locked; }
@@ -270,8 +307,15 @@ export class GameState {
 
     this.history.push(record);
     this.sideToMove = opposite(piece.side);
+    // 本步是否将军：必须用棋盘直接判定，且**在 refreshStatus() 之前**赋值。
+    // 原因：refreshStatus() → _checkRepetition() 需读取本重复周期内每一步的
+    //   checkAfter（含刚刚走完的这一步）。若沿用「refreshStatus 之后按 status 反推」，
+    //   本步的 checkAfter 在裁定时刻恒为初始值 false → 长将裁定会漏掉本步将军的一方。
+    // 等价性：将军或把对方将死时 isInCheck(对方) 均为 true，与原判定一致。
+    record.checkAfter = isInCheck(this.board, this.sideToMove);
+    // 记录走子后的局面键（必须在 sideToMove 更新之后、refreshStatus 之前）
+    this._posKeys.push(positionKey(this.board, this.sideToMove));
     this.refreshStatus();
-    record.checkAfter = this.status === 'check' || this.status === 'checkmate';
     record.statusAfter = this.status;
 
     this.emit('move', { record, state: this });
@@ -302,6 +346,8 @@ export class GameState {
       }
       this.halfMoveClock = rec.prevHalfMoveClock;
       this.sideToMove = rec.side;
+      // 与 history 同步回退局面键（两者长度恒为 history.length + 1）
+      if (this._posKeys.length > 1) this._posKeys.pop();
       undone.push(rec);
     }
     if (undone.length) {
@@ -322,6 +368,7 @@ export class GameState {
     this.history.length = 0;
     this.halfMoveClock = 0;
     this._drawHinted = false;
+    this._posKeys = [positionKey(this.board, this.sideToMove)];
     this.winner = null;
     this.endReason = null;
     this.captured = { [RED]: [], [BLACK]: [] };
@@ -349,21 +396,96 @@ export class GameState {
     return true;
   }
 
+  /**
+   * 三次重复局面检测 + 长将裁定（中国象棋正式规则）。
+   *
+   * 判定流程：
+   *   1. 统计当前局面键在 `_posKeys` 中的出现次数；不足 `REPETITION_LIMIT`(3) → 无结果。
+   *   2. 取「上一次出现」到「本次出现」之间的着法序列（即一个重复周期）。
+   *   3. 统计该周期内双方各自的着法数与其中「走完后将军」的步数，并按下列规则裁定：
+   *      - 恰有一方**步步将军**、另一方并非如此 → 前者**长将判负**；
+   *      - 双方均步步将军（互相对将）→ **判和**；
+   *      - 双方均非步步将军（普通循环）→ **判和**。
+   *
+   * 为什么取「上一次出现」而不是「首次出现」：只需一个完整周期即可识别违规方，
+   * 周期越短越能排除与本次无关的历史着法，降低误判概率。
+   *
+   * ⚠ 已知范围限制：**长捉（连续捉子）未纳入判定**。其判定需要完整的「捉」定义
+   * （威胁吃子、被保护子、等价交换等），规则解释存在争议，误判代价高于收益；
+   * 当前这类局面按普通重复判和。若后续需要，在此处扩展即可。
+   *
+   * @returns {{kind:'none'}|{kind:'draw'}|{kind:'perpetual', loser:string}}
+   *          `loser` 为长将被判负的一方
+   */
+  _checkRepetition(): { kind: 'none' } | { kind: 'draw' } | { kind: 'perpetual', loser: string } {
+    const n = this._posKeys.length;
+    if (n < REPETITION_LIMIT) return { kind: 'none' };
+    const cur = this._posKeys[n - 1]!;
+
+    // 统计「含本次在内」的出现总次数，并记录**上一次**出现的下标（本次固定为 n-1）。
+    // ⚠ 不可在 count 达到 2 时就 break：那样 count 恒为 2，永远无法满足
+    //   `count >= REPETITION_LIMIT`(3)，整个长将 / 重复局面裁定会退化为死代码。
+    let count = 0;
+    let prevIdx = -1;
+    for (let i = n - 1; i >= 0; i--) {
+      if (this._posKeys[i] !== cur) continue;
+      count++;
+      if (i !== n - 1 && prevIdx === -1) prevIdx = i;
+    }
+    if (count < REPETITION_LIMIT || prevIdx < 0) return { kind: 'none' };
+
+    // 一个周期内的着法：_posKeys[prevIdx] → _posKeys[n-1]，对应 history[prevIdx .. n-2]
+    const cycle = this.history.slice(prevIdx, n - 1);
+    if (!cycle.length) return { kind: 'draw' };
+
+    const stat: Record<string, { moves: number, checks: number }> = {};
+    for (const r of cycle) {
+      const s = stat[r.side] || (stat[r.side] = { moves: 0, checks: 0 });
+      s.moves++;
+      if (r.checkAfter) s.checks++;
+    }
+    const sides = Object.keys(stat);
+    const alwaysCheck = sides.filter((s) => stat[s]!.moves > 0 && stat[s]!.checks === stat[s]!.moves);
+
+    // 恰有一方步步将军 → 该方长将判负；否则判和
+    if (alwaysCheck.length === 1 && sides.length >= 2) {
+      return { kind: 'perpetual', loser: alwaysCheck[0]! };
+    }
+    return { kind: 'draw' };
+  }
+
   /** 重新计算 status / winner / endReason */
   refreshStatus(): GameStatus {
-    // 和棋优先判定
+    // ① 双方仅剩将帅 → 和
     if (this.board.isBareKings()) {
       this.status = 'draw';
       this.winner = null;
       this.endReason = END_REASON.DRAW_MATERIAL;
       return this.status;
     }
+    // ② 三次重复局面 → 长将判负 / 判和
+    //    排在自然限着之前：长将是「违规判负」，比「长期无吃子判和」更具体，应优先裁定。
+    const rep = this._checkRepetition();
+    if (rep.kind === 'perpetual') {
+      this.status = 'perpetual';
+      this.winner = opposite(rep.loser);
+      this.endReason = END_REASON.PERPETUAL_CHECK;
+      return this.status;
+    }
+    if (rep.kind === 'draw') {
+      this.status = 'draw';
+      this.winner = null;
+      this.endReason = END_REASON.DRAW_REPETITION;
+      return this.status;
+    }
+    // ③ 自然限着 → 和
     if (this.halfMoveClock >= DRAW_HALFMOVE_LIMIT) {
       this.status = 'draw';
       this.winner = null;
       this.endReason = END_REASON.DRAW_HALFMOVE;
       return this.status;
     }
+    // ④ 常规：将军 / 将死 / 困毙（困毙判负）
     const st = getGameStatus(this.board, this.sideToMove);
     this.status = st;
     if (st === 'checkmate') {
@@ -386,14 +508,16 @@ export class GameState {
     if (this.status === 'draw') {
       const why = this.endReason === END_REASON.DRAW_MATERIAL ? '双方仅剩将帅'
         : this.endReason === END_REASON.DRAW_HALFMOVE ? '长期无吃子'
-          : '双方议和';
+          : this.endReason === END_REASON.DRAW_REPETITION ? '三次重复局面'
+            : '双方议和';
       return `和棋 · ${why}`;
     }
     const w = SIDE_NAMES[this.winner || ''] || '';
     const why = this.endReason === END_REASON.CHECKMATE ? '将死对方'
       : this.endReason === END_REASON.STALEMATE ? '对方困毙无子可动'
         : this.endReason === END_REASON.RESIGN ? '对方认输'
-          : '';
+          : this.endReason === END_REASON.PERPETUAL_CHECK ? '对方长将判负'
+            : '';
     return `${w}胜 · ${why}`;
   }
 

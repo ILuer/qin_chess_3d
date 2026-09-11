@@ -22,7 +22,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { existsSync, statSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, statSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -80,7 +80,19 @@ function resolveEntry(rel) {
   return existsSync(tsPath) ? tsPath : jsPath;
 }
 
-/** 构建参数（build 与 dev 共用，保证行为一致） */
+/**
+ * 构建参数（build 与 dev 共用的**结构**部分）。
+ *
+ * ⚠ 注意：`sourcemap` / `minify` **刻意不放在这里** —— 二者是生产与开发的
+ * 分档项，必须显式在各档位（PROD / DEV）声明，避免「改一处同时影响另一端」：
+ *
+ *   - 生产（buildOnce）：sourcemap **false** + minify **true**
+ *   - 开发（--serve）  ：sourcemap **true**  + minify **false**
+ *
+ * 历史教训：本字段原为 `sourcemap: true` 且无 `minify`，因 common 被两档共用，
+ * 导致**生产环境同时暴露完整源码（dist/main.js.map 可下载、含 sourcesContent）
+ * 且产物未压缩**（dist/main.js 1,232,565 B / 29,224 行）。详见下方 PROD 注释。
+ */
 const common = {
   entryPoints: [resolveEntry('src/main.js')],
   bundle: true,
@@ -90,28 +102,115 @@ const common = {
   assetNames: 'assets/[name]-[hash]',
   outdir: OUTDIR,
   target: ['es2022'],
-  sourcemap: true,
   legalComments: 'none',
   logLevel: 'info',
   plugins: [threeVendorPlugin]
 };
 
 /**
- * 递归收集 dist/ 下运行时 JS 文件（排除 .map sourcemap）
- * @returns {string[]} 根相对路径数组（如 'dist/main.js'、'dist/chunks/chunk-xxx.js'）
+ * 生产档位构建参数。
+ *
+ * 【为什么 sourcemap 必须为 false】
+ * 本项目的 dist/ 由 Cloudflare Pages 在构建时生成并**原样对外托管**，任何落到
+ * dist/ 的文件都是公开可下载的。esbuild 的 sourcemap 内嵌 `sourcesContent`
+ * （源文件全文），实测线上 `dist/main.js.map` 返回 HTTP 200 / 2,534,407 B，
+ * 可 1:1 还原 33 个项目源文件（含 AI 搜索算法、音频合成配方、动作参数总表）。
+ * 这类程序化建模/合成配方是本项目的核心技术资产，不得外泄。
+ *
+ * 【为什么 minify 必须为 true】
+ * 未压缩产物为 1,232,565 B / 29,224 行，实测 minify 后可降至 ~1/2 量级，
+ * 直接减少首屏传输。`legalComments: 'none'` 已在 common 中设置，规避许可注释膨胀。
+ *
+ * 【为什么用「删除残留 .map」而非只靠 sourcemap:false】
+ * OUTDIR 可能残留上一次构建的 .map（例如本地 BUILD_OUT 切换、或历史产物未清理）。
+ * 只置 false 不会删除既有文件，故 buildOnce 末尾统一清理 *.map 做**兜底**。
  */
-function collectRuntimeJs() {
+const PROD = {
+  sourcemap: false,
+  minify: true
+};
+
+/** 开发档位：保留 sourcemap 与可读产物，便于断点调试 */
+const DEV = {
+  sourcemap: true,
+  minify: false
+};
+
+/**
+ * 从 esbuild 的 `metafile.outputs` 提取**本次构建实际写出**的 JS 文件。
+ *
+ * 【为什么不能用「遍历 OUTDIR」代替】
+ * esbuild **不会清理 outdir**：chunk 名带内容哈希（`chunks/[name]-[hash]`），
+ * 每次构建哈希变化就会留下上一批旧 chunk。实测一次改动即残留 2 个旧 chunk
+ * （1,734,482 B + 1,089,389 B ≈ 2.8 MB 死代码），且它们会被写进 SW 预缓存清单、
+ * 被 CF Pages 一并对外托管。以 metafile 的 outputs 为准，才能反映「真实产物集」。
+ *
+ * @param {object} metafile esbuild 构建结果中的 metafile
+ * @returns {string[]} 仓库相对路径数组（正斜杠），已排序
+ */
+function outputJsFromMetafile(metafile) {
+  if (!metafile || !metafile.outputs) return [];
+  return Object.keys(metafile.outputs)
+    .filter((p) => p.endsWith('.js'))
+    .map((p) => {
+      const abs = path.isAbsolute(p) ? p : path.resolve(ROOT, p);
+      return path.relative(ROOT, abs).split(path.sep).join('/');
+    })
+    .sort();
+}
+
+/**
+ * 剔除 OUTDIR 下**不属于本次构建**的陈旧的 .js / .map（安全兜底）。
+ *
+ * 同时解决两类残留：
+ *   ① 旧 chunk（哈希变化后遗留，见 outputJsFromMetafile 注释）；
+ *   ② sourcemap（PROD.sourcemap=false 不会删除既有文件）。
+ *
+ * 只删除 `.js` / `.map`；`assets-manifest.json` 与任何非 JS 资源不受影响。
+ * 传入的 keep 集合必须来自 metafile，否则有误删风险。
+ *
+ * @param {string[]} freshFiles 本次构建产出的仓库相对路径集合
+ * @returns {string[]} 被删除文件的仓库相对路径
+ */
+function pruneStaleArtifacts(freshFiles) {
+  const keep = new Set(freshFiles);
+  const removed = [];
+  const walk = (dir) => {
+    for (const n of readdirSync(dir)) {
+      const fp = path.join(dir, n);
+      if (statSync(fp).isDirectory()) walk(fp);
+      else if (n.endsWith('.js') || n.endsWith('.map')) {
+        const rel = path.relative(ROOT, fp).split(path.sep).join('/');
+        if (keep.has(rel)) continue;
+        try {
+          rmSync(fp);
+          removed.push(rel);
+        } catch (e) {
+          console.warn(`[build] 清理陈旧产物 ${rel} 失败：${e && e.message}`);
+        }
+      }
+    }
+  };
+  if (existsSync(OUTDIR)) walk(OUTDIR);
+  return removed.sort();
+}
+
+/**
+ * 列出 OUTDIR 下所有指定扩展名的文件（仓库相对路径）。
+ * @param {string} ext 扩展名，含点（如 '.map'）
+ * @returns {string[]}
+ */
+function listFilesWithExt(ext) {
   const out = [];
   const walk = (dir) => {
     for (const n of readdirSync(dir)) {
       const fp = path.join(dir, n);
-      const st = statSync(fp);
-      if (st.isDirectory()) walk(fp);
-      else if (n.endsWith('.js')) out.push(fp);
+      if (statSync(fp).isDirectory()) walk(fp);
+      else if (n.endsWith(ext)) out.push(path.relative(ROOT, fp).split(path.sep).join('/'));
     }
   };
   if (existsSync(OUTDIR)) walk(OUTDIR);
-  return out.map((fp) => path.relative(ROOT, fp).split(path.sep).join('/')).sort();
+  return out.sort();
 }
 
 /**
@@ -119,10 +218,14 @@ function collectRuntimeJs() {
  * 契约：sw.js fetch('./dist/assets-manifest.json')，读 `json.files`（字符串数组）；
  * 路径为根相对（'dist/...'），sw.js 自行补 './' 前缀；three.webgpu-* 由 sw.js 过滤不预缓存。
  * sizes 为附加信息（sw.js 不读，供体积观测/QA 验收双口径）。
+ *
+ * ⚠ files 必须由调用方传入「本次构建真实产物」（metafile 口径）；禁止再遍历 OUTDIR，
+ *   否则会把陈旧 chunk 重新混入预缓存清单（历史缺陷，见 outputJsFromMetafile 注释）。
+ *
+ * @param {string[]} files 本次构建产出的仓库相对路径集合
  * @returns {Promise<string>} 清单文件路径
  */
-async function writeManifest() {
-  const files = collectRuntimeJs();
+async function writeManifest(files) {
   const sizes = {};
   for (const rel of files) {
     const buf = await readFile(path.join(ROOT, rel));
@@ -141,7 +244,8 @@ async function writeManifest() {
 
 async function buildOnce() {
   // 主 bundle：src/main.js → dist/main.js（three 内联；webgpu 动态 chunk）。
-  await esbuild.build(common);
+  // metafile 用于精确获知本次写出的文件集（含哈希命名的 chunk）。
+  const mainResult = await esbuild.build({ ...common, ...PROD, metafile: true });
 
   // AI module worker：显式第二 entry → dist/worker.js。
   // 注意：这里必须显式打包，不能依赖 esbuild 对 engine.ts 中
@@ -150,21 +254,64 @@ async function buildOnce() {
   //   dist/worker.js，导致 Worker 加载失败降级为主线程）。显式 entry 保证
   //   每次构建都产出 worker.js，与 engine.ts 的 URL './worker.js' 精确对齐，
   //   也契合 sw.js PRECACHE_CORE 硬编码的 './dist/worker.js'。
-  await esbuild.build({
+  const workerResult = await esbuild.build({
     entryPoints: [resolveEntry('src/ai/worker.js')],
     bundle: true,
     format: 'esm',
     outfile: path.join(OUTDIR, 'worker.js'),
     target: ['es2022'],
-    sourcemap: false,
-    legalComments: 'none',
-    logLevel: 'info',
+    ...PROD,
+    metafile: true,
     plugins: [threeVendorPlugin]   // worker 不引 three，但保留插件以防御未来引入
   });
 
-  // 构建产物清单（SW 预缓存契约）
-  const manifestPath = await writeManifest();
-  console.log('[build] 产物已写入 dist/（main.js + worker.js + chunks/）');
+  // 本次构建的真实产物集（两个 entry 的并集）
+  const freshFiles = [
+    ...new Set([
+      ...outputJsFromMetafile(mainResult.metafile),
+      ...outputJsFromMetafile(workerResult.metafile)
+    ])
+  ].sort();
+
+  // 【第一道防线 · 配置回退即刻失败】
+  // 若生产档位被改回 sourcemap:true，esbuild 会**新生成** .map。此时必须立刻报错，
+  // 而不是依赖下方 prune 静默删掉——静默会掩盖配置回退，直到某次构建顺序变化
+  // 才把源码泄露出去。这里直接以 metafile 为准判定。
+  const emittedMaps = [
+    ...Object.keys(mainResult.metafile?.outputs || {}),
+    ...Object.keys(workerResult.metafile?.outputs || {})
+  ].filter((p) => p.endsWith('.map'));
+  if (emittedMaps.length) {
+    throw new Error(
+      `[build] 生产构建产出了 sourcemap，已阻止构建：${emittedMaps.join(', ')}\n` +
+      '        dist/ 是对外托管的公开目录，sourcemap 内嵌 sourcesContent，会泄露完整源码。\n' +
+      '        请检查 PROD.sourcemap 必须为 false。'
+    );
+  }
+
+  // 兜底：剔除陈旧 chunk 与 sourcemap 残留（esbuild 不清理 outdir）
+  const stale = pruneStaleArtifacts(freshFiles);
+  if (stale.length) {
+    console.log(`[build] 已清理陈旧产物 ${stale.length} 个：${stale.join(', ')}`);
+  }
+
+  // 强制不变量：dist/ 下不得存在任何 sourcemap。
+  // 背景：dist/ 由 CF Pages 原样对外托管，任何 .map 都是公开可下载的完整源码
+  // （内嵌 sourcesContent）。此处把「不泄露」从注释升级为**构建期断言**——
+  // 若将来有人重新开启 sourcemap（或引入会产出 .map 的插件），构建会立即失败并
+  // 阻断部署，而不是静默把源码推到线上。
+  const leftoverMaps = listFilesWithExt('.map');
+  if (leftoverMaps.length) {
+    throw new Error(
+      `[build] 检测到 sourcemap 残留，已阻止构建：${leftoverMaps.join(', ')}\n` +
+      '        dist/ 是对外托管的公开目录，sourcemap 会泄露完整源码。\n' +
+      '        请检查 esbuild 的 sourcemap 配置（生产档位 PROD.sourcemap 必须为 false）。'
+    );
+  }
+
+  // 构建产物清单（SW 预缓存契约）——严格以本次产物集为准
+  const manifestPath = await writeManifest(freshFiles);
+  console.log(`[build] 产物已写入 dist/（${freshFiles.length} 个 JS：${freshFiles.join(', ')}）`);
   console.log(`[build] assets-manifest.json 已生成 -> ${manifestPath}`);
 }
 
@@ -206,21 +353,36 @@ const isServe = process.argv.includes('--serve');
 if (isServe) {
   // watch 模式：主 bundle 每次重建后刷新 assets-manifest.json（worker 为固定文件，
   // 由完整 build 更新；dev 只保证 main/chunks 清单新鲜，与 sw.js 契约一致）
+  //
+  // 注意：dev **不做陈旧产物清理**——worker.js 不在 watch 的产物集里，
+  // 若在此剪枝会把 worker.js 一并删掉。清理只发生在完整 build（buildOnce）。
   const manifestPlugin = {
     name: 'write-assets-manifest',
     setup(build) {
-      build.onEnd(async () => {
-        try { await writeManifest(); }
-        catch (e) { console.warn('[dev] assets-manifest.json 刷新失败：', e && e.message); }
+      build.onEnd(async (result) => {
+        try {
+          const files = outputJsFromMetafile(result.metafile);
+          const workerRel = path.relative(ROOT, path.join(OUTDIR, 'worker.js')).split(path.sep).join('/');
+          if (existsSync(path.join(OUTDIR, 'worker.js')) && !files.includes(workerRel)) {
+            files.push(workerRel);
+            files.sort();
+          }
+          await writeManifest(files);
+        } catch (e) {
+          console.warn('[dev] assets-manifest.json 刷新失败：', e && e.message);
+        }
       });
     }
   };
   const ctx = await esbuild.context({
     ...common,
+    ...DEV,
+    metafile: true,
     plugins: [...common.plugins, manifestPlugin]
   });
+  // 启动即构建一次（产出 dist/main.js 供静态服务器消费），watch 随后接管
+  await ctx.rebuild();
   await ctx.watch();
-  await writeManifest();   // 启动即写一次（服务既有 dist）
   const port = Number(process.env.PORT || 5173);
   createStaticServer().listen(port, () => {
     console.log(`[dev] 本地服务器 http://localhost:${port}（watch 已开启）`);

@@ -43,8 +43,21 @@
 
 # H4 构建产物：main.js / worker.js 为固定文件名（非内容哈希），必须 must-revalidate；
 # chunks/* 带内容哈希理论上可 immutable，但统一走 must-revalidate 更稳妥（ETag 304 已足够便宜）。
+#
+# ⚠ 不变量：/dist/ 下**不得存在任何 .map**。
+#   本目录由 Cloudflare Pages 原样对外托管，sourcemap 内嵌 sourcesContent，
+#   一旦部署即可被任何人下载并 1:1 还原完整源码（2026-09 实测 dist/main.js.map
+#   线上返回 HTTP 200 / 2.5 MB，可还原 33 个源文件，含 AI 搜索与音频合成配方）。
+#   该不变量由 build.mjs 强制：生产档位 sourcemap=false + 构建后剪枝 + 构建期断言
+#   （产出 .map 即 throw 阻断构建）。_headers 无法返回 404，故此处仅作声明与兜底。
+#   注意：/dist/*.map 必须写在 /dist/* **之后**（多规则命中时以靠后者为准），
+#   否则会被通用规则覆盖。
 /dist/*
   Cache-Control: public, max-age=0, must-revalidate
+
+# 兜底：若因异常仍部署了 .map，至少禁止其被 CDN / 浏览器缓存
+/dist/*.map
+  Cache-Control: no-store
 
 # 战场音频采样（assets/audio/**：SAMPLE_MANIFEST 登记 44 条 = 38 WAV + 6 MP3，
 # 磁盘 3.989MB / 解码 float32 37.605MB；另含 1 份 ATTRIBUTION.md）。
