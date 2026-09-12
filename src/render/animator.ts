@@ -128,6 +128,17 @@ export function cloneMaterialsForFade(root: any): Array<{ mesh: any, orig: any }
   return backup;
 }
 
+/**
+ * 把「世界 XZ 方向」归一化为单位向量（Y 恒 0）。缺省/零向量回退 +Z。
+ * 用于 R-1 贴地败退的滑出方向（Caller 传「攻击者→受害者」向量）。
+ */
+function _normXZ(dir?: { x: number, z: number } | null): { x: number, z: number } {
+  if (!dir) return { x: 0, z: 1 };
+  const len = Math.hypot(dir.x, dir.z);
+  if (!(len > 1e-6)) return { x: 0, z: 1 };
+  return { x: dir.x / len, z: dir.z / len };
+}
+
 /** 设置整棵子树的不透明度（须先调用 cloneMaterialsForFade） */
 export function setTreeOpacity(root: any, v: number) {
   root.traverse((o: any) => {
@@ -201,6 +212,10 @@ export interface DissolveOpts {
   delay?: number;
   lock?: boolean;
   onComplete?: (mesh: any, backup?: any) => void;
+  /** ★ R-1 贴地败退：败退方向（世界 XZ，非单位向量亦可，内部归一化）。缺省 +Z。 */
+  knockDir?: { x: number, z: number };
+  /** ★ R-1 贴地败退：沿盘面的滑出距离（世界单位）。缺省 0.55。 */
+  knockDist?: number;
 }
 
 export class Animator {
@@ -348,7 +363,12 @@ export class Animator {
    */
   arcMove(mesh: any, to: any, opts: ArcMoveOpts = {}): TweenHandle {
     const duration = opts.duration != null ? opts.duration : TIMING.moveDuration;
-    const lift = opts.lift != null ? opts.lift : TIMING.liftHeight;
+    // ★ R-1（冻结红线·最高优先级）：root 离地一律禁止，故**缺省 lift = 0**。
+    //   原缺省为 TIMING.liftHeight（0.85）——任何未显式传 lift 的调用都会把整枚棋子
+    //   抬起 0.85 世界单位，是判定容差 0.02 的 42 倍，属严重违规（main.ts 曾踩中）。
+    //   垂直观感请走「部件级关节旋转」（见 PieceChoreography.moveFlourish：蹄/足/轮）
+    //   与 idleGroup.scale 的压扁回弹；确需整体抛物者必须在调用处显式传 lift 并写明豁免理由。
+    const lift = opts.lift != null ? opts.lift : 0;
     const from = mesh.position.clone();
     const target = to.clone();
     const way = opts.waypoints && opts.waypoints.length
@@ -435,9 +455,23 @@ export class Animator {
     const backup = cloneMaterialsForFade(mesh);
     mesh.userData.__fadeBackup = backup;
     const baseScale = mesh.userData.__baseScale || (mesh.userData.__baseScale = mesh.scale.clone());
-    const startY = mesh.position.y;
     const startRotY = mesh.rotation.y;
     const tmp = new THREE.Vector3();
+    // ★ R-1 贴地败退（设计原文：US-4 / 附录 A.4「受击方贴地败退，败退沿盘面滑出；root 恒贴地」）
+    //   本方法原实现有**三处**违反 GLOBAL-1：
+    //     ① `mesh.position.y = startY - t*0.75` —— 整枚棋子沉入盘面以下 0.75（穿透，容差 0.02，37 倍）；
+    //     ② 因此 restorePiece 不还原 position.y → 悔棋复原后棋子**永久埋在地下**（可见 bug）；
+    //     ③ `mesh.rotation.z = t*0.55` —— 绕形心倾倒，x<0 一侧顶点降到盘面下（穿透）。
+    //   现改为「贴地败退 + 沿盘面滑出」：败退方向由调用方按「攻击者→受害者」向量传入，
+    //   整枚棋子沿盘面平移滑出（root y 恒 0），配合缩小与淡出收束。
+    //   ⚠️ 遗留待办：设计期望的「前缘铰接式倾倒」（绕朝败退方向那一侧的底边旋转，
+    //      可保证无顶点低于盘面）尚未实现，当前整枚倾倒角为 0；已登记到「被击杀演出」阶段。
+    const n = _normXZ(opts.knockDir);
+    const slide = opts.knockDist != null ? opts.knockDist : 0.55;
+    const basePos = mesh.position.clone();
+    basePos.y = 0;
+    // 记录消散前基准位，供 restorePiece（悔棋）完整还原位置
+    if (!mesh.userData.__dissolveBasePos) mesh.userData.__dissolveBasePos = basePos.clone();
     // 被吃方专属附加（BK-14 等）：分兵种消散风味，由 PieceChoreography 的
     // applyDissolvePose 驱动（见下方 onUpdate），不再依赖外部编排 stub。
 
@@ -447,14 +481,17 @@ export class Animator {
       easing: Easing.easeInQuad,
       lock: opts.lock !== false,
       onUpdate: (t: number, raw: number) => {
-        mesh.position.y = startY - t * 0.75;
+        // ① 贴地滑出：沿盘面（XZ）败退，root y 恒 0 —— 绝不沉降、绝不整体浮起
+        mesh.position.set(basePos.x + n.x * slide * raw, 0, basePos.z + n.z * slide * raw);
+        // ② 绕 Y 轴溃旋（纯平面旋转，不产生任何盘面以下几何）
         mesh.rotation.y = startRotY + t * Math.PI * 1.35;
-        mesh.rotation.z = t * 0.55;
+        // ③ 缩小 + 淡出
         tmp.copy(baseScale).multiplyScalar(Math.max(0.02, 1 - t * 0.92));
         mesh.scale.copy(tmp);
         setTreeOpacity(mesh, Math.max(0, 1 - t * 1.05));
-        // 分兵种崩解姿态（DISSOLVE_POSE）：驱动 idleGroup + 命名子组
-        // （K.crown 冕落 / C.cart 散架 / 各兵种整体倾倒等）。subGroup 缺失时内部安全跳过。
+        // ④ 分兵种**部件级**崩解（DISSOLVE_POSE.subGroupActions）：
+        //    K.crown 冕落 / C.trebuchet 折臂 + cart 散架 / A.sword 脱手 / R.horses 挣扎脉冲。
+        //    ⚠️ 整体倾倒（DISSOLVE_POSE 的 rotX/rotZ）仍为 0，原因见上「遗留待办」。
         try { applyDissolvePose(mesh, mesh.userData.pieceType, t); } catch (e) { /* 安全兜底 */ }
       },
       onComplete: () => { if (opts.onComplete) opts.onComplete(mesh, backup); }
@@ -468,13 +505,33 @@ export class Animator {
     const base = mesh.userData.__baseScale;
     if (base) mesh.scale.copy(base); else mesh.scale.set(1, 1, 1);
     mesh.rotation.set(0, mesh.userData.__baseRotY || 0, 0);
+    // ★ R-1：消散期间棋子沿盘面滑出（dissolvePiece），复原必须一并还原位置，
+    //   否则悔棋后棋子停留在滑出后的错格；原实现连沉降位移都不还原，
+    //   棋子会永久埋进盘面以下 0.75（可见 bug）。
+    const home = mesh.userData.__dissolveBasePos;
+    if (home) { mesh.position.copy(home); mesh.userData.__dissolveBasePos = null; }
+    else { mesh.position.y = 0; }
+    // ★ 还原消散期对 idleGroup 的纵向压缩（applyDissolvePose 的 scaleY 通道）。
+    //   原实现只还原 root scale，不动 idleGroup —— 兵/卒消散后 idleGroup.scale.y 恒为
+    //   基准 ×0.7，悔棋复原的棋子会永久保持压扁态（可见 bug）。
+    const orient = mesh.userData._orient || mesh.getObjectByName('orient') || mesh;
+    const idleGroup = mesh.userData._idleGroup || orient.getObjectByName('idleGroup') || orient;
+    const idleBase = idleGroup && idleGroup.userData ? idleGroup.userData.__dissolveBase : null;
+    if (idleBase) {
+      idleGroup.scale.set(idleBase.x, idleBase.y, idleBase.z);
+      idleGroup.userData.__dissolveBase = null;
+    }
   }
 
   /** 攻击方向目标冲刺一小段（吃子的第一拍） */
   lunge(mesh: any, towards: any, ratio = 0.24, duration = TIMING.captureLunge): TweenHandle {
     const from = mesh.position.clone();
     const to = from.clone().lerp(towards, ratio);
-    to.y = from.y + 0.12;
+    // ★ R-1（冻结红线）：原实现 `to.y = from.y + 0.12` 会给整枚棋子加纵向弧，违反
+    //   「禁止整体（root）离地」（0.12 是容差 0.02 的 6 倍）。改为**纯水平冲刺**：
+    //   突击感由 horizontal 位移 + 调用方的部件级关节动作（挥戈/扬蹄）承担。
+    //   本方法当前无调用方（Attack 演出已由 CaptureAction 的 A0 贴地冲锋取代）。
+    to.y = 0;
     return this.add({
       duration,
       easing: Easing.easeOutQuad,
@@ -609,7 +666,7 @@ export class Animator {
   }
 
   /**
-   * 分兵种移动：通用抛物线 + 兵种专属风味（子组随动）。
+   * 分兵种移动：贴地位移（root 恒 y=0）+ 兵种专属风味（子组随动）。
    * @param {THREE.Object3D} piece
    * @param {THREE.Vector3} target 目标世界坐标
    * @param {string} type  PT.* 之一
@@ -618,14 +675,18 @@ export class Animator {
    */
   movePiece(piece: any, target: any, type: string, side: string, opts: any = {}): TweenHandle {
     const flavor = MOVE_FLAVOR[type] || MOVE_FLAVOR_DEFAULT;
-    const lift = TIMING.liftHeight * (flavor.liftMul != null ? flavor.liftMul : 1);
-    // 朝向：平滑转向移动方向（绕 Y，配合 orient 的 180° 阵营基调）
+    // ★ R-1（冻结红线）：原实现 lift = TIMING.liftHeight × flavor.liftMul（0.0425~0.17）
+    //   会给整枚棋子加抛物弧，违反「禁止整体（root）离地」（容差 0.02）。
+    //   本方法当前无调用方（走子演出已由 render/combat/MoveAction.ts 的贴地位移取代）；
+    //   保留 API 但 lift 恒置 0，`flavor.liftMul` 仅作历史记录不再参与位移。
+    void flavor;
+    // 朝向：平滑转向移动方向（绕 Y，配合 orient 的 180° 阵营基调）—— 偏航非位移，不涉 R-1
     const dx = target.x - piece.position.x;
     const dz = target.z - piece.position.z;
     const spin = headingYaw(side, dx, dz) - piece.rotation.y;
     return this.arcMove(piece, target, {
       duration: opts.duration,
-      lift,
+      lift: 0,
       waypoints: opts.waypoints,
       spin,
       easing: opts.easing,
@@ -779,25 +840,32 @@ export class Animator {
     });
   }
 
-  /** 悬浮上下浮动（选中态由 effects 负责，这里提供一次性上浮） */
-  hover(mesh: any, height = 0.16, duration = 0.18): TweenHandle {
-    const from = mesh.position.clone();
-    const to = from.clone(); to.y = (mesh.userData.__homeY || 0) + height;
+  /** 悬停确认（R-1：禁止整体浮起，故改为绕 root 原点的**压扁脉冲** —— 纯缩放、零位移） */
+  hover(mesh: any, strength = 0.12, duration = 0.18): TweenHandle {
+    // ★ R-1（冻结红线）：原实现 `to.y = (__homeY||0) + height`（缺省上浮 0.16）在
+    //   悬停时把整枚棋子抬起，直撞 US-8「悬停/拖拽/落子反馈/取消选中 → 全程零整体离地，
+    //   无拿起、无浮空、无跳起」与 O1「选中/悬停/拖拽整体浮起」否决项。
+    //   改为压扁脉冲：以 root 原点（y=0 即盘面）为缩放中心，底面恒贴地、无穿透。
+    const base = mesh.userData.__baseScale || (mesh.userData.__baseScale = mesh.scale.clone());
+    const sq = new THREE.Vector3(
+      base.x * (1 + strength * 0.5),
+      base.y * (1 - strength),
+      base.z * (1 + strength * 0.5)
+    );
     return this.add({
       duration, easing: Easing.easeOutCubic,
-      onUpdate: t => mesh.position.lerpVectors(from, to, t),
-      onComplete: () => mesh.position.copy(to)
+      onUpdate: t => mesh.scale.lerpVectors(base, sq, t)
     });
   }
 
-  /** 放下（回到 y = home） */
+  /** 解除悬停：缩放复位（与 hover 的压扁脉冲配对） */
   unhover(mesh: any, duration = 0.16): TweenHandle {
-    const from = mesh.position.clone();
-    const to = from.clone(); to.y = mesh.userData.__homeY || 0;
+    const base = mesh.userData.__baseScale || (mesh.userData.__baseScale = mesh.scale.clone());
+    const from = mesh.scale.clone();
     return this.add({
       duration, easing: Easing.easeOutCubic,
-      onUpdate: t => mesh.position.lerpVectors(from, to, t),
-      onComplete: () => mesh.position.copy(to)
+      onUpdate: t => mesh.scale.lerpVectors(from, base, t),
+      onComplete: () => mesh.scale.copy(base)
     });
   }
 

@@ -12,7 +12,7 @@
 
 import * as THREE from 'three';
 import {
-  RED, BLACK, PT, FILES, RANKS, BOARD_HALF_W, PALETTE, TIMING, toWorld, INITIAL_FEN
+  RED, BLACK, PT, FILES, RANKS, GRID, BOARD_HALF_W, PALETTE, TIMING, toWorld, INITIAL_FEN
 } from './core/constants.ts';
 import { GameState } from './core/gameState.ts';
 import { ReviewController } from './core/reviewController.ts';   // L2：复盘状态机（纯逻辑）
@@ -633,7 +633,7 @@ function updateCheckRing(): void {
   }
 }
 
-/** 开局动画：棋子从高处错落落下归位 */
+/** 开局动画：棋子贴地列阵入场归位（R-1：整枚绝不离地） */
 function openingAnimation(): void {
   let i = 0;
   for (let f = 0; f < FILES; f++) {
@@ -641,9 +641,17 @@ function openingAnimation(): void {
       const m = pieceMeshes[f] && pieceMeshes[f]![r];
       if (!m) continue;
       const home = toWorld(f, r);
-      m.position.set(home.x, 2.6, home.z);
+      // ★ R-1（冻结红线·最高优先级）：原实现 `m.position.set(home.x, 2.6, home.z)` +
+      //   `arcMove(..., { lift: 0.18 })` 是「整体浮起 2.6 → 抛物落下」的 LiftAndMove 范式，
+      //   违反「禁止整体（root）离地」（判定：每帧 piece.position.y === 0，容差 ≤0.02；
+      //   2.6 是容差的 130 倍）。
+      //   改为**贴地列阵入场**：自本方一侧（红 +Z / 黑 −Z）场外沿棋盘平面滑入归位。
+      //   「错落」由每枚递进的起步延迟承担，「落定顿挫」由 squashLand（纯缩放，
+      //   绕 root 原点 y=0 压缩，不产生位移与穿透）承担。
+      const outZ = (m.userData.pieceSide === RED ? 1 : -1) * GRID * 1.6;
+      m.position.set(home.x, 0, home.z + outZ);
       animator.arcMove(m, new THREE.Vector3(home.x, 0, home.z), {
-        duration: 0.5, lift: 0.18, lock: false,
+        duration: 0.5, lift: 0, lock: false,
         delay: (i % 9) * 0.03,
         onComplete: () => animator.squashLand(m, 0.18)
       });

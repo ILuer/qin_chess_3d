@@ -610,14 +610,16 @@ export function applyDissolvePose(victim: any, victimType: string, t: number): v
 
   const { idleGroup, sub } = _getGroups(victim);
 
-  // 主体姿态
-  if (pose.rotX && !pose.subGroupActions) {
-    idleGroup.rotation.x = pose.rotX * t;
-  }
-  if (pose.rotZ) {
-    const dir = pose.rotZDir === 'random' ? _pieceRandomDir(victim) : 1;
-    idleGroup.rotation.z = pose.rotZ * dir * t;
-  }
+  // ★ R-1（冻结红线）：「整枚（idleGroup）倾倒」通道已按红线**移除**。
+  //   原因：idleGroup 原点在盘面（y=0）形心，绕形心倾倒必然把朝倾倒侧的顶点压到盘面以下
+  //   （例：R 半宽 ≈0.26、倾 0.55 rad → |Δy| ≈ 0.14，是 GLOBAL-1 容差 0.02 的 7 倍），
+  //   违反「整体 Box3 底面 穿透=0 且 悬空=0」。DISSOLVE_POSE 的 rotX / rotZ 已一并置 0。
+  //   「贴地败退」改由 ① 整枚沿盘面滑出（animator.dissolvePiece 的 knockDir/knockDist）
+  //   ② 下方 subGroupActions 的**部件级**崩解 承担。
+  //   ⚠️ 待办：实现「前缘铰接式倾倒」（绕朝败退方向那一侧的底边旋转，其余顶点只抬起）
+  //      后方可按铰接口径重新启用整枚倾倒。
+
+  // 绕盘面原点的纵向压缩（idleGroup 原点在盘面，压缩不产生穿透 → 合规保留）
   if (pose.scaleY && t > 0.5) {
     const s = (t - 0.5) * 2; // 后半段
     // ★ K 预缩放锁定：相对 idleGroup 自身基准（K=1.25）做压缩，绝不写回 1.0。

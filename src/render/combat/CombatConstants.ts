@@ -314,16 +314,32 @@ export const TENSION_HITSTOP_MUL = {
 // §7 受害者崩解姿态参数
 // ═══════════════════════════════════════════════════════════════
 
+/**
+ * 受害者崩解姿态参数。
+ *
+ * ★ R-1（冻结红线 · GLOBAL-1 双层口径）改造说明：
+ *   本表原先含**整体倾倒**参数 `rotX` / `rotZ`（P −0.6、B ±0.35、A +0.5、R ±0.55、K +0.4），
+ *   由 applyDissolvePose 写到 idleGroup.rotation 上。而 idleGroup 的原点位于盘面（y=0）形心，
+ *   绕形心倾倒必然把朝倾倒侧的顶点压到盘面**以下**（例：R 半宽 ≈0.26 时倾 0.55 rad
+ *   → |Δy| ≈ 0.14，是 GLOBAL-1 容差 0.02 的 7 倍）→ 违反「整体 Box3 底面 穿透=0 且 悬空=0」。
+ *   故本表**整体倾倒角一律置 0**，「贴地败退」改由两条合规通道表达：
+ *     ① 整枚棋子沿盘面**滑出**（`animator.dissolvePiece` 的 `knockDir`/`knockDist`，root y 恒 0）；
+ *     ② 本表 `subGroupActions` 的**部件级**崩解（K 冕落 / C 折臂散架 / A 脱剑 / R 马蹄挣扎 / B 袖摆 / N 前扑）。
+ *   ⚠️ 遗留待办（登记到「被击杀演出」阶段）：设计期望的「**前缘铰接式倾倒**」——
+ *     绕「朝败退方向那一侧的底边」旋转；该边是棋子沿该方向的极值边，绕它旋转时其余顶点
+ *     只会抬起、恒不低于盘面，可实现无穿透的倒地。实现后可以**铰接口径**重新启用 rotX/rotZ。
+ *     **在那之前绝不可把这里的 0 改回非 0** —— 改回即重新引入穿透违规。
+ */
 export const DISSOLVE_POSE = {
   [PT.PAWN]: {
     desc: '瘫软前倒',
-    rotX: -0.6, rotXDuration: 0.3,
-    scaleY: 0.7,
+    rotX: 0, rotXDuration: 0.3,   // R-1：整体倾倒禁用，见上方说明
+    scaleY: 0.7,                   // 绕盘面原点纵向压缩 → 不产生穿透（合规保留）
     subGroupActions: null
   },
   [PT.HORSE]: {
     desc: '前扑',
-    rotX: 0, liftY: 0.03,
+    rotX: 0,
     subGroupActions: {
       bodyHorse:  { rotX: +0.5 },
       rider:  { rotX: +0.4 }
@@ -331,21 +347,21 @@ export const DISSOLVE_POSE = {
   },
   [PT.ELEPHANT]: {
     desc: '侧倾',
-    rotZ: 0.35, rotZDir: 'random',
+    rotZ: 0,                       // R-1：整体侧倾禁用
     subGroupActions: {
       arms: { rotZ: 0.5, dir: 'match' }
     }
   },
   [PT.ADVISOR]: {
     desc: '后仰脱剑',
-    rotX: +0.5,
+    rotX: 0,
     subGroupActions: {
       sword: { translateY: -0.3 }
     }
   },
   [PT.ROOK]: {
     desc: '侧翻',
-    rotZ: 0.55, rotZDir: 'random',
+    rotZ: 0,                       // R-1：整体侧翻禁用
     subGroupActions: {
       horses: { rotX: 'pulse' }
     }
@@ -359,7 +375,7 @@ export const DISSOLVE_POSE = {
   },
   [PT.KING]: {
     desc: '冕落',
-    rotX: +0.4,
+    rotX: 0,
     subGroupActions: {
       crown: { translateY: +0.25, then: { translateY: -0.35, mode: 'gravity' } }
     }

@@ -7,7 +7,7 @@
  */
 
 import * as THREE from 'three';
-import { PT, PALETTE, TIMING, toWorld } from '../../core/constants.ts';
+import { PT, PALETTE, toWorld } from '../../core/constants.ts';
 import { headingYaw } from '../animator.ts';
 import {
   moveFlourish, resetMovePose,
@@ -15,7 +15,7 @@ import {
 } from './PieceChoreography.ts';
 import { cellPan, cellDistance } from './coords.ts';
 import {
-  getBeatDuration, getLiftMul,
+  getBeatDuration,
   MOVE_LEAN, M0_LEAN_BACK, M0_SQUASH,
   M3_OVERSHOOT, M4_SQUASH, AI_SPEED_MUL, VFX_INTERVAL,
   beatSpeedMul, distScaleFor
@@ -64,8 +64,6 @@ export function execute(cd: any, piece: any, fromCell: { file: number, rank: num
     const m0Squash = M0_SQUASH[type] || 0.97;
     const m3Over = M3_OVERSHOOT[type] || 1.04;
     const m4Squash = M4_SQUASH[type] || 0.22;
-    const liftMul = getLiftMul(type);
-    const liftPeak = TIMING.liftHeight * liftMul;
 
     // ── 获取 orient/idleGroup ──
     const orient = piece.getObjectByName('orient') || piece;
@@ -173,10 +171,23 @@ export function execute(cd: any, piece: any, fromCell: { file: number, rank: num
       easing: animator.EASE.easeInCubic,
       onStart: () => { sequencer.fire('M2_start'); },
       onUpdate: (t: number) => {
-        // 位置 lerp
+        // 位置 lerp（startPos / endPos 的 y 均恒为 0，故本拍 y 天然贴地）
         piece.position.lerpVectors(startPos, endPos, t);
-        // 竖直弧线
-        piece.position.y = liftPeak * 4 * t * (1 - t);
+        // ★ R-1（冻结红线·最高优先级）：**root 恒贴地，绝不做整体抛物**。
+        //   原实现 `piece.position.y = liftPeak * 4t(1-t)`（liftPeak = 0.85 × liftMul
+        //   = 0.0425~0.170）超出容差 0.02 达 2~8.5 倍，7 兵种全数违规。
+        //   设计原文（research_report §2.8，主理人 2026-09-07 冻结）：移动必须是
+        //   「贴地连续位移」范式（滑行 slide / 推行 push / 行走 walk / 轮式滚动 roll）；
+        //   整体抬起-平移-落下（LiftAndMove）属被明确否决的原始棋牌范式。
+        //   垂直「重量感」不靠整体位移，而由三者共同承担：
+        //     ① idleGroup.scale —— M0 后仰压扁 → M3 过冲 → M4 squashLand 顿挫（既有）
+        //     ② MOVE_LEAN 前压角 idleGroup.rotation.x（既有）
+        //     ③ 部件级**关节旋转** —— moveFlourish 的 P legL/legR 踏步、N 四腿 trot、
+        //        R/C 车轮自转、B 袍袖/下摆、K 披风（既有）
+        //   ⚠️ 不得把该弧改挂到子组 position.y：0.17 的躯干平移会让马身浮在自己四条腿
+        //   上方；且 A 的 body 含腿靴、B 的 bodyRobe 含靴、C 的 cart 是地面接触层，
+        //   抬它们会顶起整体 Box3 底面，同样违反 R-1 的 Box3 判别式。
+        piece.position.y = 0;
         // 前压 ramp
         idleGroup.rotation.x = leanVal * Math.sin(Math.PI * t);
         // 兵种子组随动（贴地冲锋姿态：戈前指 / 马前扑 / 双兵推车等）

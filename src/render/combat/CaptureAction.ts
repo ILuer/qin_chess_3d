@@ -6,10 +6,10 @@
  */
 
 import * as THREE from 'three';
-import { PT, PALETTE, TIMING, toWorld } from '../../core/constants.ts';
+import { PT, PALETTE, toWorld } from '../../core/constants.ts';
 import { headingYaw } from '../animator.ts';
 import {
-  getCaptureBeat, getLiftMul, clampA0,
+  getCaptureBeat, clampA0,
   MOVE_LEAN, M0_LEAN_BACK, M0_SQUASH,
   M3_OVERSHOOT, M4_SQUASH,
   HITSTOP, AI_SPEED_MUL, IMPACT_LEVELS, CAPTURE_TOTAL, CAPTURE_BEAT,
@@ -174,6 +174,8 @@ export function execute(cd: any, attacker: any, victim: any, fromCell: { file: n
           duration: A4,
           delay: 0,
           lock: true,
+          // ★ R-1 贴地败退：败退方向 = 攻方突进向量（受害者被沿攻方前进方向击退滑出）
+          knockDir: { x: endPos.x - startPos.x, z: endPos.z - startPos.z },
           onComplete: (m: any) => {
             try { cd.piecesGroup.remove(m); } catch (e) {}
           }
@@ -186,8 +188,6 @@ export function execute(cd: any, attacker: any, victim: any, fromCell: { file: n
     const steps = [];
 
     // A0 · APPROACH = M0+M1+M2+M3 简化版
-    const liftMul = getLiftMul(aType);
-    const liftPeak = TIMING.liftHeight * liftMul;
     const leanVal = MOVE_LEAN[aType] || -0.12;
 
     // A0 sub-beats（贴地冲锋：朝向已在 A0 前段旋至 victim 方向，这里只做平移 + 微前压）
@@ -196,7 +196,7 @@ export function execute(cd: any, attacker: any, victim: any, fromCell: { file: n
     //   最终由 A5 的 position.copy(endPos) 瞬移补完 —— 形成可见跳变(违反 A4)。
     // 现改为四拍占比固定(A0*0.30/0.20/0.35/0.15)，总时长===A0 保证命中时刻对齐；
     //   位置/弧高/前压在四拍连续推进 totalT=(i+t)/4，A0 末攻方恰好抵达 victim 格，
-    //   后续 A1~A5 不再瞬移（贴地弧高 liftPeak 仍受 liftMul 约束）。
+    //   后续 A1~A5 不再瞬移（root 恒贴地：y 恒 0，无整体抛物）。
     const a0b0 = A0 * 0.30, a0b1 = A0 * 0.20, a0b2 = A0 * 0.35, a0b3 = A0 * 0.15;
     [
       { dur: a0b0, id: 'A0_M0' },
@@ -213,7 +213,9 @@ export function execute(cd: any, attacker: any, victim: any, fromCell: { file: n
         onUpdate: (t: number) => {
           const totalT = (i + t) / 4;
           attacker.position.lerpVectors(startPos, endPos, totalT);
-          attacker.position.y = liftPeak * 4 * totalT * (1 - totalT);
+          // ★ R-1（冻结红线）：root 恒贴地。原实现 `liftPeak*4·t(1-t)` 整体抛物
+          //   （峰值 0.0425~0.170）超容差 0.02 达 2~8.5 倍；贴地冲锋范式见 MoveAction M2 同款注释。
+          attacker.position.y = 0;
           aIdle.rotation.x = leanVal * Math.sin(Math.PI * totalT);
           if (isLast) {
             aIdle.scale.x = aIdleBase.x * (1 + 0.04 * (1 - t) * Math.sin(Math.PI * t));
@@ -415,6 +417,8 @@ function executeCannon(cd: any, attacker: any, victim: any, fromCell: { file: nu
       try {
         animator.dissolvePiece(v, {
           delay: 0, duration: 0.42,
+          // ★ R-1 贴地败退：炮击为远程压制，败退方向 = 弹道方向（炮位 → 目标格）
+          knockDir: { x: toVec.x - fromVec.x, z: toVec.z - fromVec.z },
           onComplete: (m: any) => { try { cd.piecesGroup.remove(m); } catch (e) { /* 已移除 */ } }
         });
       } catch (e) { /* 安全兜底 */ }
