@@ -109,7 +109,7 @@ function rebuildPieces() {
     mesh.position.set(w.x, 0, w.z);
     mesh.userData.cell = { file: f, rank: r };
     mesh.userData.__homeY = 0;
-    mesh.userData.idlePhase = ((f * 7 + r * 13) % 1000) / 1000 * Math.PI * 2;
+    mesh.userData.idlePhase = ((f * 137 + r * 53) % 1000) / 1000 * Math.PI * 2;
     mesh.userData._busy = false;
     if (sceneSys) sceneSys.piecesGroup.add(mesh);
     pieceMeshes[f]![r] = mesh;

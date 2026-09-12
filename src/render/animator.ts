@@ -12,18 +12,21 @@ import * as THREE from 'three';
 import { TIMING, PT } from '../core/constants.ts';
 import { applyDissolvePose } from './combat/PieceChoreography.ts';
 import { IDLE_PIECE } from './combat/CombatConstants.ts';
+import {
+  evalVignette,
+  variantBlend,
+  variantAmp,
+  IDLE_BASE_GAIN
+} from './combat/vignette.ts';
 // 战斗姿态现由 CombatDirector → CaptureAction/MoveAction → PieceChoreography 统一驱动；
 // animator 仅保留纯通用回退（点头 / 前压 / 消散），不再依赖任何外部编排 stub。
 // （历史 _getChoreoStub 已删除：其恒返回 null，真实编排走 CombatDirector 实时路径。）
 
 // ---------------------------------------------------------------------------
-// 待机微动全局调参（P3-可见度修正）
+// 待机 vignette 全局调参（R-2 重构）
 // ---------------------------------------------------------------------------
-// IDLE_AMP_SCALE：待机三层（L0 呼吸 / L1 子组微动 / L2 脉冲）幅度的统一倍率。
-//   原幅度过小（呼吸≈1.7% 身高、摆角<1°），默认相机距离下几乎不可见；
-//   ×2.0 使 7 种兵种待机清晰可辨且不失优雅（不改几何/锚点）。
-//   选中强调（amp 1.8）仍叠加其上；L2 脉冲按同比例放大。
-const IDLE_AMP_SCALE = 2.0;
+// ★ 旧的 `IDLE_AMP_SCALE = 2.0` 已删除：那是「呼吸时代」的幅度口径（R-2 红线明令不沿用）。
+//   vignette 幅度现由 VigCh.to / IDLE_BASE_GAIN / variantAmp 直接决定，不再有全局倍率。
 // IDLE_BUSY_DEADMAN_S：_busy 卡死保险阈值（渲染帧时钟秒，仅主循环推进时累积，
 //   后台标签页不误触）。若移动/吃子演出因异常序列器未收尾导致 _busy 永久为 true，
 //   超过此阈值后自动释放，避免待机被永久压制。15s ≫ 任何真实走子/吃子时长。
@@ -559,110 +562,162 @@ export class Animator {
   }
 
   /**
-   * 每帧待机微动。必须在主循环里对每个棋子调用一次。
-   * 三层结构（piece-image-v4 §3.0，数据源 CombatConstants.IDLE_PIECE）：
-   *   L0 呼吸层（idleGroup.position.y / rotation.z，按兵种差异化幅度）
-   *   L1 子组微动层（按兵种正弦摆动）
-   *   L2 偶发脉冲层（确定性门控波形，无随机/无状态）
-   * _busy 时对「待机专属通道」幂等归零（绝不写战斗拥有的通道/节点，见 zeroChannels）。
-   * ★ A5 farView 早退（ADR-3 / animation-spec §5.1）：远景（>12 单位）仅写 L0 呼吸，
-   *   关 L1/L2（写入 −78%）；selected=true 冻结降档（选中棋子全量，无姿态跳变）。
+   * 每帧待机 vignette 序列器。必须在主循环里对每个棋子调用一次。
+   *
+   * 三级激活增益（主理人裁定 D2 / 系统设计.md §3.2.M5.20 IDLE 子状态机）：
+   *   _busy            → 按 IDLE_PIECE[type].zeroChannels 幂等归零（保持现状，不改）
+   *   !sel && far      → L1 IDLE_BASE：仅 baseline（静态基准），L2/L3 停写并冻结当前值
+   *   !sel && !far     → 怠速层：全通道 × IDLE_BASE_GAIN（极小幅度机械怠速，无呼吸）
+   *   sel（任意视距）  → L2/L3 全量 vignette：全部分段通道 + 机械层（C 炮），增益 1.0
+   * 三档之间以 crossfadeSec 为时长的增益斜坡过渡（进入 / 取消选中 / 远景恢复均不跳变）。
+   *
+   * R-1 红线（冻结）：本函数**只写子组 rotation**（sg[sub].rotation[axis]），绝不写
+   *   root/orient/idleGroup 的 position 或 rotation；idleGroup.position.y / rotation.z 恒置 0
+   *   （旧 L0 呼吸层已删除）。子组缺失守卫：`sg[sub]` 不存在时 `continue` 跳过（建模段未补建的子组）。
+   *
+   * 防同步（D4）：起始相位分散 u0 = idlePhase/2π；周期抖动 loopSec_i = loopSec·(1+0.06·sin(idlePhase))。
+   * 降级不跳变（D5）：进入 !sel && far 那帧起累加 _vigPause，u 从冻结处继续天然无跳变；
+   *   恢复时以冻结值为起点做 crossfade（_vigResumeW 0→1）。
+   *
    * @param {THREE.Object3D} group 棋子根 Group
    * @param {number} t 当前秒（performance.now()/1000）
    * @param {boolean} [selected] 是否选中（冻结降档保护）
-   * @param {boolean} [farView] 是否远景（>12 单位；关 L1/L2）
+   * @param {boolean} [farView] 是否远景（>12 单位；关 L2/L3）
    */
   tickIdle(group: any, t: number, selected?: boolean, farView?: boolean): void {
     if (!group || !group.userData) return;
-   try {
     const ud = group.userData;
-    // 防御：_busy 卡死保险（见 IDLE_BUSY_DEADMAN_S）。基于帧时钟 t（仅主循环运行时推进），
-    // 后台标签页/暂停不会误触；超过阈值即释放 _busy，使该棋子待机恢复（绝不中途清战斗通道）。
-    if (ud._busy) {
-      if (ud._busySinceT == null) ud._busySinceT = t;
-      else if (t - ud._busySinceT > IDLE_BUSY_DEADMAN_S) {
-        ud._busy = false;
+    try {
+      // 防御：_busy 卡死保险（见 IDLE_BUSY_DEADMAN_S）。基于帧时钟 t（仅主循环运行时推进），
+      // 后台标签页/暂停不会误触；超过阈值即释放 _busy，使该棋子待机恢复（绝不中途清战斗通道）。
+      if (ud._busy) {
+        if (ud._busySinceT == null) ud._busySinceT = t;
+        else if (t - ud._busySinceT > IDLE_BUSY_DEADMAN_S) {
+          ud._busy = false;
+          ud._busySinceT = null;
+        }
+      } else {
         ud._busySinceT = null;
       }
-    } else {
-      ud._busySinceT = null;
-    }
-    // H2：优先读 createPieceMesh 缓存的引用（热路径每帧 0 次 getObjectByName）；
-    // 回退路径仅为未走 createPieceMesh 的旧实例/测试桩保留。
-    const orient = ud._orient || group.getObjectByName('orient') || group;
-    // idleGroup：整枚棋子的微动作用层。绝不写 orient 的 rotation/position，
-    // 否则会触发欧拉→四元数重算，把黑方 Y=180° 的朝向翻成 X=180°（头朝下）。
-    const idleGroup = ud._idleGroup || orient.getObjectByName('idleGroup') || orient;
-    const cfg: any = IDLE_PIECE[ud.pieceType] || null;
-    const sg: any = ud.subGroups;
 
-    // 移动 / 吃子进行中：仅把「idleGroup 节点」的待机微动归零，并按兵种把
-    // 待机专属子组通道幂等归零（每帧执行，无状态）。战斗通道（如 arm.x / sword.z）
-    // 由 windUp/strike/settle 接管，绝不在 busy 时写入，避免互相打架。
-    if (ud._busy) {
+      // H2：优先读 createPieceMesh 缓存的引用（热路径每帧 0 次 getObjectByName）；
+      // 回退路径仅为未走 createPieceMesh 的旧实例/测试桩保留。
+      const orient = ud._orient || group.getObjectByName('orient') || group;
+      // idleGroup：整枚棋子的微动作用层。绝不写 orient 的 rotation/position，
+      // 否则会触发欧拉→四元数重算，把黑方 Y=180° 的朝向翻成 X=180°（头朝下）。
+      const idleGroup = ud._idleGroup || orient.getObjectByName('idleGroup') || orient;
+      const cfg: any = IDLE_PIECE[ud.pieceType] || null;
+      const sg: any = ud.subGroups;
+      const def = cfg && cfg.vignette ? cfg.vignette : null;
+
+      // R-1：idleGroup 纵向/侧倾恒 0（旧 L0 呼吸层已删除，root 恒贴地由 moveFlourish/包装层保证）。
       idleGroup.position.y = 0;
       idleGroup.rotation.z = 0;
-      if (cfg && cfg.zeroChannels && sg) {
-        // 解析 "sub.prop.path"：当前数据全部为 rotation.{x|y|z}。
-        // Parts[0]=子组名，Parts[1]=父属性（如 'rotation'），Parts[2]=子属性（如 'z'）。
-        // 写入 sg[sub].prop.path = 0，绝不写 sg[sub]['rotation.z'] 这种带点的伪键。
-        for (const ch of cfg.zeroChannels) {
-          const parts = ch.split('.');
-          const sub = sg[parts[0]];
-          if (!sub) continue;
-          if (parts.length >= 3 && sub[parts[1]]) sub[parts[1]][parts[2]] = 0;
-        }
-      }
-      return;
-    }
-    const sel = !!selected;
-    const far = !!farView;
-    // 选中放大（Juice 选中强调 / Windex 焦点）
-    // ★ P3：IDLE_PIECE 基数已上调 ~2x（修「棋子呆呆的」），选中系数由 1.8 降到 1.4 补偿，
-    //   使选中峰值 ≤ ~0.18 rad，防手臂/剑穿模。
-    const amp = sel ? 1.4 : 1;
-    const ph = ud.idlePhase || 0;
-    const bAmp = ((cfg && cfg.breathe) || 0.012) * IDLE_AMP_SCALE;
-    const sAmp = ((cfg && cfg.sway) || 0.014) * IDLE_AMP_SCALE;
-    // L0 呼吸层（保留现公式，幅度按兵种差异化；K/A 最稳）
-    // ★ farView 早退：远景（>12 单位）且未选中时，L0 呼吸仍写（保留呼吸 + 帅旗微扬基线），
-    //   L1/L2 直接关闭 —— 把待机写入从 ~290 次/帧降到 ~64 次/帧（ADR-3）。
-    idleGroup.position.y = Math.sin(t * 1.15 + ph) * bAmp * amp;
-    idleGroup.rotation.z = Math.sin(t * 0.85 + ph) * sAmp * amp;
 
-    if (!sg || !cfg) return;
-    if (far && !sel) return;   // ★ 远景降档：关 L1/L2（选中冻结降档保护，FAR-004）
-    // L1 子组微动层（个性化主体；无每帧对象分配）
-    // 数据约定：w[1] 为 'x'|'y'|'z' 单字符轴名，对应 sub.rotation[axis]。
-    // ★ 原 bug：sub[w[1]] 写入伪属性（如 sub.z），THREE.Object3D 无 .x/.y/.z 直接访问器，
-    //   视觉上完全无效——所有兵种只剩 L0 呼吸层。已修复：sub.rotation[w[1]]。
-    if (cfg.l1) {
-      const l1Amp = amp;
-      for (const w of cfg.l1) {
-        const sub = sg[w[0]];
-        if (!sub) continue;
-        sub.rotation[w[1]] = w[2] * IDLE_AMP_SCALE * l1Amp * Math.sin(t * 2 * Math.PI * w[3] + ph + w[4]);
+      // L1（_busy 让位）：按 zeroChannels 幂等归零待机专属通道，绝不写战斗通道；保持现状不改。
+      if (ud._busy) {
+        if (cfg && cfg.zeroChannels && sg) {
+          // 解析 "sub.axis"（2 段式）：sg[sub].rotation[axis] = 0。
+          for (const ch of cfg.zeroChannels) {
+            const dot = ch.indexOf('.');
+            const sub = sg[ch.slice(0, dot)];
+            const axis = ch.slice(dot + 1);
+            if (!sub || !sub.rotation) continue;
+            sub.rotation[axis] = 0;
+          }
+        }
+        return;
       }
-    }
-    // L2 偶发脉冲层（确定性门控；选中时脉冲幅度 ×min(amp,1.5) 防超 0.11）
-    if (cfg.l2) {
-      const l2Amp = Math.min(amp, 1.5);
-      for (const p of cfg.l2) {
-        const sub = sg[p[0]];
-        if (!sub) continue;
-        const gate = p[5];
-        if (gate === 'phPlus' && Math.sin(ph) <= 0) continue;
-        if (gate === 'phMinus' && Math.sin(ph) > 0) continue;
-        const u = t / p[3] + ph / (2 * Math.PI);
-        const pulse = Math.pow(Math.sin(Math.PI * (u - Math.floor(u))), 2);
-        // 脉冲以「加性」方式叠加在子组 rotation 上；与 L1 同轴则叠加，否则赋值覆盖。
-        const ax = p[1];
-        sub.rotation[ax] += p[2] * IDLE_AMP_SCALE * l2Amp * pulse;
+
+      const sel = !!selected;
+      const far = !!farView;
+      const ph = ud.idlePhase || 0;
+
+      // 帧间隔（帧时钟，后台标签页/暂停不推进）。
+      if (ud._vigLastT == null) ud._vigLastT = t;
+      const dt = t - ud._vigLastT;
+      ud._vigLastT = t;
+
+      // 增益斜坡（D2 + 系统设计.md §3.2.M5.20 退出契约）：
+      //   目标增益 sel → 1.0（全量 vignette）；!sel && !far → IDLE_BASE_GAIN（怠速层）；
+      //   !sel && far → 0（远景降档 = 收束至 L1 基准）。
+      // 以 crossfadeSec 为时长的线性斜坡实现「进入 / 退出 / 远景恢复均不跳变」：
+      //   相位 u 始终随 t 连续推进，增益斜坡天然等价于「以当前值为起点 crossfade 到目标相位」。
+      // ★ 曾用 _vigPause/_vigFrozen/_vigResumeW 三字段做「暂停累加 + 恢复淡入」，会在远景恢复时
+      //   从 baseline 淡入（先回基准再回相位）产生下沉伪影，且状态字段过多易出错 —— 已弃用。
+      const target = sel ? 1 : (far ? 0 : IDLE_BASE_GAIN);
+      if (ud._vigGain == null) ud._vigGain = target;  // 首帧直接就位，不做入场淡入
+      const cf = def ? def.crossfadeSec : 0.2;
+      const step = cf > 0 ? dt / cf : 1;
+      if (ud._vigGain < target) ud._vigGain = Math.min(target, ud._vigGain + step);
+      else if (ud._vigGain > target) ud._vigGain = Math.max(target, ud._vigGain - step);
+      const g = ud._vigGain;
+
+      // L1 IDLE_BASE：静态基准姿态，任何非 _busy 档位恒写（选中 / 怠速 / 远景）。
+      if (def) this._writeBaseline(def, sg, 1.0);
+
+      // 完全降档（g≈0）：L2/L3 停写、通道冻结在当前值（不归零）；恢复由上面的增益斜坡接管。
+      if (!def || g <= 0.001) return;
+
+      const loop_i = def.loopSec * (1 + 0.06 * Math.sin(ph)); // D4 策略②：周期抖动（±6%）
+      const u0 = ((ph / (2 * Math.PI)) % 1 + 1) % 1;          // D4 策略①：起始相位分散
+      let u = (t / loop_i + u0) % 1;
+      if (u < 0) u += 1;
+
+      const out = evalVignette(def, u);
+
+      if (sel) {
+        // L2/L3 全量 vignette + 变体派生（D3）+ 机械层（C 炮）。
+        const vb = variantBlend(def, ph, t);
+        const effAmp = vb.w * variantAmp(ph, vb.idx) + (1 - vb.w) * variantAmp(ph, vb.next);
+        const gain = effAmp * g;
+        for (const [key, val] of out) this._writeChannel(sg, key, val * gain);
+      } else {
+        // 怠速层：全盘同一套波形、幅度 ×IDLE_BASE_GAIN（极小幅度机械怠速，无呼吸）。
+        // ★ 写「全部」通道而非子集：若只写子集，上一帧全量档位遗留的非子集通道会被冻结在半途
+        //   姿态（可见残留）。全写为 32 枚 × ~4 通道 ≈ 130 次/帧，仍在预算内。
+        for (const [key, val] of out) this._writeChannel(sg, key, val * g);
       }
+      if (def.mech) this._writeMech(def, sg, ph, t);
+    } catch (e) {
+      console.error('[ANIM:animator] tickIdle 待机 vignette 异常（已跳过本帧）', { pieceType: group?.userData?.pieceType }, e);
     }
-   } catch (e) {
-    console.error('[ANIM:animator] tickIdle 待机微动异常（已跳过本帧）', { pieceType: group?.userData?.pieceType }, e);
-   }
+  }
+
+  /** 写 baseline（静态基准，增益 gain）。 */
+  private _writeBaseline(def: any, sg: any, gain: number): void {
+    if (!sg || !def || !def.baseline) return;
+    for (const ch of def.baseline) this._writeChannel(sg, ch.sub + '.' + ch.axis, ch.to * gain);
+  }
+
+  /** 写单通道：sg[sub].rotation[axis] = value（sub 缺失则跳过，R-1 安全）。key 格式 `sub.axis`。 */
+  private _writeChannel(sg: any, key: string, value: number): void {
+    if (!sg) return;
+    const dot = key.indexOf('.');
+    const sub = sg[key.slice(0, dot)];
+    const axis = key.slice(key.lastIndexOf('.') + 1);
+    if (!sub || !sub.rotation) return;
+    sub.rotation[axis] = value;
+  }
+
+  /**
+   * 机械层（C 炮 winch/gear）：匀速连续转动、位置独立于肢体分段、周期整除 loopSec（D4 策略⑤）。
+   *
+   * 角度 = 2π·(t / loop_i)·periodRatio + ph_mech —— 关于 t **连续**（远景降档期间停写也不会
+   * 造成恢复跳变，因为恢复时角度仍等于同一函数在该 t 的取值），且每过一个 loop_i 恰好转
+   * periodRatio 整圈 → 回环无缝闭合。机械相位 ph_mech = idlePhase × 0.5 与肢体相位解耦
+   * （多枚炮齿轮起始角度不同，但整除关系不受种子影响，逐枚仍各自闭合）。
+   * 子组缺失（`winch`/`gear` 属建模段新增，当前未注册）时安全跳过。
+   */
+  private _writeMech(def: any, sg: any, ph: number, t: number): void {
+    if (!sg || !def.mech) return;
+    const phMech = ph * 0.5;                                       // 机械相位解耦
+    const loop_i = def.loopSec * (1 + 0.06 * Math.sin(ph));
+    for (const m of def.mech) {
+      const s = sg[m.sub];
+      if (!s || !s.rotation) continue;                             // 子组缺失（建模段）则跳过
+      s.rotation.y = 2 * Math.PI * (t / loop_i) * m.periodRatio + phMech;
+    }
   }
 
   /**

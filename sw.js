@@ -33,7 +33,7 @@
 // 版本号：**每次构建产物内容变更必须递增**（activate 时按此清理旧版本缓存）。
 // v2.0.1-20260912：构建改为生产档位（minify + 关闭 sourcemap）→ dist/main.js 与
 //   chunks 全体变更，且 assets-manifest.json 改为「仅列本次真实产物」（不再含陈旧 chunk）。
-const __SHELL_VERSION__ = 'qin-chess-shell-v2.0.1-20260912';
+const __SHELL_VERSION__ = 'qin-chess-shell-v2.0.2-20260912';
 const CACHE_NAME = __SHELL_VERSION__;
 
 // 稳定文件名的应用外壳（不含构建哈希 chunk）
