@@ -648,7 +648,10 @@ export class Animator {
       const target = sel ? 1 : (far ? 0 : IDLE_BASE_GAIN);
       if (ud._vigGain == null) ud._vigGain = target;  // 首帧直接就位，不做入场淡入
       const cf = def ? def.crossfadeSec : 0.2;
-      const step = cf > 0 ? dt / cf : 1;
+      // ★ dt 必须夹到 ≥0：帧时钟 t 理论上单调，但 L2 探针逐段重放 / 后台恢复 / 时钟回拨
+      //   会让 dt<0，此时 `_vigGain ± step` 会朝反方向**冲过头**（实测 dt=−12s、cf=0.2 → 增益
+      //   瞬间跳到 61，待机幅度被放大 60 倍）。夹紧后最坏只是本帧不推进增益。
+      const step = cf > 0 ? Math.max(0, dt) / cf : 1;
       if (ud._vigGain < target) ud._vigGain = Math.min(target, ud._vigGain + step);
       else if (ud._vigGain > target) ud._vigGain = Math.max(target, ud._vigGain - step);
       const g = ud._vigGain;

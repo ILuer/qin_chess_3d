@@ -974,6 +974,13 @@ function buildCannon(mp: any, M: any, K: any, side: string): void {
   const dirZ = Math.sin(ANG);   //  0.383 （长端/投掷端在 +Z 后方）
   const LONG = 0.540, SHORT = 0.290;
 
+  // 抛杆两端（配重端 / 抛兜端）与配重箱中心的**作者坐标**。
+  // ★ 必须在下方 cart / counterweight 段之前就绪：配重箱作者坐标决定其世界高度，
+  //   而 R-1（AC-15-7）要求顶面以下不得穿透棋盘 —— 见下面 counterweight 段的说明。
+  const btmY = PIV - SHORT * dirY;        // ≈ 0.212
+  const btmZ = -SHORT * dirZ;             // ≈ -0.111（配重垂向 -Z 前方）
+  const cwY = btmY - 0.030, cwZ = btmZ + 0.006;  // ≈ 0.182 / -0.105
+
   /* ======== 木底座（cart 组，地面接触层）======== */
   Pcart.add(box(0.042, 0.042, 0.480), M.wood, { pos: [0.145, FOOT + 0.020, 0] });
   Pcart.add(box(0.042, 0.042, 0.480), M.wood, { pos: [-0.145, FOOT + 0.020, 0] });
@@ -1022,18 +1029,31 @@ function buildCannon(mp: any, M: any, K: any, side: string): void {
   Pcart.add(cyl(0.006, 0.006, 0.028, 6), K.bronzeDark, { pos: [-0.142, 0.154, 0] });
 
   // 配重箱（counterweight 子组，挂在 trebuchet 短端 -Z 前方，随抛臂反向运动）
+  // ★ R-1（AC-15-7）修复：原先三个箱体作者 y 均为 0，而本文件 PartBuilder.add /
+  //   _strutImpl 会把**每个零件**的作者 y 统一减 FOOT(0.086)（"去基座"规约），
+  //   于是配重箱落到世界 y∈[-0.176,+0.004] —— 以 8.8× 容差穿透棋盘
+  //   （实测 Box3 底面 -0.176，红线容差 0.02）。改按 cwY/cwZ 安放，与上方悬挂索端点一致：
+  //   世界 y∈[+0.006,+0.186]（贴地不穿透）、z∈[-0.164,-0.034]（与绞盘 z∈[-0.026,+0.026]
+  //   及横梁 z=±0.185 均不相交）。
   if (Pcw) {
-    Pcw.add(box(0.150, 0.120, 0.130), M.woodDeep, { pos: [0, 0, 0] });
-    Pcw.add(box(0.158, 0.040, 0.138), K.bronzeDark, { pos: [0, 0.070, 0] });
-    Pcw.add(box(0.158, 0.040, 0.138), K.bronzeDark, { pos: [0, -0.070, 0] });
+    Pcw.add(box(0.150, 0.120, 0.130), M.woodDeep, { pos: [0, cwY, cwZ] });
+    Pcw.add(box(0.158, 0.040, 0.138), K.bronzeDark, { pos: [0, cwY + 0.070, cwZ] });
+    Pcw.add(box(0.158, 0.040, 0.138), K.bronzeDark, { pos: [0, cwY - 0.070, cwZ] });
   }
 
-  // 炮推行轮（wheelL/wheelR 子组，小木轮绕轴自转；reuse buildWheel 风格但独立子组）
+  // 炮推行轮（wheelL/wheelR 子组，小木轮绕轴自转）
+  // ★ R-1（AC-15-7）修复：改用与 buildWheel（R 车，上方 line 736）**同一规约** ——
+  //   轴心作者高度 HUB = FOOT + 外半径，使轮底恰好落在世界 y=0。原先作者 y=0
+  //   → 世界 y=-FOOT=-0.086 → 轮底 -0.160，穿透棋盘 8× 容差。
+  //   SUBGROUP_JOINTS.C.wheelL/R 的 y 同步改为同一 HUB，使自转绕真正的轮心
+  //   （否则轮心与转轴错位 0.014，轮转时可见摆动）。R 车即以 joint.y === HUB 保持一致。
+  const CANNON_RING = 0.058, CANNON_TUBE = 0.016;
+  const CANNON_HUB = FOOT + CANNON_RING + CANNON_TUBE;   // = 0.160 → 轮底世界 y = 0
   const buildCannonWheel = (Pg: any, x: number): void => {
     if (!Pg) return;
-    Pg.add(torKeep(0.058, 0.016, 6, 14), M.wood, { pos: [x, 0, 0], rot: [0, Math.PI / 2, 0] });
-    Pg.add(cylKeep(0.030, 0.030, 0.050, 10), M.woodDeep, { pos: [x, 0, 0], rot: [0, 0, Math.PI / 2] });
-    Pg.add(sphKeep(0.022, 8, 6), M.accentDim, { pos: [x * 1.12, 0, 0] });
+    Pg.add(torKeep(CANNON_RING, CANNON_TUBE, 6, 14), M.wood, { pos: [x, CANNON_HUB, 0], rot: [0, Math.PI / 2, 0] });
+    Pg.add(cylKeep(0.030, 0.030, 0.050, 10), M.woodDeep, { pos: [x, CANNON_HUB, 0], rot: [0, 0, Math.PI / 2] });
+    Pg.add(sphKeep(0.022, 8, 6), M.accentDim, { pos: [x * 1.12, CANNON_HUB, 0] });
   };
   buildCannonWheel(Pwl, -0.145);
   buildCannonWheel(Pwr, 0.145);
@@ -1063,8 +1083,6 @@ function buildCannon(mp: any, M: any, K: any, side: string): void {
 
   const tipY = PIV + LONG * dirY;         // ≈ 0.979
   const tipZ = LONG * dirZ;               // ≈ +0.207（长端在 +Z 后方扬起）
-  const btmY = PIV - SHORT * dirY;        // ≈ 0.212
-  const btmZ = -SHORT * dirZ;             // ≈ -0.111（配重垂向 -Z 前方）
 
   // 皮索 + 抛兜 + 石弹（在长端/后方扬起处）
   Pt.strut(K.rope, [0.028, tipY, tipZ], [0.028, tipY - 0.056, tipZ - 0.054], 0.006, 0.006, 6);
@@ -1072,9 +1090,8 @@ function buildCannon(mp: any, M: any, K: any, side: string): void {
   Pt.add(sph(0.044, 10, 8), K.leather, { pos: [0, tipY - 0.052, tipZ - 0.052], scale: [1, 0.66, 1.08] });
   Pt.add(sph(0.038, 10, 8), K.stone, { pos: [0, tipY - 0.080, tipZ - 0.052] });
 
-  // 配重箱（悬于短端/前方 -Z 侧）已由独立 counterweight 子组（Pcw，line 995-1000）承载，
+  // 配重箱（悬于短端/前方 -Z 侧）已由独立 counterweight 子组（Pcw，见下）承载，
   // 该子组由 CaptureAction 驱动做反向运动；此处仅保留悬挂索，从抛杆短端垂向配重箱方向。
-  const cwY = btmY - 0.030, cwZ = btmZ + 0.006;
   Pt.strut(K.rope, [0, btmY, btmZ], [0.048, cwY + 0.048, cwZ + 0.012], 0.007, 0.007, 6);
   Pt.strut(K.rope, [0, btmY, btmZ], [-0.048, cwY + 0.048, cwZ + 0.012], 0.007, 0.007, 6);
 
@@ -1444,7 +1461,9 @@ const SUBGROUP_JOINTS: Record<string, Record<string, any>> = {
   //   arms 暂不动（零增量，Sprint 4 不拆袖）。hem 绕腰 pivot [0,0.200,0] 残留 1 mesh/枚。
   B: { bodyRobe: [0, 0.368, 0], hem: [0, 0.200, 0], arms: [0, 0.328, -0.10] },
   R: { horses: [0, 0.168, -0.30], body: [0, 0.288, 0.02], driver: [0.05, 0.378, 0.40], spearman: [-0.05, 0.378, 0.46], wheelL: [-0.26, 0.330, 0], wheelR: [0.26, 0.330, 0] },
-  C: { trebuchet: [0, 0.308, 0], cart: [0, 0.114, 0], soldierL: [-0.25, 0.248, 0.09], soldierR: [0.25, 0.248, 0.09], counterweight: [0, 0.250, -0.150], wheelL: [-0.145, 0.060, 0.110], wheelR: [0.145, 0.060, 0.110] },
+  // ★ R-1 修复同步：counterweight 关节由 [0,0.250,-0.150] 改为箱体实际中心 [0,cwY,cwZ]；
+  //   wheelL/R 的 y 由 0.060 改为 CANNON_HUB（=FOOT+外半径，与 R 车 joint.y===HUB 同规约）。
+  C: { trebuchet: [0, 0.308, 0], cart: [0, 0.114, 0], soldierL: [-0.25, 0.248, 0.09], soldierR: [0.25, 0.248, 0.09], counterweight: [0, 0.182, -0.105], wheelL: [-0.145, 0.160, 0.110], wheelR: [0.145, 0.160, 0.110] },
   K: { body: [0, 0.378, 0], throne: [0, 0.028, 0], crown: [0, 0.964, 0], sword: [0.14, 0.434, -0.02], banner: [0, 0.394, 0], rArm: [0.14, 0.46, 0], capeHem: [0, 0.420, -0.010] }
 };
 

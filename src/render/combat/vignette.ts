@@ -434,9 +434,18 @@ export function evalVignette(def: VignetteDef, u: number, out?: Map<string, numb
       const key = c.sub + '.' + c.axis;
       let val: number;
       if (c.osc) {
-        // 起止均为 to（整数次往复）→ 天然闭合
+        // 起止均为 c.to（整数次往复）→ 天然闭合。
+        // ★ 往复中心必须从「进入本段时的当前值」平滑过渡到 c.to：原实现直接取
+        //   `c.to + swing·(1−cos)/2`，当该通道在本段之前已有值（首个关键帧不在第 0 段，
+        //   或上一段末值 ≠ c.to）时，段首会**瞬间跳到 c.to** —— K 的 banner.z 即因此
+        //   每到 u=0.18（段 0→1 边界）跳 0.06 rad（L2 探针 E.K 实测 maxStep 0.06696
+        //   = 0.06 × 变体幅度，每 7.27s 一次）。中心插值后 ee=0 ⇒ val=prevTo（无跳变）、
+        //   ee=1 ⇒ val=c.to（回环闭合），与下方非 osc 分支同构；对 prevTo===c.to 的
+        //   通道行为完全不变（无回归）。
         const reps = c.reps ?? 1;
-        val = c.to + (c.swing ?? 0) * (1 - Math.cos(2 * Math.PI * reps * ee)) / 2;
+        const prevTo = cur[key] ?? 0;
+        const center = prevTo + (c.to - prevTo) * ee;
+        val = center + (c.swing ?? 0) * (1 - Math.cos(2 * Math.PI * reps * ee)) / 2;
       } else {
         const prevTo = cur[key] ?? 0;
         val = prevTo + (c.to - prevTo) * ee;
