@@ -72,8 +72,17 @@ export const PIECE_GLYPH: Record<string, Record<string, string>> = {
 /** 各类型标称总高（去基座后，含最高装饰，master-plan §1.1）
  *  QIN-P15-FIX2（反馈 #1）：crown 恢复原比例后，K 顶高从 1.29（crown 撑高）
  *  下修至 ~1.15（throne 高背撑高，与 art-royal-throne §2.1「龙椅为高度主体」
- *  的设计口径一致）。其他兵种不变。 */
-export const PIECE_TOP_Y: Record<string, number> = { P: 0.70, N: 0.86, B: 0.79, A: 0.79, R: 0.99, C: 0.93, K: 1.15 };
+ *  的设计口径一致）。其他兵种不变。
+ *
+ *  ★ M-03 对齐修正（02-四视角视觉评估 §9 #5/#8/#10 + 04 验证 E 节）：
+ *    - K 1.15 → 1.00：R-3 座屏化后「高背板」不再是最高点，最高点改由鹖冠立缨
+ *      承担（实测 ~0.99）。声明值必须等于实测，否则 animator/CaptureAction 的
+ *      抬升基准会凭空多出 0.15（C 的 D7 同款问题）。
+ *    - C 0.93 → 0.90：对齐实测 0.899（D7）。
+ *    - B 0.79 → 0.74：高冠降 25% 后实测 ~0.74（#8）。
+ *    ⚠ 这三个常量写入 group.userData.topY，消费点见 animator.ts / CaptureAction.ts /
+ *      followCamera.ts / ui/input.ts，改后已逐点核对（04 文档 §5）。 */
+export const PIECE_TOP_Y: Record<string, number> = { P: 0.70, N: 0.86, B: 0.74, A: 0.79, R: 0.99, C: 0.90, K: 1.00 };
 
 /**
  * L4b：支持低模 LOD 的兵种（lod-spec §2.2）——R/C/K 三型。
@@ -358,21 +367,59 @@ class Parts {
  * 多分组零件收集器（阶段二：K/C/R 使用命名子组）
  * ============================================================ */
 
+/** 空集合单例（避免每枚棋子构造 MultiParts 时分配一个空 Set） */
+const _EMPTY_SET: Set<string> = new Set();
+
+/**
+ * ADR-α「配件白名单」（03-资产化分层规格 §6.3 方案 α，用户拍板）。
+ *
+ * 背景：FORCE_SINGLE 把每个子组压成 1 mesh（顶点色烘焙保留零件颜色），代价是
+ *   甲片/青铜/鎏金等金属件失去金属高光。对「身份配件」而言这个代价不可接受 ——
+ *   戈刃、盾心、鹖冠、帅旗、车轮毂盖正是玩家在俯视/远视下认子的第一线索。
+ *
+ * 方案：保持 FORCE_SINGLE 总体策略不变，仅对下列 A 档配件子组**豁免** forceSingle，
+ *   让它们在子组内部走 matte/metal 双族拆分（每子组 ≤2 单面 mesh + 至多 1 个
+ *   双面特殊件）。硬约束（03 §5.2）：
+ *     DC-1 禁新材质族 —— 复用 mats.families.matte / metal 两个既有族代表；
+ *     DC-2 禁新贴图   —— 顶点色烘焙沿用既有 `_sampleMap` 路径；
+ *     DC-3 子组内按族合并，绝不跨子组合并（演出子组必须保持独立 Object3D）。
+ *
+ * 白名单 = 03 §6.2 A 档 must 全量 8 项：
+ *   P.spear / P.shield、K.banner / K.crown、A.sword / A.shield、R.wheelL / R.wheelR
+ *
+ * 代价核算（04 文档 §4）：金属顶点占比 < 12% 的子组会自动回退单族（Parts.build
+ *   的既有逻辑），R 车轮即命中该回退 —— 毂盖只占约 9% 顶点，故 R.wheelL/R 实际
+ *   Δmesh = 0。其余 6 项各 +1 mesh/实例。
+ */
+const ACCESSORY_WHITELIST: Record<string, Set<string>> = {
+  P: new Set(['spear', 'shield']),
+  K: new Set(['banner', 'crown']),
+  A: new Set(['sword', 'shield']),
+  R: new Set(['wheelL', 'wheelR'])
+};
+
 class MultiParts {
   groups: Map<string, Parts>;
   defaultName: string;
   /** 子组强制单材质族（Sprint1 PERF-1 修复）：所有子组 build() 跳过双族拆分 */
   forceSingle: boolean;
-  constructor(forceSingle = false) {
+  /** ADR-α：豁免 forceSingle 的配件子组名集合（空集合 = 全部强制单族） */
+  whitelist: Set<string>;
+  constructor(forceSingle = false, whitelist?: Set<string>) {
     this.groups = new Map();
     /** 默认组名（不归属动画子组的公共零件归入此组，最终放入 idleGroup 顶层，如 R 车轮） */
     this.defaultName = '_base';
     this.forceSingle = forceSingle;
+    this.whitelist = whitelist || _EMPTY_SET;
   }
 
-  /** 取指定名称的 Parts 收集器；不存在则创建（继承 forceSingle 标志） */
+  /** 取指定名称的 Parts 收集器；不存在则创建。
+   *  ★ ADR-α：命中白名单的配件子组传 forceSingle=false，走 matte/metal 双族拆分，
+   *    恢复金属高光；其余子组继承 forceSingle（合并为 1 mesh）。 */
   get(name: string): any {
-    if (!this.groups.has(name)) this.groups.set(name, new Parts(this.forceSingle));
+    if (!this.groups.has(name)) {
+      this.groups.set(name, new Parts(this.forceSingle && !this.whitelist.has(name)));
+    }
     return this.groups.get(name);
   }
 
@@ -598,9 +645,14 @@ function buildElephant(mp: any, M: any, K: any, side: string): void {
   robeP.add(sph(0.055, 12, 10), M.skin, { pos: [0, 0.652, -0.004] });
   robeP.strut(K.hair, [0, 0.632, -0.048], [0, 0.548, -0.030], 0.030, 0.008, 8);
   // 髻 + 进贤冠
+  // ★ M-03 #8（B 高冠过长 + 后倾）：冠身高 0.145 → 0.100（整组高度 −25%，约 −0.044），
+  //   并把 rot.x 由 −0.18（≈10.3° 后倾）校正为 0（冠轴垂直），冠身/冠板 z 由 0.014/0.002
+  //   收到 0.006 对齐头颅垂直轴。修正后 front 头身比 / side 歪戴 / top 前伸投影三视角同改善。
+  //   注意：进贤冠是 B 的最高件，降冠后 B 实测顶高 ~0.74 —— PIECE_TOP_Y.B 已同步
+  //   由 0.79 改为 0.74（见顶部常量注释），否则动画抬升基准会凭空多 0.05。
   robeP.add(cyl(0.058, 0.064, 0.030, 12), M.clothDeep, { pos: [0, 0.706, 0.004] });
-  robeP.add(box(0.082, 0.145, 0.096), M.clothDeep, { pos: [0, 0.790, 0.014], rot: [-0.18, 0, 0] });
-  robeP.add(box(0.060, 0.012, 0.098), M.accentDim, { pos: [0, 0.862, 0.002], rot: [-0.18, 0, 0] });
+  robeP.add(box(0.082, 0.100, 0.096), M.clothDeep, { pos: [0, 0.762, 0.006], rot: [0, 0, 0] });
+  robeP.add(box(0.060, 0.012, 0.098), M.accentDim, { pos: [0, 0.818, 0.006], rot: [0, 0, 0] });
   robeP.add(box(0.070, 0.058, 0.014), M.clothDeep, { pos: [0, 0.726, 0.074], rot: [0.30, 0, 0] });
 
   // 腹部层（anatomy 腹部，深衣车削分层之下追加独立腹部环）
@@ -630,8 +682,11 @@ function buildElephant(mp: any, M: any, K: any, side: string): void {
   armsP.strut(M.robe, [-0.104, 0.545, -0.010], [-0.140, 0.462, -0.026], 0.062, 0.072, 12);
   armsP.add(sph(0.034, 8, 6), M.robe, { pos: [-0.140, 0.462, -0.026] });
   armsP.strut(M.robe, [-0.140, 0.462, -0.026], [-0.176, 0.378, -0.042], 0.060, 0.088, 12);
-  armsP.add(tor(0.084, 0.012, 5, 14), M.clothDeep, { pos: [+0.178, 0.372, -0.044], rot: [1.30, 0, -0.38] });
-  armsP.add(tor(0.084, 0.012, 5, 14), M.clothDeep, { pos: [-0.178, 0.372, -0.044], rot: [1.30, 0, 0.38] });
+  // ★ M-03 #9（袖口悬空环）：红环原落在 [±0.178, 0.372, −0.044]，比小臂末端
+  //   （[±0.176, 0.378, −0.042]，端半径 0.088）低 0.006 且外偏，读作「悬在袖外的圈」。
+  //   本次沿小臂轴向上内收（y +0.022 → 0.394，x ∓0.006，z +0.004），使环体嵌入袖口下缘。
+  armsP.add(tor(0.084, 0.012, 5, 14), M.clothDeep, { pos: [+0.172, 0.394, -0.040], rot: [1.30, 0, -0.38] });
+  armsP.add(tor(0.084, 0.012, 5, 14), M.clothDeep, { pos: [-0.172, 0.394, -0.040], rot: [1.30, 0, 0.38] });
   // 手（捧简牍）
   armsP.add(sph(0.032, 10, 8), M.skin, { pos: [+0.052, 0.498, -0.118] });
   armsP.add(sph(0.032, 10, 8), M.skin, { pos: [-0.052, 0.498, -0.118] });
@@ -703,10 +758,13 @@ function buildAdvisor(mp: any, M: any, K: any, side: string): void {
   armP.add(sph(0.032, 10, 8), M.skin, { pos: [-0.036, 0.532, -0.168] });
 
   // 双手拄剑（sword 组，绕握把 pivot）—— z 前移 -0.054，剑身移出甲裙前表面（裙底 front z≈-0.168）
-  swordP.add(box(0.048, 0.400, 0.015), K.blade, { pos: [0, 0.288, -0.170] });
-  swordP.add(box(0.094, 0.022, 0.030), K.bronze, { pos: [0, 0.500, -0.170] });
-  swordP.add(cyl(0.017, 0.019, 0.086, 10), M.leather, { pos: [0, 0.554, -0.170] });
-  swordP.add(sph(0.026, 10, 8), K.bronze, { pos: [0, 0.606, -0.170] });
+  // ★ M-03 #14（剑手脱节）：整组向躯干内收 0.044（z −0.170 → −0.126），使剑柄（皮革握把
+  //   y≈0.554）落回双手（arms 组 [±0.036, 0.556, −0.168]）的握持范围，读作「按剑」。
+  //   SUBGROUP_JOINTS.A.sword 的 z 已同步为 −0.126（pivot 与几何同帧移动）。
+  swordP.add(box(0.048, 0.400, 0.015), K.blade, { pos: [0, 0.288, -0.126] });
+  swordP.add(box(0.094, 0.022, 0.030), K.bronze, { pos: [0, 0.500, -0.126] });
+  swordP.add(cyl(0.017, 0.019, 0.086, 10), M.leather, { pos: [0, 0.554, -0.126] });
+  swordP.add(sph(0.026, 10, 8), K.bronze, { pos: [0, 0.606, -0.126] });
 
   // 圆盾（shield 组，A4 新增子组）—— 贴身前（z=-0.20，略前于甲裙前表面），
   // 近卫剑盾的盾：木心蒙皮 + 鎏金包边 + 中心护手。绕盾心 pivot（SUBGROUP_JOINTS.A.shield），
@@ -756,10 +814,12 @@ function buildChariot(mp: any, M: any, K: any, side: string): void {
   Pc.add(box(0.320, 0.016, 0.016), M.accentDim, { pos: [0, 0.544, 0.148] });
 
   // 车辕 + 衡 + 轭（连接马匹方向，朝向 -Z 即前方）
-  Pc.strut(M.wood, [0, 0.378, 0.080], [0, 0.456, -0.340], 0.022, 0.016, 8);
-  Pc.add(cyl(0.013, 0.013, 0.270, 8), M.wood, { pos: [0, 0.458, -0.330], rot: [0, 0, Math.PI / 2] });
-  Pc.strut(M.woodDeep, [0.078, 0.450, -0.330], [0.104, 0.350, -0.320], 0.011, 0.011, 6);
-  Pc.strut(M.woodDeep, [-0.078, 0.450, -0.330], [-0.104, 0.350, -0.320], 0.011, 0.011, 6);
+  // ★ M-03 #4（R 纵深压缩）：车辕/衡/轭随马群后移同步**缩短** 0.06，保持「辕端抵马」
+  //   的原有相对关系（马群从 −0.520/−0.480 后移到 −0.460/−0.420，见下方 buildOneHorse 调用）。
+  Pc.strut(M.wood, [0, 0.378, 0.080], [0, 0.456, -0.280], 0.022, 0.016, 8);
+  Pc.add(cyl(0.013, 0.013, 0.270, 8), M.wood, { pos: [0, 0.458, -0.270], rot: [0, 0, Math.PI / 2] });
+  Pc.strut(M.woodDeep, [0.078, 0.450, -0.270], [0.104, 0.350, -0.260], 0.011, 0.011, 6);
+  Pc.strut(M.woodDeep, [-0.078, 0.450, -0.270], [-0.104, 0.350, -0.260], 0.011, 0.011, 6);
 
   // 车旗（V6 高度专项：旗杆/旗面/顶饰整体加高，使 R 顶高 0.81 → ~0.99；
   //  仍归 body 子组，windUp/strike/settle 独立变换不受影响）
@@ -774,19 +834,25 @@ function buildChariot(mp: any, M: any, K: any, side: string): void {
     { pos: [0.104, 0.936, 0.038], rot: [0, Math.PI / 2, 0] }
   );
 
-  /* ======== 双马（horses 组，在车前方 -Z 方向）======== */
+  /* ======== 双马（horses 组，在车前方 -Z 方向）========
+   * ★ M-03 #4：马群整体后移 0.06（hzL −0.520→−0.460 / hzR −0.480→−0.420），
+   *   配合马首前伸量收窄（buildOneHorse 内 −0.284s→−0.272s 等），
+   *   把 R 的 depthZ 从 1.056 压到 ≤1.0，消除相邻格（同一纵列、中心距 GRID=1.0）
+   *   的真实互穿。**只压前端马群，不整枚等比缩放**（等比缩放会破坏 R 的高度层级）。 */
   // 左马（略靠后）
-  const hxL = -0.110, hzL = -0.520;
+  const hxL = -0.110, hzL = -0.460;
   buildOneHorse(Ph, M, K, hxL, hzL, 0.95);
   // 右马（略靠前，形成前后错落）
-  const hxR = 0.110, hzR = -0.480;
+  const hxR = 0.110, hzR = -0.420;
   buildOneHorse(Ph, M, K, hxR, hzR, 0.98);
 
-  /* ======== 御马兵（driver 组，站在车舆前部偏右）======== */
-  buildDriver(Pd, M, K, 0.050, -0.030, 0.85, 0.405);
+  /* ======== 御马兵（driver 组，站在车舆前部偏右）========
+   * ★ M-03 #12：oz −0.030 → −0.050（与持戈兵各外扩 0.02，缓解躯干重叠） */
+  buildDriver(Pd, M, K, 0.050, -0.050, 0.85, 0.405);
 
-  /* ======== 持戈兵（spearman 组，站在车舆后部偏左）======== */
-  buildSpearman(Ps, M, K, -0.050, 0.060, 0.88, 0.405);
+  /* ======== 持戈兵（spearman 组，站在车舆后部偏左）========
+   * ★ M-03 #12：oz 0.060 → 0.080 */
+  buildSpearman(Ps, M, K, -0.050, 0.080, 0.88, 0.405);
 }
 
 /** 单侧车轮（A4：wheelL/wheelR 独立子组，绕车轴 HUB pivot 自转）。
@@ -812,43 +878,50 @@ function buildOneHorse(P: any, M: any, K: any, ox: number, oz: number, scl: numb
   P.add(sph(0.096 * s, 10, 7), hide, { pos: [ox, 0.296 * s + 0.086, oz + 0.134 * s], scale: [0.88*s, 0.92*s, 0.88*s] });
   // 颈 + 头
   P.strut(hide, [ox, 0.500 * s + 0.086, oz - 0.200 * s], [ox, 0.345 * s + 0.086, oz - 0.108 * s], 0.040 * s, 0.066 * s, 9);
-  P.add(sph(0.044 * s, 9, 7), hide, { pos: [ox, 0.500 * s + 0.086, oz - 0.234 * s], scale: [0.78*s, 0.92*s, 1.36*s] });
-  P.add(sph(0.028 * s, 7, 5), hide, { pos: [ox, 0.470 * s + 0.086, oz - 0.284 * s], scale: [0.83*s, 0.77*s, 0.96*s] });
+  // ★ M-03 #4：马首前伸量收窄（0.284s→0.272s / 0.234s→0.226s / 0.202s→0.196s），
+  //   与马群后移 0.06 叠加，把 R 的 depthZ 压到 ≤1.0；马身/颈/腿比例不动。
+  P.add(sph(0.044 * s, 9, 7), hide, { pos: [ox, 0.500 * s + 0.086, oz - 0.226 * s], scale: [0.78*s, 0.92*s, 1.36*s] });
+  P.add(sph(0.028 * s, 7, 5), hide, { pos: [ox, 0.470 * s + 0.086, oz - 0.272 * s], scale: [0.83*s, 0.77*s, 0.96*s] });
   // 耳
-  P.add(cyl(0.000, 0.014 * s, 0.036 * s, 5), hide, { pos: [ox + 0.022 * s, 0.542 * s + 0.086, oz - 0.202 * s], rot: [-0.2, 0, 0.15] });
-  P.add(cyl(0.000, 0.014 * s, 0.036 * s, 5), hide, { pos: [ox - 0.022 * s, 0.542 * s + 0.086, oz - 0.202 * s], rot: [-0.2, 0, -0.15] });
+  P.add(cyl(0.000, 0.014 * s, 0.036 * s, 5), hide, { pos: [ox + 0.022 * s, 0.542 * s + 0.086, oz - 0.196 * s], rot: [-0.2, 0, 0.15] });
+  P.add(cyl(0.000, 0.014 * s, 0.036 * s, 5), hide, { pos: [ox - 0.022 * s, 0.542 * s + 0.086, oz - 0.196 * s], rot: [-0.2, 0, -0.15] });
   // 鬃毛
   P.add(box(0.011 * s, 0.048 * s, 0.040 * s), K.hair, { pos: [ox, 0.540 * s + 0.086, oz - 0.192 * s], rot: [0.45, 0, 0] });
   P.add(box(0.011 * s, 0.052 * s, 0.040 * s), K.hair, { pos: [ox, 0.504 * s + 0.086, oz - 0.156 * s], rot: [0.55, 0, 0] });
   // 马面帘
-  P.add(box(0.048 * s, 0.060 * s, 0.014 * s), M.armor, { pos: [ox, 0.504 * s + 0.086, oz - 0.284 * s], rot: [0.12, 0, 0] });
+  P.add(box(0.048 * s, 0.060 * s, 0.014 * s), M.armor, { pos: [ox, 0.504 * s + 0.086, oz - 0.272 * s], rot: [0.12, 0, 0] });
   // 四腿（anatomy 大腿/小腿/蹄；左前右后抬起 = 奔腾姿态）
+  // ★ M-03 #3（D5 马蹄孤岛缝）：小腿下端原止于 0.086+0.060s（去基座后 y≈0.057），
+  //   而蹄底片只覆盖 y∈[0,0.0152]，中间留出 0.035~0.042 的空隙 —— 审计判为 8 片
+  //   `r.hoofSole` 孤岛，侧视肉眼可见「蹄子浮在腿下」。本次把小腿下端下延到
+  //   0.086+0.018s（去基座后 y≈0.017，与蹄底片上缘 0.0152 重叠），缝隙焊实。
+  //   蹄底片 y 不动 ⇒ R-1 贴地（root min.y = 0）保持不变。
   // 左前 FL 抬起
   P.strut(hide, [ox + 0.062 * s, 0.250 * s + 0.086, oz - 0.116 * s],
           [ox + 0.078 * s, 0.250 * s + 0.086 - 0.080, oz - 0.170 * s], 0.026 * s, 0.022 * s, 8);
   P.strut(hide, [ox + 0.078 * s, 0.250 * s + 0.086 - 0.080, oz - 0.170 * s],
-          [ox + 0.088 * s, 0.086 + 0.060 * s, oz - 0.216 * s], 0.020 * s, 0.018 * s, 8);
+          [ox + 0.088 * s, 0.086 + 0.018 * s, oz - 0.216 * s], 0.020 * s, 0.018 * s, 8);
   P.add(box(0.028 * s, 0.016 * s, 0.034 * s), M.hoofSole,
     { pos: [ox + 0.088 * s, 0.086 + 0.008 * s, oz - 0.216 * s] });
   // 右前 FR 落地
   P.strut(hide, [ox - 0.062 * s, 0.250 * s + 0.086, oz - 0.116 * s],
           [ox - 0.062 * s, 0.250 * s + 0.086 - 0.080, oz - 0.130 * s], 0.026 * s, 0.022 * s, 8);
   P.strut(hide, [ox - 0.062 * s, 0.250 * s + 0.086 - 0.080, oz - 0.130 * s],
-          [ox - 0.066 * s, 0.086 + 0.060 * s, oz - 0.140 * s], 0.020 * s, 0.018 * s, 8);
+          [ox - 0.066 * s, 0.086 + 0.018 * s, oz - 0.140 * s], 0.020 * s, 0.018 * s, 8);
   P.add(box(0.028 * s, 0.016 * s, 0.034 * s), M.hoofSole,
     { pos: [ox - 0.066 * s, 0.086 + 0.008 * s, oz - 0.140 * s] });
   // 左后 BL 落地
   P.strut(hide, [ox + 0.064 * s, 0.250 * s + 0.086, oz + 0.136 * s],
           [ox + 0.066 * s, 0.250 * s + 0.086 - 0.080, oz + 0.156 * s], 0.026 * s, 0.022 * s, 8);
   P.strut(hide, [ox + 0.066 * s, 0.250 * s + 0.086 - 0.080, oz + 0.156 * s],
-          [ox + 0.068 * s, 0.086 + 0.060 * s, oz + 0.172 * s], 0.021 * s, 0.018 * s, 8);
+          [ox + 0.068 * s, 0.086 + 0.018 * s, oz + 0.172 * s], 0.021 * s, 0.018 * s, 8);
   P.add(box(0.028 * s, 0.016 * s, 0.034 * s), M.hoofSole,
     { pos: [ox + 0.068 * s, 0.086 + 0.008 * s, oz + 0.172 * s] });
   // 右后 BR 抬起
   P.strut(hide, [ox - 0.064 * s, 0.250 * s + 0.086, oz + 0.136 * s],
           [ox - 0.078 * s, 0.250 * s + 0.086 - 0.080, oz + 0.156 * s], 0.026 * s, 0.022 * s, 8);
   P.strut(hide, [ox - 0.078 * s, 0.250 * s + 0.086 - 0.080, oz + 0.156 * s],
-          [ox - 0.090 * s, 0.086 + 0.060 * s, oz + 0.168 * s], 0.021 * s, 0.018 * s, 8);
+          [ox - 0.090 * s, 0.086 + 0.018 * s, oz + 0.168 * s], 0.021 * s, 0.018 * s, 8);
   P.add(box(0.028 * s, 0.016 * s, 0.034 * s), M.hoofSole,
     { pos: [ox - 0.090 * s, 0.086 + 0.008 * s, oz + 0.168 * s] });
   // 尾
@@ -1216,17 +1289,30 @@ function buildKing(mp: any, M: any, K: any, side: string): void {
   //   本次按棋子 orient 约定把整组 z 取反：背板在 +Z = body 身后（己方一侧）——
   //   从玩家视角（红方 -Z 看 +Z）看，椅背从将/帅身后露出，body 完整坐姿可见。
   //   尺寸与高度不变，仅 z 符号翻转，保持 piece-check maxY≈1.15 / throne 顶≥0.95 ——）
-  Pt.add(box(0.300, 0.600, 0.060), M.woodDeep,  { pos: [0, FOOT + 0.560, +0.220] }); // 背板
-  Pt.add(box(0.270, 0.540, 0.042), M.wood,      { pos: [0, FOOT + 0.550, +0.216] }); // 内衬分层
-  // 顶部夔龙纹横梁 —— ★ L4b 关键剪影件「不降段」（lod-spec §3）：王座整组（t01~t07）
-  //   为 K 剪影主体（高背 + 坐姿），任何 LOD 保段，仅 box 零件天然不受段数影响。
-  Pt.add(box(0.340, 0.070, 0.080), M.accent,    { pos: [0, FOOT + 0.880, +0.220] });
-  Pt.add(sphKeep(0.030, 10, 8), M.accent,       { pos: [+0.170, FOOT + 0.885, +0.220] });
-  Pt.add(sphKeep(0.030, 10, 8), M.accent,       { pos: [-0.170, FOOT + 0.885, +0.220] });
-  Pt.add(box(0.030, 0.520, 0.030), M.accentDim, { pos: [0, FOOT + 0.600, +0.232] });
-  Pt.add(box(0.060, 0.380, 0.020), M.accent,    { pos: [+0.092, FOOT + 0.500, +0.230] });
-  Pt.add(box(0.060, 0.380, 0.020), M.accent,    { pos: [-0.092, FOOT + 0.500, +0.230] });
-  Pt.add(box(0.110, 0.420, 0.012), K.panChi,    { pos: [0, FOOT + 0.505, +0.206] });
+  // ★★ M-03 #5+#6（R-3 红线 · 用户拍板「座屏路线」）—— t03 由「通高背板」重建为
+  //   「座后屏风（座屏）」：
+  //   ① 屏顶由 piece-local 0.915（世界 1.14，比头顶 0.80 还高 0.36，读成「高背椅」）
+  //      降到 piece-local 0.680（世界 0.85，约与头顶齐平）→ 最高点改由鹖冠立缨承担，
+  //      视觉主体回归「坐着的统帅」（02 §1.1「让冠成为整枚最高点」）；
+  //   ② 顶部「金属圆梁 + 两端球帽」改为屏风**横枨**（上/中两道扁枨），去掉椅背语汇；
+  //   ③ 新增**屏座**（压在座垫上）与**侧翼板**（自座身/座垫一路连到屏心主板），
+  //      消除侧视「背板柱底悬空、像插在空中的旗杆」的断口（02 §1.2）。
+  //   材质全部复用既有族（woodDeep/wood/accent/accentDim/common.panChi）——
+  //   03 §5.2 DC-1 禁新材质族、DC-2 禁新贴图，本次零新增。
+  //   座屏顶 piece-local 0.680 × K_IDLE_SCALE 1.25 = 世界 0.85，落在用户拍板的
+  //   「世界 0.75–0.85」区间（02 §1.5 同口径「背板顶由约 1.14 降到约 0.92 量级」）。
+  //   ★ L4b 关键剪影件「不降段」纪律不变：王座整组（t01~t07）任何 LOD 保段。
+  Pt.add(box(0.300, 0.070, 0.180), M.woodDeep,  { pos: [0, FOOT + 0.250, +0.130] }); // 屏座（压座垫，落地）
+  Pt.add(box(0.040, 0.400, 0.180), M.woodDeep,  { pos: [+0.148, FOOT + 0.350, +0.130] }); // 右侧翼板（座身→屏心）
+  Pt.add(box(0.040, 0.400, 0.180), M.woodDeep,  { pos: [-0.148, FOOT + 0.350, +0.130] }); // 左侧翼板
+  Pt.add(box(0.280, 0.330, 0.044), M.woodDeep,  { pos: [0, FOOT + 0.450, +0.216] }); // 屏心主板 0.285→0.615
+  Pt.add(box(0.250, 0.300, 0.030), M.wood,      { pos: [0, FOOT + 0.450, +0.211] }); // 内衬分层
+  Pt.add(box(0.320, 0.042, 0.070), M.accent,    { pos: [0, FOOT + 0.659, +0.210] }); // 上横枨（原夔龙纹金属圆梁）
+  Pt.add(box(0.290, 0.026, 0.056), M.accentDim, { pos: [0, FOOT + 0.450, +0.212] }); // 中横枨
+  Pt.add(box(0.030, 0.290, 0.030), M.accentDim, { pos: [0, FOOT + 0.450, +0.230] }); // 中央竖棂
+  Pt.add(box(0.050, 0.210, 0.018), M.accent,    { pos: [+0.090, FOOT + 0.450, +0.228] }); // 侧纹
+  Pt.add(box(0.050, 0.210, 0.018), M.accent,    { pos: [-0.090, FOOT + 0.450, +0.228] });
+  Pt.add(box(0.100, 0.300, 0.012), K.panChi,    { pos: [0, FOOT + 0.450, +0.204] }); // 蟠螭纹屏心
 
   // —— t04 扶手 + 龙首（fx=±0.16，与人物手臂对位；端头鎏金兽首）——
   for (let s = -1; s <= 1; s += 2) {
@@ -1313,10 +1399,12 @@ function buildKing(mp: any, M: any, K: any, side: string): void {
   Pb.add(cyl(0.132, 0.140, 0.022, 14), M.armor,     { pos: [0, PY(0.480), +0.010] });
 
   // 兽面披膊（shoulder 护肩）
-  Pb.add(dome(0.078, 12, 7, 0.62), M.armor, { pos: [+0.142, PY(0.480), 0] });
-  Pb.add(dome(0.078, 12, 7, 0.62), M.armor, { pos: [-0.142, PY(0.480), 0] });
-  Pb.add(box(0.062, 0.046, 0.044), M.accent, { pos: [+0.174, PY(0.480), -0.020] });
-  Pb.add(box(0.062, 0.046, 0.044), M.accent, { pos: [-0.174, PY(0.480), -0.020] });
+  // ★ M-03 #18（肩甲体量）：兽面披膊半球半径 0.078 → 0.063（−0.015），缓解
+  //   02 §1.1 指出的「肩甲与头部接近 1:1、头大身小」，并让俯视人物占比提升。
+  Pb.add(dome(0.063, 12, 7, 0.62), M.armor, { pos: [+0.142, PY(0.480), 0] });
+  Pb.add(dome(0.063, 12, 7, 0.62), M.armor, { pos: [-0.142, PY(0.480), 0] });
+  Pb.add(box(0.052, 0.040, 0.038), M.accent, { pos: [+0.168, PY(0.480), -0.020] });
+  Pb.add(box(0.052, 0.040, 0.038), M.accent, { pos: [-0.168, PY(0.480), -0.020] });
 
   // 披风（自肩后垂落到椅背外；下摆收在 piece-y≈0.05 之上，避免插穿棋盘面/踏脚）
   // Sprint5 写实：几何整体移入独立 capeHem 子组，绕肩后关节 [0,0.420,-0.010] 旋转。
@@ -1413,8 +1501,11 @@ function buildKingBanner(P: any, M: any, K: any, side: string): void {
   P.add(cyl(0.012, 0.014, 0.600, 8), M.woodDeep, { pos: [0.228, 0.400, 0.126] });
   P.strut(M.accent, [0.228, 0.756, 0.126], [0.228, 0.694, 0.126], 0.000, 0.020, 8);
   P.add(sph(0.024, 8, 6), M.plume, { pos: [0.228, 0.688, 0.126] });
+  // ★ M-03 #7（旗帜压人）：旗面宽×高 0.195×0.260 → 0.166×0.221（各 −15%），
+  //   与 02 §1.2「旗帜体量接近甚至超过人物躯干可视宽度、旗压过人」对应；
+  //   杆位/杆高不动（旗杆仍是 K 的纵向身份件，俯视可见）。
   P.add(
-    curvedBanner(0.195, 0.260, 0.034, 8),
+    curvedBanner(0.166, 0.221, 0.034, 8),
     getBannerMaterial(PIECE_GLYPH[side]!.K ?? '', side),
     { pos: [0.228, 0.560, 0.028], rot: [0, Math.PI / 2, 0] }
   );
@@ -1442,29 +1533,52 @@ const MULTI_GROUP_TYPES = new Set(['K', 'C', 'R', 'P', 'A', 'N', 'B']);
  * buildTemplate 多分组路径会把该子组几何整体平移 -joint，再把 Group 放到 joint，
  * 于是子组旋转即绕关节本身（不再是绕棋子根/棋盘中心公转）。
  * 仅列出需要精炼旋转的子组；为空则 Group 留在原点（平移类动画不受影响）。
+ *
+ * ★ M-03 关节校准（01-几何量化审计 C3「pivotOutside」+ 02 §9 #2/#11/#13/#15/#16/#17）：
+ *   本表历来的写法混用了「作者坐标（含 FOOT）」与「去基座坐标（不含 FOOT）」两套系，
+ *   导致一批 pivot 落在该子组自身 AABB 之外（P.armR/L 0.075、B.hem 0.086、
+ *   N 四腿 0.062~0.079、R.driver 0.352、R.spearman 0.317、C.wheelL/R 0.039、
+ *   K.sword 0.101）。静态无害（translate(-J) 与 position(J) 相消），但一旦该子组
+ *   被 POSE_TABLE 旋转，几何就绕一个空中的点公转（吃子峰值 rotX −0.70 时
+ *   R.spearman 末端位移可达 0.20）。
+ *   本轮按「pivot = 该子组真实旋转中心（去基座坐标，= 作者 y − FOOT）」逐项校准，
+ *   语义锚点（肩/髋/腰/轮心）不变，只是补回 FOOT 差或修正 z 遗留错误。
+ *   ⚠ 不驱动旋转的子组（K.crown 只走 translateY）本轮不校，见 04 文档遗留风险。
  */
 const SUBGROUP_JOINTS: Record<string, Record<string, any>> = {
   // ★ Sprint 1 重构：兵/卒 P 拆为 armL/armR、legL/legR，新增独立 shield，戈(spear)挂 armR 子节点。
   //   零新 Mesh（仅重新分组到 Group 容器），draw call 不增。
+  // ★ M-03 #15：armR/armL 的 y 由 0.505（作者坐标）校准为 0.505−FOOT=0.419（真肩点）。
   P: {
     body: [0, 0.334, 0],
-    armR: [0.096, 0.505, 0],   // 右肩
-    armL: [-0.096, 0.505, 0],  // 左肩
+    armR: [0.096, 0.419, 0],   // 右肩（= 作者 0.505 − FOOT）
+    armL: [-0.096, 0.419, 0],  // 左肩
     legR: [0.055, 0.300, 0],   // 右胯（踏步绕胯转）
     legL: [-0.055, 0.300, 0],  // 左胯
     shield: [-0.176, 0.400, -0.058], // 盾心
     spear: [0.170, 0.440, -0.020]    // 戈握把（作为 armR 子节点，随右臂挥动）
   },
-  A: { body: [0, 0.334, 0], arms: [0, 0.378, 0], sword: [0, 0.328, -0.17], shield: [0, 0.45, -0.20] },
-  N: { bodyHorse: [0, 0.128, 0], legFL: [+0.076, 0.300, -0.140], legFR: [-0.076, 0.300, -0.140], legBL: [+0.080, 0.300, 0.165], legBR: [-0.080, 0.300, 0.165], rider: [0, 0.328, 0] },
+  // ★ M-03 #14：sword 子组向躯干内收 0.044（z −0.170 → −0.126），使剑柄落入握持范围。
+  A: { body: [0, 0.334, 0], arms: [0, 0.378, 0], sword: [0, 0.328, -0.126], shield: [0, 0.45, -0.20] },
+  // ★ M-03 #16：四腿 hip 由 0.300（作者坐标）校准为 0.300−FOOT=0.214（真髋点，= strut 起点）。
+  N: { bodyHorse: [0, 0.128, 0], legFL: [+0.076, 0.214, -0.140], legFR: [-0.076, 0.214, -0.140], legBL: [+0.080, 0.214, 0.165], legBR: [-0.080, 0.214, 0.165], rider: [0, 0.328, 0] },
   // ★ Sprint 4 写实：象 B 拆 robe→bodyRobe + hem（下摆独立可飘动子组），
   //   arms 暂不动（零增量，Sprint 4 不拆袖）。hem 绕腰 pivot [0,0.200,0] 残留 1 mesh/枚。
-  B: { bodyRobe: [0, 0.368, 0], hem: [0, 0.200, 0], arms: [0, 0.328, -0.10] },
-  R: { horses: [0, 0.168, -0.30], body: [0, 0.288, 0.02], driver: [0.05, 0.378, 0.40], spearman: [-0.05, 0.378, 0.46], wheelL: [-0.26, 0.330, 0], wheelR: [0.26, 0.330, 0] },
+  // ★ M-03 #17：hem pivot 由 0.200（作者坐标）校准为 0.110（下摆顶缘 = 腰，绕此摆动）。
+  B: { bodyRobe: [0, 0.368, 0], hem: [0, 0.110, 0], arms: [0, 0.328, -0.10] },
+  // ★ M-03 #2/#4/#12：
+  //   driver  [0.05, 0.378, 0.40] → [0.050, 0.4465, −0.050]（真髋：作者 0.150×0.85+0.405−FOOT；
+  //           z 由遗留错误 0.40 校正到实际站位 −0.030，并按 #12 外扩 0.02 → −0.050）
+  //   spearman[−0.05,0.378, 0.46] → [−0.050, 0.451, 0.080]（同理；z 0.060 外扩 → 0.080）
+  //   horses  z −0.30 → −0.24（随马群整体后移 0.06 同步跟随，保持相对枢轴不变）
+  R: { horses: [0, 0.168, -0.24], body: [0, 0.288, 0.02], driver: [0.050, 0.4465, -0.050], spearman: [-0.050, 0.451, 0.080], wheelL: [-0.26, 0.330, 0], wheelR: [0.26, 0.330, 0] },
   // ★ R-1 修复同步：counterweight 关节由 [0,0.250,-0.150] 改为箱体实际中心 [0,cwY,cwZ]；
   //   wheelL/R 的 y 由 0.060 改为 CANNON_HUB（=FOOT+外半径，与 R 车 joint.y===HUB 同规约）。
-  C: { trebuchet: [0, 0.308, 0], cart: [0, 0.114, 0], soldierL: [-0.25, 0.248, 0.09], soldierR: [0.25, 0.248, 0.09], counterweight: [0, 0.182, -0.105], wheelL: [-0.145, 0.160, 0.110], wheelR: [0.145, 0.160, 0.110] },
-  K: { body: [0, 0.378, 0], throne: [0, 0.028, 0], crown: [0, 0.964, 0], sword: [0.14, 0.434, -0.02], banner: [0, 0.394, 0], rArm: [0.14, 0.46, 0], capeHem: [0, 0.420, -0.010] }
+  // ★ M-03 #11：wheelL/R 的 z 由 0.110 校正为 0.000（轮几何整体在 z=0，轮心才是自转轴）。
+  C: { trebuchet: [0, 0.308, 0], cart: [0, 0.114, 0], soldierL: [-0.25, 0.248, 0.09], soldierR: [0.25, 0.248, 0.09], counterweight: [0, 0.182, -0.105], wheelL: [-0.145, 0.160, 0.000], wheelR: [0.145, 0.160, 0.000] },
+  // ★ M-03 #13：sword pivot → 剑柄握持段（作者 0.171+0.204−FOOT≈0.289，x 取剑身轴 0.162）；
+  //   rArm pivot → 真肩点（作者 FOOT+0.480 − FOOT = 0.480）。
+  K: { body: [0, 0.378, 0], throne: [0, 0.028, 0], crown: [0, 0.964, 0], sword: [0.162, 0.289, -0.018], banner: [0, 0.394, 0], rArm: [0.140, 0.480, 0.000], capeHem: [0, 0.420, -0.010] }
 };
 
 /**
@@ -1501,7 +1615,8 @@ function buildTemplate(type: string, side: string, lodLevel: number): any {
   const forceSingle = FORCE_SINGLE_TYPES.has(type);
 
   if (useMulti) {
-    mp = new MultiParts(forceSingle);
+    // ADR-α：白名单配件子组豁免 forceSingle（matte/metal 双族拆分，恢复金属高光）
+    mp = new MultiParts(forceSingle, ACCESSORY_WHITELIST[type]);
     P = mp.base;
   } else {
     P = new Parts(forceSingle);
@@ -1552,6 +1667,29 @@ function buildTemplate(type: string, side: string, lodLevel: number): any {
     const jointTable = SUBGROUP_JOINTS[type] || null;
     const parentTable = SUBGROUP_PARENTS[type] || null;
     const createdGroups: Record<string, any> = {};
+
+    // ★ M-03 D1（01 审计 C1 / 02 §9 #1）：**父链关节求和**。
+    //   原实现对每个子组统一做「几何 translate(−J) + Group.position = J」。
+    //   对**嵌套**子组（P.spear 挂在 armR 下）这是错的：父组 armR 已经把自己
+    //   摆到 J_armR，子组再把自身摆到 J_spear，两者叠加 ⇒ 几何被整体抬高 ΣJ_祖先
+    //   = [0.096, 0.505, 0]，P 的戈尖飞到 1.209（声明 0.70），root maxY 1.21。
+    //   修正：嵌套子组的 Group.position 改为（J_self − ΣJ_祖先），
+    //   于是 world = J_armR + (J_spear − J_armR) + (G − J_spear) = G（几何回到设计位），
+    //   且该子组的**世界旋转枢轴仍恰好是 J_spear**（戈绕握把转、随右臂摆），语义不变。
+    const ancestorSum = (name: string): number[] => {
+      const acc = [0, 0, 0];
+      if (!parentTable || !jointTable) return acc;
+      const seen = new Set<string>();
+      let cur = parentTable[name];
+      while (cur && !seen.has(cur)) {
+        seen.add(cur);
+        const j = jointTable[cur];
+        if (j) { acc[0] += j[0]; acc[1] += j[1]; acc[2] += j[2]; }
+        cur = parentTable[cur];
+      }
+      return acc;
+    };
+
     for (const name of Object.keys(allGroups)) {
       if (name === '_base') continue;
       const g = new THREE.Group();
@@ -1562,9 +1700,10 @@ function buildTemplate(type: string, side: string, lodLevel: number): any {
       // （修复障碍②：子组绕中心公转而非绕关节自转）。
       const joint = jointTable && jointTable[name];
       if (joint) {
+        const off = ancestorSum(name);
         const jx = joint[0], jy = joint[1], jz = joint[2];
         for (const m of meshes) m.geometry.translate(-jx, -jy, -jz);
-        g.position.set(jx, jy, jz);
+        g.position.set(jx - (off[0] || 0), jy - (off[1] || 0), jz - (off[2] || 0));
       }
       for (const m of meshes) g.add(m);
       createdGroups[name] = g;
@@ -1788,4 +1927,175 @@ export function disposePieceFactory(): void {
   }
   _templates.clear();
   _mapCache.clear();   // H3：_mapCache 不再常驻像素数据
+}
+
+/* ============================================================
+ * [Task M-01 · 取证调试钩子 —— 纯新增，零线上行为改动]
+ * ------------------------------------------------------------
+ * 用途：几何量化审计需要「零件级」AABB（合并成 Mesh 之后就再也拿不到单个零件），
+ *   因此在不触碰 buildTemplate / createPieceMesh 既有逻辑的前提下，新增两个
+ *   **仅用于取证**的子类与一个导出函数：
+ *     - RecordingParts    extends Parts      ：走与 Parts.add/_strutImpl 完全相同的
+ *       变换路径（含 -FOOT），但额外记录每个零件的 AABB / 材质名 / 三角形数；
+ *       永不调用 build()，因此不产生任何 Mesh。
+ *     - RecordingMultiParts extends MultiParts：get() 返回 RecordingParts。
+ *     - __debugCollectParts(type, side)：跑一次 BUILDERS[type]，返回零件级数据。
+ *   线上链路（createPieceMesh / buildTemplate / setPieceLod / disposePieceFactory）
+ *   一行未改；本段代码不被 src/** 任何模块 import，生产构建会被 esbuild tree-shake 掉。
+ *
+ * 移除方法：删除本段（从本注释块到文件末尾 __debugCollectParts 结束）即可，
+ *   其余代码无引用，无副作用。
+ * ============================================================ */
+
+/** 材质对象 -> 可读名（按 M/K 表的键反查；查不到退回色值） */
+let _dbgMatMap: Map<any, string> | null = null;
+
+function _dbgBuildMatMap(mats: any): Map<any, string> {
+  const m = new Map<any, string>();
+  const collect = (obj: any, prefix: string): void => {
+    if (!obj || typeof obj !== 'object') return;
+    for (const k of Object.keys(obj)) {
+      const v = obj[k];
+      if (!v || typeof v !== 'object') continue;
+      if (Array.isArray(v)) { for (const mm of v) m.set(mm, prefix + k); }
+      else if (v.color !== undefined) m.set(v, prefix + k);
+    }
+  };
+  collect(mats.common, 'common.');
+  collect(mats.r, 'r.');
+  collect(mats.b, 'b.');
+  return m;
+}
+
+function _dbgMatName(mat: any): string {
+  if (!mat) return 'unknown';
+  const hit = _dbgMatMap ? _dbgMatMap.get(mat) : undefined;
+  if (hit) return hit;
+  if (mat.name) return String(mat.name);
+  if (mat.color && mat.color.getHexString) return '#' + mat.color.getHexString();
+  return 'unknown';
+}
+
+function _dbgTris(g: any): number {
+  const pos = g && g.attributes ? g.attributes.position : null;
+  if (!pos) return 0;
+  return g.index ? Math.floor(g.index.count / 3) : Math.floor(pos.count / 3);
+}
+
+/** 记录型 Parts：与 Parts 同一变换路径，额外记录零件 AABB。不调用 build()。 */
+class RecordingParts extends Parts {
+  partGroup: string;
+  parts: any[];
+  _kind: string;
+
+  constructor(partGroup: string, forceSingle = false) {
+    super(forceSingle);
+    this.partGroup = partGroup;
+    this.parts = [];
+    this._kind = 'add';
+  }
+
+  /** 记录刚入列零件的 AABB（list 末位） */
+  _dbgRecord(kind: string, mat: any, meta: any): void {
+    const entry = this.list[this.list.length - 1];
+    if (!entry) return;
+    const g = entry.geom;
+    g.computeBoundingBox();
+    const bb = g.boundingBox;
+    if (!bb) return;
+    this.parts.push({
+      i: this.parts.length,
+      group: this.partGroup,
+      kind: kind,
+      mat: _dbgMatName(mat),
+      metalness: mat && typeof mat.metalness === 'number' ? mat.metalness : null,
+      double: !!(mat && mat.side === THREE.DoubleSide),
+      tris: _dbgTris(g),
+      min: [bb.min.x, bb.min.y, bb.min.z],
+      max: [bb.max.x, bb.max.y, bb.max.z],
+      meta: meta || null
+    });
+  }
+
+  override add(geom: any, mat: any, opts: any): any {
+    const n0 = this.list.length;
+    const r = super.add(geom, mat, opts);
+    if (this.list.length > n0) this._dbgRecord('add', mat, { opts: opts || null });
+    return r;
+  }
+
+  override strut(mat: any, a: any, b: any, rTop: number, rBot: number, seg: number = 12): this {
+    this._kind = 'strut';
+    return super.strut(mat, a, b, rTop, rBot, seg);
+  }
+
+  override strutKeep(mat: any, a: any, b: any, rTop: number, rBot: number, seg: number = 12): this {
+    this._kind = 'strutKeep';
+    return super.strutKeep(mat, a, b, rTop, rBot, seg);
+  }
+
+  override _strutImpl(mat: any, a: any, b: any, rTop: number, rBot: number, seg: number, applyLod: boolean): this {
+    const n0 = this.list.length;
+    const r = super._strutImpl(mat, a, b, rTop, rBot, seg, applyLod);
+    if (this.list.length > n0) {
+      this._dbgRecord(this._kind, mat, { a: a, b: b, rTop: rTop, rBot: rBot, seg: seg });
+    }
+    return r;
+  }
+}
+
+/** 记录型 MultiParts：get() 产出 RecordingParts，从而按子组名归集零件。 */
+class RecordingMultiParts extends MultiParts {
+  override get(name: string): any {
+    if (!this.groups.has(name)) this.groups.set(name, new RecordingParts(name, this.forceSingle));
+    return this.groups.get(name);
+  }
+}
+
+/**
+ * 【Task M-01 取证专用】采集单个兵种的**零件级**几何数据。
+ *
+ * 返回值坐标系说明（与线上一致）：
+ *   - 零件 AABB 已含 Parts.add/_strutImpl 的 -FOOT 偏移（即"去基座"后的作者坐标）；
+ *   - 尚未做子组关节平移（-joint），故 AABB 位于**棋子 root 局部系**；
+ *     线上子组世界 AABB = 本 AABB（几何 -joint 后再由 Group.position=+joint 抵消）。
+ *
+ * 固定 lodLevel=0（全段数），与 createPieceMesh 默认档一致。
+ *
+ * @param type 兵种 K/A/B/N/C/R/P
+ * @param side 'r' | 'b'
+ */
+export function __debugCollectParts(type: string, side: string): any {
+  const mats = getMaterials();
+  const M = mats.side(side);
+  const K = mats.common;
+  _dbgMatMap = _dbgBuildMatMap(mats);
+  const prevLod = _lodLevel;
+  _lodLevel = 0;                       // 取证口径：恒 lod0
+  try {
+    const mp = new RecordingMultiParts(false);
+    const fn = BUILDERS[type] || BUILDERS.P;
+    fn(mp, M, K, side);
+    const groups: Record<string, any> = {};
+    let total = 0;
+    for (const [name, rp] of mp.groups) {
+      const arr = (rp as any).parts || [];
+      groups[name] = { name: name, parts: arr };
+      total += arr.length;
+    }
+    return {
+      type: type,
+      side: side,
+      foot: FOOT,
+      lodLevel: 0,
+      joints: SUBGROUP_JOINTS[type] || {},
+      parents: SUBGROUP_PARENTS[type] || {},
+      groupNames: Array.from(mp.groups.keys()),
+      groups: groups,
+      partCount: total
+    };
+  } finally {
+    _lodLevel = prevLod;
+    _dbgMatMap = null;
+  }
 }
