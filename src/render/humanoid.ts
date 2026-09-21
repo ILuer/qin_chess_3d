@@ -114,7 +114,16 @@ export interface HumanoidSpec {
   joints: JointSpec[];
 }
 
-/** 姿态预设 → 关节初始旋转（S1 仅声明；实际发射见 `buildHumanoid`）。 */
+/**
+ * 姿态预设 → 关节初始旋转（S1 起仅**声明**；S2 为各型 spec 标注姿态来源）。
+ * 逐型归口（S2 · M-08d）：
+ *   stand   → P/A（立姿）+ R 乘员（御手/持戈兵，立姿）
+ *   ride    → N 骑手（骑姿）
+ *   operate → C 操作兵（推车/绞盘姿态）
+ *   sit     → K 坐姿人物
+ *   walk    → 通用踏步（预留）
+ * ⚠ S2 **仍为零几何改动**：本表只记录意图，不产生任何初始旋转（发射仍见 §3/§4 spec 数值）。
+ */
 export const POSE_PRESETS: Record<PoseName, Record<string, Vec3>> = {
   stand: {},
   walk: {},
@@ -225,7 +234,11 @@ export const RIG_SEMANTIC: Record<string, Semantic | 'attach'> = {
 
 /**
  * 逐型的**声明式**完整骨架树（name → parent）。含已物化（T0）与未物化（T1/T2/attach）节点。
- * S1 只声明 P/A（人形）；S2+ 补 N/R/C/K。
+ *   S1 声明 P/A（人形）；S2（M-08d）补 N/R/C/K/B。
+ *
+ * ★ S2 纪律：**已物化 ⊆ 已声明**（`check-piece-contract.mjs` ⑧-I2）对全部 7 型成立。
+ *   逐型的「子组名」在此声明其语义父链；具体映射（哪个 spec 关节 → 哪个子组）见 §4。
+ *   父子仅作**语义血统**用，不参与几何（几何锚定仍走 `SUBGROUP_JOINTS`，红线 JOINT）。
  */
 export const HUMAN_RIG_TREE: Record<string, Record<string, string>> = {
   P: {
@@ -242,6 +255,40 @@ export const HUMAN_RIG_TREE: Record<string, Record<string, string>> = {
     arms: 'torso',
     sword: 'handR',
     shield: 'forearmL'
+  },
+  // N 骑兵（马 + 骑手）：骑手挂在马身下（语义），四腿挂马身。
+  N: {
+    ...HUMAN_RIG_STD,
+    bodyHorse: 'idleGroup',
+    rider: 'bodyHorse',
+    legFL: 'bodyHorse', legFR: 'bodyHorse', legBL: 'bodyHorse', legBR: 'bodyHorse'
+  },
+  // R 战车（双马 + 车体 + 御手 + 持戈兵 + 轮）。
+  R: {
+    ...HUMAN_RIG_STD,
+    horses: 'idleGroup', body: 'idleGroup',
+    driver: 'body', spearman: 'body',
+    wheelL: 'body', wheelR: 'body'
+  },
+  // C 抛石车（器械 + 两名操作兵）。
+  C: {
+    ...HUMAN_RIG_STD,
+    trebuchet: 'idleGroup', cart: 'trebuchet',
+    soldierL: 'cart', soldierR: 'cart',
+    counterweight: 'trebuchet', wheelL: 'cart', wheelR: 'cart'
+  },
+  // K 主帅（坐姿人物 body + 右臂 rArm + 王座/冠/剑/旗/披风）。
+  K: {
+    ...HUMAN_RIG_STD,
+    body: 'idleGroup', throne: 'idleGroup',
+    crown: 'head', sword: 'handR', banner: 'torso', rArm: 'torso', capeHem: 'torso'
+  },
+  // B 象/相（书生）：★ S2 实测**无独立人形骨架**（躯干为 Lathe 车削深衣单体，
+  //   无 per-limb 骨段）→ 不接 spec（详见 §4 末「B 判定」）。此处仅补声明树，
+  //   保证「已物化 ⊆ 已声明」对 B 亦成立。
+  B: {
+    ...HUMAN_RIG_STD,
+    bodyRobe: 'idleGroup', hem: 'waist', arms: 'torso'
   }
 };
 
@@ -425,3 +472,304 @@ export const ADVISOR_SPEC: HumanoidSpec = {
     }
   ]
 };
+
+/* ============================================================
+ * §4 逐型 spec 数据（S2 · M-08d：N 骑手 / R 乘员 / C 操作兵 / K 坐姿接入同一 Rig）
+ * ------------------------------------------------------------
+ * ★ S2「等价」纪律（09 §8.5 S2）：几何判据与 S1 **完全一致 —— 逐零件等同**。
+ *   ① 参数化类型（R 御手/持戈兵、C 操作兵）用 **spec 工厂**（runtime 变量同源），
+ *      保证 `ox/oz/sc/oy/mx` 参与的运算**与内联同一套 IEEE-754 顺序**（bit 级一致）；
+ *      常量类型（N 骑手 / K 坐姿）用**字面量 spec**。
+ *   ② `grouping` **只路由到该型已物化的真实子组**（零新子组）：单子组类型（N.rider、
+ *      R.driver/spearman、C.soldierL/R）的多个关节全映射到同一子组；K 映射 body/rArm。
+ *   ③ `anchor` = 该关节所属子组的 `SUBGROUP_JOINTS[type][group]`（供契约 I2 断言；
+ *      `buildHumanoid` 不消费 anchor —— 几何锚定仍走 `SUBGROUP_JOINTS`）。
+ *   ④ **武器/甲裙/头饰/旗一律继续内联**（长戟 N、长戈 R、介帻/兜鍪等归类保留）。
+ *   ⑤ `grouping` 键 = `joints[].name`（契约 I2 断言）。
+ *
+ * ⚠ 与 P/A（§3）唯一差异：单子组类型的多个关节共享一个 `Parts` 收集器 →
+ *   子组内**发射顺序**可能与本文件旧内联路径不同（如 R 持戈兵的长戈居中），
+ *   但**零件集合与每个零件的几何逐项相同**（等价判据 = 零件级无序比对，
+ *   见 `devtools/compare-humanoid-rig.mjs`；S1 起即按无序集合比对）。
+ * ============================================================ */
+
+/** 'N' 骑手（`buildHorse` 的 `rider` 子组）—— 骑姿。字面量 spec，逐点等于 rider 内联。
+ *  不含**长戟**（武器，`pieceFactory` 内联续写）。 */
+export const RIDER_SPEC: HumanoidSpec = {
+  scale: 1,
+  side: 'r',
+  pose: 'ride',
+  grouping: { legs: 'rider', torso: 'rider', arms: 'rider' },
+  joints: [
+    {
+      name: 'legs', semantic: 'hip', parent: 'torso', anchor: [0, 0.328, 0],
+      segments: [
+        { role: 'bone', prim: 'strut', material: 'clothDeep', a: [0.062, 0.430, 0.005], b: [0.078, 0.300, -0.020], rTop: 0.034, rBot: 0.030, seg: 8 },
+        { role: 'bone', prim: 'strut', material: 'clothDeep', a: [-0.062, 0.430, 0.005], b: [-0.078, 0.300, -0.020], rTop: 0.034, rBot: 0.030, seg: 8 },
+        { role: 'bone', prim: 'strut', material: 'clothDeep', a: [0.078, 0.300, -0.020], b: [0.072, 0.180, -0.018], rTop: 0.028, rBot: 0.024, seg: 8 },
+        { role: 'bone', prim: 'strut', material: 'clothDeep', a: [-0.078, 0.300, -0.020], b: [-0.072, 0.180, -0.018], rTop: 0.028, rBot: 0.024, seg: 8 },
+        { role: 'apparel', prim: 'box', material: 'bootSole', w: 0.052, h: 0.030, d: 0.080, pos: [0.072, 0.150, -0.018] },
+        { role: 'apparel', prim: 'box', material: 'bootSole', w: 0.052, h: 0.030, d: 0.080, pos: [-0.072, 0.150, -0.018] }
+      ]
+    },
+    {
+      name: 'torso', semantic: 'torso', parent: 'idleGroup', anchor: [0, 0.328, 0],
+      segments: [
+        { role: 'apparel', prim: 'sph', material: 'cloth', r: 0.070, sw: 10, sh: 8, pos: [0, 0.490, 0.020] },
+        { role: 'bone', prim: 'cyl', material: 'clothDeep', rt: 0.080, rb: 0.092, h: 0.080, seg: 12, pos: [0, 0.510, 0.012] },
+        { role: 'bone', prim: 'strut', material: 'cloth', a: [0.078, 0.482, 0.005], b: [0.116, 0.338, -0.098], rTop: 0.034, rBot: 0.026, seg: 8 },
+        { role: 'bone', prim: 'strut', material: 'cloth', a: [-0.078, 0.482, 0.005], b: [-0.116, 0.338, -0.098], rTop: 0.034, rBot: 0.026, seg: 8 },
+        { role: 'apparel', prim: 'cyl', material: 'armorDeep', rt: 0.082, rb: 0.096, h: 0.160, seg: 12, pos: [0, 0.580, 0.010] },
+        { role: 'apparel', prim: 'cyl', material: 'armor', rt: 0.101, rb: 0.104, h: 0.020, seg: 12, pos: [0, 0.548, 0.010] },
+        { role: 'apparel', prim: 'cyl', material: 'armor', rt: 0.099, rb: 0.102, h: 0.020, seg: 12, pos: [0, 0.608, 0.010] },
+        { role: 'apparel', prim: 'sph', material: 'armorDeep', r: 0.045, sw: 10, sh: 8, pos: [0.086, 0.652, 0.010] },
+        { role: 'apparel', prim: 'sph', material: 'armorDeep', r: 0.045, sw: 10, sh: 8, pos: [-0.086, 0.652, 0.010] },
+        { role: 'bone', prim: 'cyl', material: 'skin', rt: 0.026, rb: 0.028, h: 0.030, seg: 8, pos: [0, 0.676, 0.008] },
+        { role: 'bone', prim: 'sph', material: 'skin', r: 0.050, sw: 12, sh: 10, pos: [0, 0.716, 0.002] },
+        { role: 'apparel', prim: 'cyl', material: 'armorDeep', rt: 0.058, rb: 0.070, h: 0.032, seg: 12, pos: [0, 0.704, 0.002] },
+        { role: 'apparel', prim: 'dome', material: 'armor', r: 0.056, sw: 12, sh: 7, frac: 0.58, pos: [0, 0.732, 0.002] },
+        { role: 'apparel', prim: 'cyl', material: 'plume', rt: 0.000, rb: 0.020, h: 0.062, seg: 8, pos: [0, 0.796, 0.002] }
+      ]
+    },
+    {
+      name: 'arms', semantic: 'shoulder', parent: 'torso', anchor: [0, 0.328, 0],
+      segments: [
+        { role: 'bone', prim: 'strut', material: 'armorDeep', a: [0.088, 0.638, 0.005], b: [0.110, 0.590, -0.040], rTop: 0.030, rBot: 0.026, seg: 8 },
+        { role: 'bone', prim: 'sph', material: 'armorDeep', r: 0.024, sw: 8, sh: 6, pos: [0.110, 0.590, -0.040] },
+        { role: 'bone', prim: 'strut', material: 'armorDeep', a: [0.110, 0.590, -0.040], b: [0.132, 0.548, -0.086], rTop: 0.024, rBot: 0.020, seg: 8 },
+        { role: 'bone', prim: 'strut', material: 'armorDeep', a: [-0.088, 0.638, 0.005], b: [-0.104, 0.598, 0.020], rTop: 0.030, rBot: 0.026, seg: 8 },
+        { role: 'bone', prim: 'sph', material: 'armorDeep', r: 0.024, sw: 8, sh: 6, pos: [-0.104, 0.598, 0.020] },
+        { role: 'bone', prim: 'strut', material: 'armorDeep', a: [-0.104, 0.598, 0.020], b: [-0.120, 0.556, 0.060], rTop: 0.024, rBot: 0.020, seg: 8 },
+        { role: 'bone', prim: 'sph', material: 'skin', r: 0.030, sw: 10, sh: 8, pos: [0.136, 0.542, -0.094] }
+      ]
+    }
+  ]
+};
+
+/** 御手 spec 工厂（R `driver` 子组）—— 立姿，双手握缰。参数与 `buildDriver` 同序，
+ *  数值逐点等于内联（`sc = s||1`、全部 `×sc` + `oy`）。无武器 → 全量 spec。 */
+export function driverSpec(ox: number, oz: number, s: number, oy = 0.086): HumanoidSpec {
+  const sc = s || 1.0;
+  return {
+    scale: 1,
+    side: 'r',
+    pose: 'stand',
+    grouping: { legs: 'driver', torso: 'driver', arms: 'driver' },
+    joints: [
+      {
+        name: 'legs', semantic: 'hip', parent: 'torso', anchor: [0.050, 0.4465, -0.050],
+        segments: [
+          { role: 'bone', prim: 'strut', material: 'clothDeep', a: [ox, 0.150 * sc + oy, oz], b: [ox, 0.080 * sc + oy, oz], rTop: 0.034, rBot: 0.030, seg: 8 },
+          { role: 'bone', prim: 'strut', material: 'clothDeep', a: [ox + 0.020 * sc, 0.150 * sc + oy, oz], b: [ox + 0.022 * sc, 0.080 * sc + oy, oz], rTop: 0.028, rBot: 0.024, seg: 8 },
+          { role: 'apparel', prim: 'box', material: 'bootSole', w: 0.052 * sc, h: 0.024 * sc, d: 0.084 * sc, pos: [ox + 0.010 * sc, 0.012 * sc + oy, oz + 0.012 * sc] }
+        ]
+      },
+      {
+        name: 'torso', semantic: 'torso', parent: 'idleGroup', anchor: [0.050, 0.4465, -0.050],
+        segments: [
+          { role: 'apparel', prim: 'cyl', material: 'clothDeep', rt: 0.058 * sc, rb: 0.080 * sc, h: 0.160 * sc, seg: 10, pos: [ox, 0.080 * sc + oy, oz] },
+          { role: 'apparel', prim: 'tor', material: 'leather', R: 0.080 * sc, t: 0.012 * sc, rs: 4, ts: 12, pos: [ox, 0.156 * sc + oy, oz], rot: [Math.PI / 2, 0, 0] },
+          { role: 'bone', prim: 'cyl', material: 'clothDeep', rt: 0.066 * sc, rb: 0.072 * sc, h: 0.060 * sc, seg: 10, pos: [ox, 0.205 * sc + oy, oz] },
+          { role: 'apparel', prim: 'cyl', material: 'armorDeep', rt: 0.056 * sc, rb: 0.066 * sc, h: 0.140 * sc, seg: 10, pos: [ox, 0.256 * sc + oy, oz] },
+          { role: 'apparel', prim: 'cyl', material: 'armor', rt: 0.068 * sc, rb: 0.072 * sc, h: 0.018 * sc, seg: 10, pos: [ox, 0.216 * sc + oy, oz] },
+          { role: 'apparel', prim: 'cyl', material: 'armor', rt: 0.066 * sc, rb: 0.070 * sc, h: 0.018 * sc, seg: 10, pos: [ox, 0.264 * sc + oy, oz] },
+          { role: 'apparel', prim: 'sph', material: 'armorDeep', r: 0.038 * sc, sw: 9, sh: 7, pos: [ox + 0.072 * sc, 0.308 * sc + oy, oz] },
+          { role: 'apparel', prim: 'sph', material: 'armorDeep', r: 0.038 * sc, sw: 9, sh: 7, pos: [ox - 0.072 * sc, 0.308 * sc + oy, oz] },
+          { role: 'apparel', prim: 'cyl', material: 'accentDim', rt: 0.026 * sc, rb: 0.028 * sc, h: 0.024 * sc, seg: 8, pos: [ox, 0.350 * sc + oy, oz] },
+          { role: 'bone', prim: 'cyl', material: 'skin', rt: 0.024 * sc, rb: 0.026 * sc, h: 0.028 * sc, seg: 8, pos: [ox, 0.376 * sc + oy, oz] },
+          { role: 'bone', prim: 'sph', material: 'skin', r: 0.044 * sc, sw: 10, sh: 8, pos: [ox, 0.416 * sc + oy, oz - 0.004 * sc] },
+          { role: 'apparel', prim: 'dome', material: 'armor', r: 0.042 * sc, sw: 10, sh: 6, frac: 0.56, pos: [ox, 0.436 * sc + oy, oz - 0.004 * sc] }
+        ]
+      },
+      {
+        name: 'arms', semantic: 'shoulder', parent: 'torso', anchor: [0.050, 0.4465, -0.050],
+        segments: [
+          { role: 'bone', prim: 'strut', material: 'armorDeep', a: [ox + 0.068 * sc, 0.304 * sc + oy, oz], b: [ox + 0.072 * sc, 0.278 * sc + oy, oz - 0.040 * sc], rTop: 0.026 * sc, rBot: 0.022 * sc, seg: 8 },
+          { role: 'bone', prim: 'sph', material: 'armorDeep', r: 0.022 * sc, sw: 8, sh: 6, pos: [ox + 0.072 * sc, 0.278 * sc + oy, oz - 0.040 * sc] },
+          { role: 'bone', prim: 'strut', material: 'armorDeep', a: [ox + 0.072 * sc, 0.278 * sc + oy, oz - 0.040 * sc], b: [ox + 0.075 * sc, 0.248 * sc + oy, oz - 0.080 * sc], rTop: 0.022 * sc, rBot: 0.018 * sc, seg: 8 },
+          { role: 'bone', prim: 'strut', material: 'armorDeep', a: [ox - 0.068 * sc, 0.304 * sc + oy, oz], b: [ox - 0.066 * sc, 0.280 * sc + oy, oz - 0.034 * sc], rTop: 0.026 * sc, rBot: 0.022 * sc, seg: 8 },
+          { role: 'bone', prim: 'sph', material: 'armorDeep', r: 0.022 * sc, sw: 8, sh: 6, pos: [ox - 0.066 * sc, 0.280 * sc + oy, oz - 0.034 * sc] },
+          { role: 'bone', prim: 'strut', material: 'armorDeep', a: [ox - 0.066 * sc, 0.280 * sc + oy, oz - 0.034 * sc], b: [ox - 0.065 * sc, 0.252 * sc + oy, oz - 0.070 * sc], rTop: 0.022 * sc, rBot: 0.018 * sc, seg: 8 },
+          { role: 'bone', prim: 'sph', material: 'skin', r: 0.026 * sc, sw: 9, sh: 7, pos: [ox + 0.077 * sc, 0.244 * sc + oy, oz - 0.082 * sc] },
+          { role: 'bone', prim: 'sph', material: 'skin', r: 0.026 * sc, sw: 9, sh: 7, pos: [ox - 0.067 * sc, 0.248 * sc + oy, oz - 0.072 * sc] }
+        ]
+      }
+    ]
+  };
+}
+
+/** 持戈兵 spec 工厂（R `spearman` 子组）—— 立姿，右臂持戈、左臂垂放。
+ *  数值逐点等于内联（`sc = s||1`）。**长戈为武器 → 由 `pieceFactory` 内联续写**，
+ *  故本 spec 到左臂为止（`armR`/`armL` 两关节；长戈旧位置在两臂之间）。 */
+export function spearmanSpec(ox: number, oz: number, s: number, oy = 0.086): HumanoidSpec {
+  const sc = s || 1.0;
+  return {
+    scale: 1,
+    side: 'r',
+    pose: 'stand',
+    grouping: { legs: 'spearman', torso: 'spearman', armR: 'spearman', armL: 'spearman' },
+    joints: [
+      {
+        name: 'legs', semantic: 'hip', parent: 'torso', anchor: [-0.050, 0.451, 0.080],
+        segments: [
+          { role: 'bone', prim: 'strut', material: 'clothDeep', a: [ox, 0.150 * sc + oy, oz], b: [ox, 0.080 * sc + oy, oz], rTop: 0.034, rBot: 0.030, seg: 8 },
+          { role: 'bone', prim: 'strut', material: 'clothDeep', a: [ox + 0.020 * sc, 0.150 * sc + oy, oz], b: [ox + 0.022 * sc, 0.080 * sc + oy, oz], rTop: 0.028, rBot: 0.024, seg: 8 },
+          { role: 'apparel', prim: 'box', material: 'bootSole', w: 0.052 * sc, h: 0.024 * sc, d: 0.084 * sc, pos: [ox + 0.010 * sc, 0.012 * sc + oy, oz + 0.012 * sc] }
+        ]
+      },
+      {
+        name: 'torso', semantic: 'torso', parent: 'idleGroup', anchor: [-0.050, 0.451, 0.080],
+        segments: [
+          { role: 'apparel', prim: 'cyl', material: 'clothDeep', rt: 0.060 * sc, rb: 0.082 * sc, h: 0.165 * sc, seg: 10, pos: [ox, 0.082 * sc + oy, oz] },
+          { role: 'apparel', prim: 'tor', material: 'leather', R: 0.082 * sc, t: 0.012 * sc, rs: 4, ts: 12, pos: [ox, 0.162 * sc + oy, oz], rot: [Math.PI / 2, 0, 0] },
+          { role: 'bone', prim: 'cyl', material: 'clothDeep', rt: 0.068 * sc, rb: 0.074 * sc, h: 0.060 * sc, seg: 10, pos: [ox, 0.208 * sc + oy, oz] },
+          { role: 'apparel', prim: 'cyl', material: 'armorDeep', rt: 0.058 * sc, rb: 0.068 * sc, h: 0.145 * sc, seg: 10, pos: [ox, 0.258 * sc + oy, oz] },
+          { role: 'apparel', prim: 'cyl', material: 'armor', rt: 0.070 * sc, rb: 0.074 * sc, h: 0.018 * sc, seg: 10, pos: [ox, 0.218 * sc + oy, oz] },
+          { role: 'apparel', prim: 'cyl', material: 'armor', rt: 0.068 * sc, rb: 0.072 * sc, h: 0.018 * sc, seg: 10, pos: [ox, 0.266 * sc + oy, oz] },
+          { role: 'apparel', prim: 'sph', material: 'armorDeep', r: 0.040 * sc, sw: 9, sh: 7, pos: [ox + 0.074 * sc, 0.310 * sc + oy, oz] },
+          { role: 'apparel', prim: 'sph', material: 'armorDeep', r: 0.040 * sc, sw: 9, sh: 7, pos: [ox - 0.074 * sc, 0.310 * sc + oy, oz] },
+          { role: 'apparel', prim: 'cyl', material: 'accentDim', rt: 0.026 * sc, rb: 0.028 * sc, h: 0.024 * sc, seg: 8, pos: [ox, 0.352 * sc + oy, oz] },
+          { role: 'bone', prim: 'cyl', material: 'skin', rt: 0.024 * sc, rb: 0.026 * sc, h: 0.028 * sc, seg: 8, pos: [ox, 0.378 * sc + oy, oz] },
+          { role: 'bone', prim: 'sph', material: 'skin', r: 0.044 * sc, sw: 10, sh: 8, pos: [ox, 0.418 * sc + oy, oz - 0.004 * sc] },
+          { role: 'apparel', prim: 'dome', material: 'armor', r: 0.042 * sc, sw: 10, sh: 6, frac: 0.56, pos: [ox, 0.438 * sc + oy, oz - 0.004 * sc] }
+        ]
+      },
+      {
+        name: 'armR', semantic: 'shoulder', parent: 'torso', anchor: [-0.050, 0.451, 0.080],
+        segments: [
+          { role: 'bone', prim: 'strut', material: 'armorDeep', a: [ox + 0.070 * sc, 0.306 * sc + oy, oz], b: [ox + 0.098 * sc, 0.288 * sc + oy, oz - 0.040 * sc], rTop: 0.026 * sc, rBot: 0.022 * sc, seg: 8 },
+          { role: 'bone', prim: 'sph', material: 'armorDeep', r: 0.022 * sc, sw: 8, sh: 6, pos: [ox + 0.098 * sc, 0.288 * sc + oy, oz - 0.040 * sc] },
+          { role: 'bone', prim: 'strut', material: 'armorDeep', a: [ox + 0.098 * sc, 0.288 * sc + oy, oz - 0.040 * sc], b: [ox + 0.124 * sc, 0.272 * sc + oy, oz - 0.084 * sc], rTop: 0.022 * sc, rBot: 0.018 * sc, seg: 8 },
+          { role: 'bone', prim: 'sph', material: 'skin', r: 0.026 * sc, sw: 9, sh: 7, pos: [ox + 0.126 * sc, 0.268 * sc + oy, oz - 0.086 * sc] }
+        ]
+      },
+      {
+        name: 'armL', semantic: 'shoulder', parent: 'torso', anchor: [-0.050, 0.451, 0.080],
+        segments: [
+          { role: 'bone', prim: 'strut', material: 'armorDeep', a: [ox - 0.070 * sc, 0.306 * sc + oy, oz], b: [ox - 0.088 * sc, 0.260 * sc + oy, oz - 0.022 * sc], rTop: 0.026 * sc, rBot: 0.022 * sc, seg: 8 },
+          { role: 'bone', prim: 'sph', material: 'armorDeep', r: 0.022 * sc, sw: 8, sh: 6, pos: [ox - 0.088 * sc, 0.260 * sc + oy, oz - 0.022 * sc] },
+          { role: 'bone', prim: 'strut', material: 'armorDeep', a: [ox - 0.088 * sc, 0.260 * sc + oy, oz - 0.022 * sc], b: [ox - 0.102 * sc, 0.210 * sc + oy, oz - 0.044 * sc], rTop: 0.022 * sc, rBot: 0.018 * sc, seg: 8 },
+          { role: 'bone', prim: 'sph', material: 'skin', r: 0.026 * sc, sw: 9, sh: 7, pos: [ox - 0.104 * sc, 0.206 * sc + oy, oz - 0.046 * sc] }
+        ]
+      }
+    ]
+  };
+}
+
+/** 操作兵 spec 工厂（C `soldierL`/`soldierR` 子组）—— 推车/转绞盘姿态。
+ *  `group` 决定 grouping 目标（`soldierL` 或 `soldierR`）。数值逐点等于内联
+ *  （`sc = s||0.85`、`mx = mirrorX||1`、`legH = 0.038*sc`）。无武器 → 全量 spec。 */
+export function cannonSoldierSpec(group: string, ox: number, oy: number, s: number, mirrorX: number): HumanoidSpec {
+  const sc = s || 0.85;
+  const mx = mirrorX || 1;
+  const legH = 0.038 * sc;
+  const anchor: Vec3 = group === 'soldierR' ? [0.25, 0.248, 0.09] : [-0.25, 0.248, 0.09];
+  return {
+    scale: 1,
+    side: 'r',
+    pose: 'operate',
+    grouping: { legs: group, torso: group, arms: group },
+    joints: [
+      {
+        name: 'legs', semantic: 'hip', parent: 'torso', anchor,
+        segments: [
+          { role: 'bone', prim: 'strut', material: 'clothDeep', a: [ox - 0.024 * sc * mx, oy + legH + 0.130 * sc, 0], b: [ox - 0.024 * sc * mx, oy + legH + 0.060 * sc, 0], rTop: 0.028 * sc, rBot: 0.024 * sc, seg: 8 },
+          { role: 'bone', prim: 'strut', material: 'clothDeep', a: [ox + 0.024 * sc * mx, oy + legH + 0.130 * sc, 0], b: [ox + 0.024 * sc * mx, oy + legH + 0.060 * sc, 0], rTop: 0.028 * sc, rBot: 0.024 * sc, seg: 8 },
+          { role: 'bone', prim: 'sph', material: 'clothDeep', r: 0.020 * sc, sw: 8, sh: 6, pos: [ox - 0.024 * sc * mx, oy + legH + 0.060 * sc, 0] },
+          { role: 'bone', prim: 'sph', material: 'clothDeep', r: 0.020 * sc, sw: 8, sh: 6, pos: [ox + 0.024 * sc * mx, oy + legH + 0.060 * sc, 0] },
+          { role: 'bone', prim: 'strut', material: 'clothDeep', a: [ox - 0.024 * sc * mx, oy + legH + 0.060 * sc, 0], b: [ox - 0.024 * sc * mx, oy + legH + 0.020 * sc, 0], rTop: 0.024 * sc, rBot: 0.020 * sc, seg: 8 },
+          { role: 'bone', prim: 'strut', material: 'clothDeep', a: [ox + 0.024 * sc * mx, oy + legH + 0.060 * sc, 0], b: [ox + 0.024 * sc * mx, oy + legH + 0.020 * sc, 0], rTop: 0.024 * sc, rBot: 0.020 * sc, seg: 8 },
+          { role: 'apparel', prim: 'box', material: 'bootSole', w: 0.034 * sc, h: 0.022 * sc, d: 0.058 * sc, pos: [ox - 0.024 * sc * mx, oy + 0.011 * sc, -0.016 * sc] },
+          { role: 'apparel', prim: 'box', material: 'bootSole', w: 0.034 * sc, h: 0.022 * sc, d: 0.058 * sc, pos: [ox + 0.024 * sc * mx, oy + 0.011 * sc, -0.016 * sc] }
+        ]
+      },
+      {
+        name: 'torso', semantic: 'torso', parent: 'idleGroup', anchor,
+        segments: [
+          { role: 'apparel', prim: 'cyl', material: 'clothDeep', rt: 0.052 * sc, rb: 0.072 * sc, h: 0.140 * sc, seg: 10, pos: [ox, oy + legH + 0.070 * sc, 0] },
+          { role: 'apparel', prim: 'tor', material: 'leather', R: 0.072 * sc, t: 0.010 * sc, rs: 4, ts: 10, pos: [ox, oy + legH + 0.138 * sc, 0], rot: [Math.PI / 2, 0, 0] },
+          { role: 'bone', prim: 'cyl', material: 'clothDeep', rt: 0.058 * sc, rb: 0.064 * sc, h: 0.050 * sc, seg: 10, pos: [ox, oy + legH + 0.170 * sc, 0.016 * mx] },
+          { role: 'apparel', prim: 'cyl', material: 'armorDeep', rt: 0.050 * sc, rb: 0.060 * sc, h: 0.130 * sc, seg: 10, pos: [ox, oy + legH + 0.222 * sc, 0.016 * mx] },
+          { role: 'apparel', prim: 'cyl', material: 'armor', rt: 0.062 * sc, rb: 0.066 * sc, h: 0.016 * sc, seg: 10, pos: [ox, oy + legH + 0.186 * sc, 0.016 * mx] },
+          { role: 'apparel', prim: 'cyl', material: 'armor', rt: 0.060 * sc, rb: 0.064 * sc, h: 0.016 * sc, seg: 10, pos: [ox, oy + legH + 0.228 * sc, 0.016 * mx] },
+          { role: 'apparel', prim: 'sph', material: 'armorDeep', r: 0.034 * sc, sw: 9, sh: 7, pos: [ox + 0.062 * sc * mx, oy + legH + 0.268 * sc, 0.016 * mx] },
+          { role: 'apparel', prim: 'sph', material: 'armorDeep', r: 0.034 * sc, sw: 9, sh: 7, pos: [ox - 0.062 * sc * mx, oy + legH + 0.268 * sc, 0.016 * mx] },
+          { role: 'apparel', prim: 'cyl', material: 'accentDim', rt: 0.024 * sc, rb: 0.026 * sc, h: 0.022 * sc, seg: 8, pos: [ox, oy + legH + 0.304 * sc, 0.018 * mx] },
+          { role: 'bone', prim: 'cyl', material: 'skin', rt: 0.022 * sc, rb: 0.024 * sc, h: 0.026 * sc, seg: 8, pos: [ox, oy + legH + 0.326 * sc, 0.018 * mx] },
+          { role: 'bone', prim: 'sph', material: 'skin', r: 0.040 * sc, sw: 10, sh: 8, pos: [ox, oy + legH + 0.362 * sc, 0.014 * mx] },
+          { role: 'apparel', prim: 'cyl', material: 'clothDeep', rt: 0.056 * sc, rb: 0.060 * sc, h: 0.010 * sc, seg: 12, pos: [ox, oy + legH + 0.392 * sc, 0.014 * mx] },
+          { role: 'apparel', prim: 'tor', material: 'leather', R: 0.048 * sc, t: 0.007 * sc, rs: 4, ts: 12, pos: [ox, oy + legH + 0.398 * sc, 0.014 * mx], rot: [Math.PI / 2, 0, 0] }
+        ]
+      },
+      {
+        name: 'arms', semantic: 'shoulder', parent: 'torso', anchor,
+        segments: [
+          { role: 'bone', prim: 'strut', material: 'armorDeep', a: [ox + 0.058 * sc * mx, oy + legH + 0.264 * sc, 0.016 * mx], b: [ox + 0.084 * sc * mx, oy + legH + 0.244 * sc, -0.020 * sc], rTop: 0.024 * sc, rBot: 0.020 * sc, seg: 8 },
+          { role: 'bone', prim: 'sph', material: 'armorDeep', r: 0.020 * sc, sw: 8, sh: 6, pos: [ox + 0.084 * sc * mx, oy + legH + 0.244 * sc, -0.020 * sc] },
+          { role: 'bone', prim: 'strut', material: 'armorDeep', a: [ox + 0.084 * sc * mx, oy + legH + 0.244 * sc, -0.020 * sc], b: [ox + 0.110 * sc * mx, oy + legH + 0.218 * sc, -0.048 * sc], rTop: 0.020 * sc, rBot: 0.016 * sc, seg: 8 },
+          { role: 'bone', prim: 'strut', material: 'armorDeep', a: [ox - 0.058 * sc * mx, oy + legH + 0.264 * sc, 0.016 * mx], b: [ox - 0.078 * sc * mx, oy + legH + 0.246 * sc, -0.020 * sc], rTop: 0.024 * sc, rBot: 0.020 * sc, seg: 8 },
+          { role: 'bone', prim: 'sph', material: 'armorDeep', r: 0.020 * sc, sw: 8, sh: 6, pos: [ox - 0.078 * sc * mx, oy + legH + 0.246 * sc, -0.020 * sc] },
+          { role: 'bone', prim: 'strut', material: 'armorDeep', a: [ox - 0.078 * sc * mx, oy + legH + 0.246 * sc, -0.020 * sc], b: [ox - 0.096 * sc * mx, oy + legH + 0.222 * sc, -0.038 * sc], rTop: 0.020 * sc, rBot: 0.016 * sc, seg: 8 },
+          { role: 'bone', prim: 'sph', material: 'skin', r: 0.024 * sc, sw: 9, sh: 7, pos: [ox + 0.112 * sc * mx, oy + legH + 0.214 * sc, -0.050 * sc] },
+          { role: 'bone', prim: 'sph', material: 'skin', r: 0.024 * sc, sw: 9, sh: 7, pos: [ox - 0.098 * sc * mx, oy + legH + 0.218 * sc, -0.040 * sc] }
+        ]
+      }
+    ]
+  };
+}
+
+/** 坐姿 spec 工厂（K `body` + `rArm` 子组）—— 主帅端坐。字面量，逐点等于
+ *  `buildKing` 的 body 段（`PY(y)=y+FOOT`）+ `buildKingArm` 的右臂段。
+ *  **甲裙/鹖冠/佩剑/帅旗/披风/王座一律内联**（不入 spec）。 */
+export function kingSpec(): HumanoidSpec {
+  const PY = (yPiece: number): number => yPiece + FOOT;
+  return {
+    scale: 1,
+    side: 'r',
+    pose: 'sit',
+    grouping: { torso: 'body', armR: 'rArm' },
+    joints: [
+      {
+        name: 'torso', semantic: 'torso', parent: 'idleGroup', anchor: [0, 0.378, 0],
+        segments: [
+          { role: 'apparel', prim: 'sph', material: 'clothDeep', r: 0.088, sw: 10, sh: 8, pos: [0, PY(0.171), 0.010], scale: [1.10, 0.55, 0.85] },
+          { role: 'bone', prim: 'strut', material: 'clothDeep', a: [0.045, PY(0.180), 0.000], b: [0.050, PY(0.180), -0.115], rTop: 0.052, rBot: 0.048, seg: 10 },
+          { role: 'bone', prim: 'strut', material: 'clothDeep', a: [-0.045, PY(0.180), 0.000], b: [-0.050, PY(0.180), -0.115], rTop: 0.052, rBot: 0.048, seg: 10 },
+          { role: 'bone', prim: 'sph', material: 'clothDeep', r: 0.038, sw: 10, sh: 8, pos: [0.050, PY(0.180), -0.115] },
+          { role: 'bone', prim: 'sph', material: 'clothDeep', r: 0.038, sw: 10, sh: 8, pos: [-0.050, PY(0.180), -0.115] },
+          { role: 'bone', prim: 'strut', material: 'clothDeep', a: [0.050, PY(0.180), -0.115], b: [0.050, PY(0.098), -0.115], rTop: 0.034, rBot: 0.030, seg: 8 },
+          { role: 'bone', prim: 'strut', material: 'clothDeep', a: [-0.050, PY(0.180), -0.115], b: [-0.050, PY(0.098), -0.115], rTop: 0.034, rBot: 0.030, seg: 8 },
+          { role: 'apparel', prim: 'box', material: 'bootSole', w: 0.060, h: 0.032, d: 0.095, pos: [0.050, PY(0.054), -0.120] },
+          { role: 'apparel', prim: 'box', material: 'bootSole', w: 0.060, h: 0.032, d: 0.095, pos: [-0.050, PY(0.054), -0.120] },
+          { role: 'bone', prim: 'cyl', material: 'clothDeep', rt: 0.110, rb: 0.118, h: 0.120, seg: 14, pos: [0, PY(0.280), -0.005] },
+          { role: 'apparel', prim: 'tor', material: 'accent', R: 0.108, t: 0.014, rs: 5, ts: 16, pos: [0, PY(0.310), 0], rot: [Math.PI / 2, 0, 0] },
+          { role: 'bone', prim: 'cyl', material: 'armorDeep', rt: 0.122, rb: 0.132, h: 0.150, seg: 14, pos: [0, PY(0.415), 0.010] },
+          { role: 'apparel', prim: 'cyl', material: 'armor', rt: 0.138, rb: 0.146, h: 0.022, seg: 14, pos: [0, PY(0.348), 0.010] },
+          { role: 'apparel', prim: 'cyl', material: 'armor', rt: 0.136, rb: 0.144, h: 0.022, seg: 14, pos: [0, PY(0.392), 0.010] },
+          { role: 'apparel', prim: 'cyl', material: 'armor', rt: 0.134, rb: 0.142, h: 0.022, seg: 14, pos: [0, PY(0.436), 0.010] },
+          { role: 'apparel', prim: 'cyl', material: 'armor', rt: 0.132, rb: 0.140, h: 0.022, seg: 14, pos: [0, PY(0.480), 0.010] },
+          { role: 'apparel', prim: 'dome', material: 'armor', r: 0.063, sw: 12, sh: 7, frac: 0.62, pos: [0.142, PY(0.480), 0] },
+          { role: 'apparel', prim: 'dome', material: 'armor', r: 0.063, sw: 12, sh: 7, frac: 0.62, pos: [-0.142, PY(0.480), 0] },
+          { role: 'apparel', prim: 'box', material: 'accent', w: 0.052, h: 0.040, d: 0.038, pos: [0.168, PY(0.480), -0.020] },
+          { role: 'apparel', prim: 'box', material: 'accent', w: 0.052, h: 0.040, d: 0.038, pos: [-0.168, PY(0.480), -0.020] },
+          { role: 'bone', prim: 'strut', material: 'armorDeep', a: [-0.140, PY(0.480), 0.000], b: [-0.160, PY(0.360), 0.040], rTop: 0.034, rBot: 0.030, seg: 8 },
+          { role: 'bone', prim: 'sph', material: 'armorDeep', r: 0.030, sw: 10, sh: 8, pos: [-0.160, PY(0.360), 0.040] },
+          { role: 'bone', prim: 'strut', material: 'armorDeep', a: [-0.160, PY(0.360), 0.040], b: [-0.160, PY(0.275), 0.020], rTop: 0.030, rBot: 0.026, seg: 8 },
+          { role: 'bone', prim: 'sph', material: 'skin', r: 0.030, sw: 10, sh: 8, pos: [-0.160, PY(0.275), 0.020] },
+          { role: 'bone', prim: 'cyl', material: 'skin', rt: 0.030, rb: 0.032, h: 0.040, seg: 8, pos: [0, PY(0.520), -0.005] },
+          { role: 'bone', prim: 'sph', material: 'skin', r: 0.060, sw: 12, sh: 10, pos: [0, PY(0.580), -0.010] },
+          { role: 'apparel', prim: 'strut', material: 'hair', a: [0, PY(0.560), -0.040], b: [0, PY(0.498), -0.020], rTop: 0.026, rBot: 0.008, seg: 6 }
+        ]
+      },
+      {
+        name: 'armR', semantic: 'shoulder', parent: 'torso', anchor: [0.140, 0.480, 0.000],
+        segments: [
+          { role: 'bone', prim: 'strut', material: 'armorDeep', a: [0.140, FOOT + 0.480, 0.000], b: [0.160, FOOT + 0.360, 0.040], rTop: 0.034, rBot: 0.030, seg: 8 },
+          { role: 'bone', prim: 'sph', material: 'armorDeep', r: 0.030, sw: 10, sh: 8, pos: [0.160, FOOT + 0.360, 0.040] },
+          { role: 'bone', prim: 'strut', material: 'armorDeep', a: [0.160, FOOT + 0.360, 0.040], b: [0.160, FOOT + 0.275, 0.020], rTop: 0.030, rBot: 0.026, seg: 8 },
+          { role: 'bone', prim: 'sph', material: 'skin', r: 0.030, sw: 10, sh: 8, pos: [0.160, FOOT + 0.275, 0.020] }
+        ]
+      }
+    ]
+  };
+}

@@ -16,10 +16,11 @@
  *   ⑥ DP-4：`zeroChannels(type) ∩ deriveCombatChannels(type) === ∅`（逐型逐通道）；K 无 `banner.z`
  *   ⑦ DP-4（S0.1 硬门）：`zeroChannels ∩ (move ∪ capture ∪ dissolve ∪ 编排层直写) === ∅`（逐型逐通道）
  *      + move 派生证据（P 的 armL/legL/legR、A 的 arms 已排除出 zeroChannels）；POSE_TABLE.move 三段齐备
- *   ⑧ S1（M-08c）人形抽象契约 I1–I6（DP-5）：
- *      I1 标准骨链 16 关节 + 逐型声明树（父存在 + 无环）；I2 已物化 ⊆ 已声明 + P/A spec 子组集零增减
- *      + spec anchor ≡ SUBGROUP_JOINTS；I3 `JOINT_DOF`（human 16）+ JSON 同源；I4 `drivableChannels` 派生；
- *      I5 `deriveBindPose` ≡ `VIGNETTE.baseline`。I6（pivot 校正）需渲染几何 → 不在 CI。
+ *   ⑧ S1（M-08c）+ S2（M-08d）人形抽象契约 I1–I6（DP-5）：
+ *      I1 标准骨链 16 关节 + 7 型（P/A/N/R/C/K/B）声明树（父存在 + 无环）；
+ *      I2 已物化 ⊆ 已声明（7 型）+ spec 只路由到真实子组 + 覆盖子组集钉死 + spec anchor ≡ SUBGROUP_JOINTS
+ *      （B 判定「无需接入」→ 无 spec，仅补声明树）；I3 `JOINT_DOF`（human 16）+ JSON 同源；
+ *      I4 `drivableChannels` 派生；I5 `deriveBindPose` ≡ `VIGNETTE.baseline`。I6（pivot 校正）需渲染几何 → 不在 CI。
  *
  * ⚠ 绝不 import `pieceFactory.ts`（three 走 vendor 别名，纯 Node 下 `Cannot find package 'three'`）。
  *   本脚本仅 import **传递零依赖**的模块（pieceJoints / accessories / CombatConstants / humanoid /
@@ -34,10 +35,13 @@ import {
   deriveCombatChannels, deriveZeroChannels, POSE_TABLE,
   DISSOLVE_POSE, CHOREO_WRITE_CHANNELS
 } from '../src/render/combat/CombatConstants.ts';
-// ★ S1（M-08c）：人形抽象接口契约（DP-5 · I1–I5）的数据源，全部零依赖、可纯 Node import。
+// ★ S1（M-08c）人形抽象接口契约（DP-5 · I1–I5）+ S2（M-08d）逐型铺开的数据源，
+//   全部零依赖、可纯 Node import。
 import {
   HUMAN_RIG_STD, RIG_TIER, RIG_SEMANTIC, HUMAN_RIG_TREE, POSE_PRESETS,
-  PAWN_SPEC, ADVISOR_SPEC, FOOT as HUMANOID_FOOT
+  PAWN_SPEC, ADVISOR_SPEC,
+  RIDER_SPEC, driverSpec, spearmanSpec, cannonSoldierSpec, kingSpec,
+  FOOT as HUMANOID_FOOT
 } from '../src/render/humanoid.ts';
 import { JOINT_DOF, JOINT_DOF_JSON, drivableChannels, deriveBindPose } from '../src/render/jointDof.ts';
 import { VIGNETTE } from '../src/render/combat/vignette.ts';
@@ -389,30 +393,66 @@ for (const type of Object.keys(HUMAN_RIG_TREE)) {
   }
 }
 chk(!!HUMAN_RIG_TREE.P && !!HUMAN_RIG_TREE.A, '[⑧-I1] HUMAN_RIG_TREE 应含 P/A');
-console.log(`  标准骨链 ${stdNames.length} 关节；声明树 P=${Object.keys(HUMAN_RIG_TREE.P).length} A=${Object.keys(HUMAN_RIG_TREE.A).length}`);
+// S2：7 型声明树齐备
+for (const t of TYPES) chk(!!HUMAN_RIG_TREE[t], `[⑧-I1] HUMAN_RIG_TREE 缺 ${t} 声明树`);
+console.log(`  标准骨链 ${stdNames.length} 关节；声明树 ${TYPES.map((t) => t + '=' + Object.keys(HUMAN_RIG_TREE[t] || {}).length).join(' ')}`);
 
-// ── I2 · 已物化 ⊆ 已声明 + spec 锚点 ≡ SUBGROUP_JOINTS ──
-const SPECS = { P: PAWN_SPEC, A: ADVISOR_SPEC };
+// ── I2 · 已物化 ⊆ 已声明 + spec 只路由到真实子组 + spec 锚点 ≡ SUBGROUP_JOINTS ──
+// 逐型 spec（S2：N/R/C/K 用工厂实例化；带参类型的实参 = pieceFactory 真实调用实参）。
+const SPECS = {
+  P: [PAWN_SPEC],
+  A: [ADVISOR_SPEC],
+  N: [RIDER_SPEC],
+  R: [driverSpec(0.050, -0.050, 0.85, 0.405), spearmanSpec(-0.050, 0.080, 0.88, 0.405)],
+  C: [cannonSoldierSpec('soldierL', -0.250, HUMANOID_FOOT, 0.95, 1),
+      cannonSoldierSpec('soldierR', 0.250, HUMANOID_FOOT, 0.95, -1)],
+  K: [kingSpec()]
+};
+// spec **覆盖的子组集**（钉死，防「悄悄扩/缩子组」）—— 必须 ⊆ SUBGROUP_JOINTS[type]。
+const EXPECTED = {
+  P: [['body', 'armR', 'armL', 'legR', 'legL', 'shield', 'spear']],
+  A: [['body', 'arms', 'sword', 'shield']],
+  N: [['rider']],
+  R: [['driver'], ['spearman']],
+  C: [['soldierL'], ['soldierR']],
+  K: [['body', 'rArm']]
+};
 for (const type of Object.keys(SPECS)) {
   const tree = HUMAN_RIG_TREE[type];
   chk(!!tree, `[⑧-I2] ${type} 无声明树`);
+  // (a) 已物化 ⊆ 已声明（S0 起不变量；S2 扩到全 7 型）
   const materialized = Object.keys(SUBGROUP_JOINTS[type] || {});
   for (const sg of materialized) chk(!!(tree && tree[sg]), `[⑧-I2] ${type}.${sg} 已物化但未在声明树`);
-  const spec = SPECS[type];
-  const jointNames = spec.joints.map((jt) => jt.name);
-  chk(sortJoin(jointNames) === sortJoin(Object.keys(spec.grouping)), `[⑧-I2] ${type} grouping 键与 joints 名不一致`);
-  const targetGroups = new Set(jointNames.map((n) => spec.grouping[n] || n));
-  chk(sortJoin([...targetGroups]) === sortJoin(materialized),
-    `[⑧-I2] ${type} spec 子组集 [${[...targetGroups]}] ≠ 物化 [${materialized}]（S1 零子组增减）`);
-  for (const jt of spec.joints) {
-    const g = spec.grouping[jt.name] || jt.name;
-    const want = SUBGROUP_JOINTS[type][g];
-    chk(JSON.stringify(jt.anchor) === JSON.stringify(want),
-      `[⑧-I2] ${type}.${jt.name} anchor=${j(jt.anchor)} ≠ joint.${g}=${j(want)}`);
+  SPECS[type].forEach((spec, si) => {
+    const jointNames = spec.joints.map((jt) => jt.name);
+    chk(sortJoin(jointNames) === sortJoin(Object.keys(spec.grouping)), `[⑧-I2] ${type}#${si} grouping 键与 joints 名不一致`);
+    const targetGroups = new Set(jointNames.map((n) => spec.grouping[n] || n));
+    // (b) spec 只路由到**真实物化子组**（不凭空造子组、不引入新子组）
+    for (const g of targetGroups) chk(materialized.includes(g), `[⑧-I2] ${type}#${si} spec 路由到未物化子组 ${g}`);
+    // (c) 覆盖子组集 = 钉死期望（防悄然增减；P/A 期望恰为全集 → 等价于 S1 的「零子组增减」）
+    chk(sortJoin([...targetGroups]) === sortJoin(EXPECTED[type][si]),
+      `[⑧-I2] ${type}#${si} spec 子组集 [${[...targetGroups]}] ≠ 期望 [${EXPECTED[type][si]}]`);
+    // (d) 每个 spec 关节 anchor ≡ SUBGROUP_JOINTS[type][目标子组]
+    for (const jt of spec.joints) {
+      const g = spec.grouping[jt.name] || jt.name;
+      const want = SUBGROUP_JOINTS[type][g];
+      chk(!!want, `[⑧-I2] ${type}#${si}.${jt.name} 目标子组 ${g} 无锚点`);
+      chk(JSON.stringify(jt.anchor) === JSON.stringify(want),
+        `[⑧-I2] ${type}#${si}.${jt.name} anchor=${j(jt.anchor)} ≠ joint.${g}=${j(want)}`);
+    }
+  });
+}
+// B：★ S2 如实判定「无需接入」（躯干为 Lathe 深衣单体，无 per-limb 骨段）→ 无 spec；
+//    仅校验其声明树覆盖全部物化子组（已物化 ⊆ 已声明 对 B 亦成立）。
+{
+  const tree = HUMAN_RIG_TREE.B;
+  chk(!!tree, '[⑧-I2] B 无声明树');
+  for (const sg of Object.keys(SUBGROUP_JOINTS.B || {})) {
+    chk(!!(tree && tree[sg]), `[⑧-I2] B.${sg} 已物化但未在声明树`);
   }
 }
 chk(HUMANOID_FOOT === 0.086, `[⑧-I2] humanoid.FOOT 漂移：${HUMANOID_FOOT}（应 0.086 = pieceFactory.FOOT）`);
-console.log('  I2：P/A spec 子组集 = 物化子组集（零增减）；anchor 逐项 ≡ SUBGROUP_JOINTS');
+console.log('  I2：已物化 ⊆ 已声明（7 型）；spec 只路由到真实子组、覆盖集钉死、anchor 逐项 ≡ SUBGROUP_JOINTS；B 无 spec（判定：无需接入）');
 
 // ── I3 · 关节可动域总表 + JSON 快照 ──
 const dofNames = Object.keys(JOINT_DOF);
@@ -469,4 +509,4 @@ if (fails.length) {
 console.log(`✓ check-piece-contract 通过：${pass} 项断言全绿`);
 console.log(`  锚点 ${slotCount} 槽位/${seenSubgroups.size} 子组 · 关节 ${goldenAllN} 个 · 父链 ${edgeCount} 条 · 子组名 ${nameN} 个`);
 console.log(`  zeroChannels：${TYPES.map((t) => t + '=' + deriveZeroChannels(t).length).join(' ')}（S0.1：P/A 已剔除 move 通道；K 已剔除 banner.z）`);
-console.log(`  S1 人形契约：I1 骨链 ${stdNames.length} · I2 物化⊆声明（P/A）· I3 DOF ${dofNames.length} · I4 通道 ${chans.length} · I5 bindPose 7 型 · I6 见 audit-pieces`);
+console.log(`  S1/S2 人形契约：I1 骨链 ${stdNames.length} · I2 物化⊆声明（7 型，N/R/C/K 已接 spec、B 无需接入）· I3 DOF ${dofNames.length} · I4 通道 ${chans.length} · I5 bindPose 7 型 · I6 见 audit-pieces`);
