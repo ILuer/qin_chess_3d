@@ -26,6 +26,26 @@
  *                                 俯视下毂盖高光不可见，美术代价≈0；换装能力不受影响，见 pieceFactory 注释）
  */
 
+// ★ S0 护栏（M-08a）：关节锚点 SSOT（零依赖，`pieceJoints.ts` 自身零 import → 本文件仍保持
+//   纯数据 / 无 three 依赖，可在 node 直接解析）。`SlotSpec.anchor` 由此**派生**，
+//   彻底消除「双表手工同步」（M-06 漂移返工的历史债 O4）。
+import { SUBGROUP_JOINTS } from './pieceJoints.ts';
+
+/**
+ * 关节锚点派生器：`SUBGROUP_JOINTS[type][subgroup]` 的**只读派生**（返回一份可变副本，
+ * 与 `SlotSpec.anchor: [number, number, number]` 形状一致）。
+ *
+ * 未注册即**快速失败**（而非静默回退）—— 槽位引用了不存在的关节属于构建期契约错误，
+ * 必须立刻可见（CI 亦由 `scripts/check-piece-contract.mjs` 断言守护）。
+ *
+ * ⚠ 坐标系口径 = **pre-idleScale 的 piece-local**（不得乘 `K_IDLE_SCALE`；见 pieceJoints.ts 文件头）。
+ */
+function anchorOf(type: string, subgroup: string): [number, number, number] {
+  const joint = SUBGROUP_JOINTS[type] && SUBGROUP_JOINTS[type]![subgroup];
+  if (!joint) throw new Error(`[accessories] 未在 SUBGROUP_JOINTS 注册的锚点：${type}.${subgroup}`);
+  return [joint[0], joint[1], joint[2]];
+}
+
 /* ============================================================
  * 类型
  * ============================================================ */
@@ -196,7 +216,7 @@ export const SLOT_TABLE: Record<string, Record<string, SlotSpec>> = {
       label: '披风（长披 → 短披 + 毛领）',
       subgroups: ['capeHem'],
       kind: 'single',
-      anchor: [0, 0.420, -0.010],
+      anchor: anchorOf('K', 'capeHem'),
       orientation: '下垂向 −Y（腰部/肩后 pivot）',
       envelope: { note: '宽度 ≤ 0.55', maxSpan: 0.55 },
       animationChannels: ['capeHem.rotation.z（move +0.10 / capture +0.14）'],
@@ -227,7 +247,7 @@ export const SLOT_TABLE: Record<string, Record<string, SlotSpec>> = {
       label: '乘员（持戈兵 → 持戟兵）',
       subgroups: ['spearman'],
       kind: 'single',
-      anchor: [-0.050, 0.451, 0.080],
+      anchor: anchorOf('R', 'spearman'),
       orientation: '朝向 −Z 前（躯干质心为旋转中心）',
       envelope: { note: '包围盒 ≤ 0.35×0.80×0.35', maxSpan: 0.35, maxLen: 0.80 },
       animationChannels: ['spearman.rotation.x（move −0.25 / capture −0.70）'],

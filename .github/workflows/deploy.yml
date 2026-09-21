@@ -50,6 +50,12 @@ jobs:
       - name: TypeScript typecheck
         run: npm run typecheck
 
+      # S0 护栏（M-08a）：棋子结构契约 L1 断言（纯 Node / 无浏览器 / 无 GPU）。
+      # 覆盖：SLOT_TABLE.anchor ≡ SUBGROUP_JOINTS、黄金值、父链无环、命名规范、
+      #       PIECE_TOP_Y 梯度、zeroChannels ∩ 战斗通道 = ∅（DP-4）。
+      - name: Piece contract check (L1, pure Node)
+        run: npm run check:contract
+
       # npm test 依赖 tests/（QA 本地产物，不入库）；本地开发执行 npm run test 验证
 
       - name: Build (esbuild)

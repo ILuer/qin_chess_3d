@@ -104,6 +104,14 @@ const common = {
   target: ['es2022'],
   legalComments: 'none',
   logLevel: 'info',
+  /**
+   * ★ S1 特性开关（M-08c）：`__HUMANOID_RIG__` —— 人形（P/A）spec 驱动路径。
+   *   经 `define` 注入为编译期常量：`true` → 常量折叠 + 死代码消除
+   *   （`pieceFactory` 内 `buildPawn/buildAdvisor` 的旧内联路径**不进产物**）；
+   *   `false` → 保留旧内联路径（`devtools/compare-humanoid-rig.mjs` 双档对拍用）。
+   *   默认 true（S1 上线态）；回滚只需把此处改为 'false' 重新构建。
+   */
+  define: { __HUMANOID_RIG__: 'true' },
   plugins: [threeVendorPlugin]
 };
 

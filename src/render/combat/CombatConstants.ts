@@ -10,7 +10,11 @@
  */
 
 import { PT, PALETTE } from '../../core/constants.ts';
-import { VIGNETTE } from './vignette.ts';
+import { VIGNETTE, writtenChannels, type VignetteDef } from './vignette.ts';
+// ★ S0 护栏（M-08a · DP-4）：关节 SSOT（零依赖）—— 供 zeroChannels 派生时判定
+//   「该通道所属子组是否已注册」。本文件（经 core/constants.ts + vignette.ts）保持
+//   **传递零依赖**（无 three），故可被 `scripts/check-piece-contract.mjs` 在纯 Node 下 import。
+import { SUBGROUP_JOINTS } from '../pieceJoints.ts';
 
 // ═══════════════════════════════════════════════════════════════
 // §0 性能预算常量
@@ -451,72 +455,9 @@ export const IDLE_WEAPON_BIAS = {
   [PT.KING]:     +0.06
 };
 
-/**
- * 七兵种个性化待机 vignette 参数（R-2 重构；数据唯一真相源，animator.tickIdle 读取）。
- *
- * 模型（取代旧「sum of sines 呼吸 + 正弦微颤 + 门控脉冲」假待机）：
- *   - 每兵种一套**分步、闭合、兵种特性化** vignette 序列（见 src/render/combat/vignette.ts
- *     的 VIGNETTE 表，权威口径为系统设计.md §3.2.M5.19）。
- *   - 通道纪律（R-1 红线）：VigCh 只写子组 rotation（sg[sub].rotation[axis]）；
- *     禁写 root / orient / idleGroup，禁写任何 position。
- *
- * 三级激活增益（animator.tickIdle 实现，主理人裁定 D2）：
- *   - _busy            → 按 zeroChannels 幂等归零（保持现状，不改）
- *   - !sel && far      → L1 IDLE_BASE：仅 baseline（静态基准），L2/L3 停写并冻结当前值
- *   - !sel && !far     → 怠速层：全通道 × IDLE_BASE_GAIN = 0.25（极小幅度机械怠速，无呼吸）
- *   - sel（任意视距）  → L2/L3 全量 vignette：全部分段通道 + 机械层，增益 1.0
- * 三档之间以 crossfadeSec 为时长的增益斜坡过渡，进入 / 退出 / 远景恢复均不跳变。
- *
- * 性能预算：!sel && far → 32 枚 × 1–3 条 baseline ≈ 64 次/帧；!sel && !far → 32 × ~4 ≈ 130；
- *   sel → +~5（外加 C 炮机械层 2 条）。
- *
- * 通道避让纪律：zeroChannels 只能收录「待机写入 ∩ 战斗不写」的通道 —— 战斗通道（如
- *   P 的 armR.x/shield.x、N 的 bodyHorse.x/rider.x、R 的 horses.x/driver.x/spearman.x、
- *   C 的 soldierL/R.x/trebuchet.z/counterweight、K 的 sword.z/throne.x）**严禁**入列，
- *   否则 _busy 期间每帧归零会吞掉战斗动作（历史 ROOK `horses.rotation.x` 即此类 bug）。
- *   QA 门禁见 qa/tests/node/idle-vignette.test.js。
- */
-export const IDLE_PIECE = {
-  [PT.PAWN]: {
-    desc: '持矛挺立 → 举目远眺瞭望 → 收手 → 小幅踏步 → 矛尖顿地（P）',
-    vignette: VIGNETTE.P,
-    // windUp 写 armR.x / shield.x → 只归零待机专属通道（见 VIGNETTE.P.zeroChannels）
-    zeroChannels: VIGNETTE.P.zeroChannels
-  },
-  [PT.HORSE]: {
-    desc: '昂首 → 前蹄扬起 → 刨地 → 前蹄落回 → 甩鬃（N，root 贴地）',
-    vignette: VIGNETTE.N,
-    zeroChannels: VIGNETTE.N.zeroChannels
-  },
-  [PT.ELEPHANT]: {
-    desc: '执笏秉笔 → 摇扇沉思 → 收扇 → 谋士揖礼 → 起身回中（B）',
-    vignette: VIGNETTE.B,
-    zeroChannels: VIGNETTE.B.zeroChannels
-  },
-  [PT.ADVISOR]: {
-    desc: '按剑戒备 → 小幅移步护卫 → 举手整饬甲胄 → 手回按剑（A，全场最静）',
-    vignette: VIGNETTE.A,
-    zeroChannels: VIGNETTE.A.zeroChannels
-  },
-  [PT.ROOK]: {
-    desc: '御马兵控缰 → 双马刨地 → 持戈兵瞭望挥戈（R，车轮待机锁定禁空转）',
-    vignette: VIGNETTE.R,
-    // 纪律（CombatConstants.ts:491）：horses.rotation.x 是战斗通道，绝不可进 zeroChannels。
-    zeroChannels: VIGNETTE.R.zeroChannels
-  },
-  [PT.CANNON]: {
-    desc: '双兵检修投石机：擦拭 → 上油 → 齿轮绞盘联动 → 校正瞄准 → 退后端详（C，含机械层）',
-    vignette: VIGNETTE.C,
-    // 全部肢体通道均被 windUp/strike 覆盖 → 无需额外归零（settle 会复位）
-    zeroChannels: VIGNETTE.C.zeroChannels
-  },
-  [PT.KING]: {
-    desc: '按剑凝思 → 手指示意 → 收手 → 展阅简牍 → 卷收归位（K，坐于席位）',
-    vignette: VIGNETTE.K,
-    // windUp 写 sword.z / throne.x → 只归零待机专属通道（见 VIGNETTE.K.zeroChannels）
-    zeroChannels: VIGNETTE.K.zeroChannels
-  }
-};
+// ★ S0 护栏（M-08a · DP-4）：`IDLE_PIECE` 已**下移**至本文件 `POSE_TABLE` 之后，
+//   其 `zeroChannels` 改为**自动派生**（见下方 deriveCombatChannels / deriveZeroChannels）。
+//   说明：派生需读取 `POSE_TABLE`（定义在本位置之后），故数据块必须后置以避免 const TDZ。
 
 // ═══════════════════════════════════════════════════════════════
 // §8.5 数据驱动姿态表 POSE_TABLE（Phase A3 + B1-B5）
@@ -661,6 +602,197 @@ export const POSE_TABLE: Record<string, Record<string, any>> = {
       action: { sub: { sword: { rotation: { z: -0.40 } }, throne: { rotation: { x: -0.15 } }, banner: { rotation: { z: -0.30 } }, rArm: { rotation: { z: -0.10 } }, capeHem: { rotation: { z: 0.14 } } }, duration: 0.08, ease: 'easeInCubic', channels: ['sword.rotation.z', 'throne.rotation.x', 'banner.rotation.z', 'rArm.rotation.z', 'capeHem.rotation.z'] },
       recovery: { sub: { sword: { rotation: { z: 0 } }, throne: { rotation: { x: 0 } }, banner: { rotation: { z: 0 } }, rArm: { rotation: { z: 0 } }, capeHem: { rotation: { z: 0 } } }, duration: 0.30, ease: 'easeInOutQuad', channels: ['sword.rotation.z', 'throne.rotation.x', 'banner.rotation.z', 'rArm.rotation.z', 'capeHem.rotation.z'] }
     }
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════
+// §8.6 战斗通道自动派生 + zeroChannels 派生（S0 护栏 · DP-4，09 §7.4 R-Z2/R-Z3/R-Z7）
+//   ★ S0.1（M-08a2）：派生范围由 capture 扩到 move ∪ capture ∪ dissolve ∪ 编排层直写。
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * 归一化通道键：`'sub.rotation.x'` → `'sub.x'`；已是 `'sub.axis'` 形状则原样返回。
+ * 仅保留 **rotation** 通道 —— `zeroChannels` 在 animator 中只写 `sg[sub].rotation[axis]`，
+ * 故 position / scale 通道（如 `DISSOLVE_POSE` 的 `translateY`）与之**不可能冲突**，不入集。
+ */
+function _normRotationChannel(c: string): string | null {
+  const p = c.split('.');
+  if (p.length === 2) return c;
+  if (p.length === 3 && p[1] === 'rotation') return `${p[0]}.${p[2]}`;
+  return null;
+}
+
+/**
+ * ★ S0.1 补刀（M-08a2 · DP-4 派生范围扩到 move + 编排层直写）
+ *
+ * **编排层直写通道**（声明式数据 = R-Z2 第三项）。
+ *
+ * 定义：**动作/编排层**（`combat/CaptureAction.ts` 的 `executeCannon`、`animator.ts` 的
+ * `cannonCapture`）**绕过 `POSE_TABLE`**、直接 `sg[sub].rotation[axis] = …` 写入的子组·轴。
+ * 判定粒度仍是通道键 `sub.axis`（R-Z3）；只登记 **rotation** 通道（`zeroChannels` 只写 rotation）。
+ *
+ * 声明纪律（**为什么是纯数据、不是运行时扫描**）：
+ *   - `CaptureAction` / `PieceChoreography` 与本文件相互 import → 派生前不能 import 它们
+ *     （循环依赖）；CI 无浏览器/GPU 无法运行时观测。故以**声明式常量**登记，并由
+ *     `scripts/check-piece-contract.mjs` 断言 `zeroChannels ∩ (move∪capture∪dissolve∪本表) = ∅`。
+ *   - 非 C 兵种**没有**任何绕过 POSE_TABLE 的直写（统一走 `windUp/strike/settle` 数据驱动分支），
+ *     故除 C 外为空。**维护提示**：新增「绕过 POSE_TABLE 的直写」必须同步本表。
+ *
+ * ⚠ **刻意不收录**两处「看似直写、实则不构成战斗位移」的通道：
+ *   - `PieceChoreography` 的 `switch` 回退分支（含 `moveFlourish[N]` 的四腿 trot）：在 7 型
+ *     `POSE_TABLE.move/capture` 三段**齐备时不可达**（该完整性由 contract 断言）→ 其声明的
+ *     `legFL.x`/`legFR.x`/`legBL.x`/`legBR.x` 在运行时**不会被写**。若误收，会把 `N.legFL.x`
+ *     挤出 `zeroChannels` → 行进中「待机抬起的马腿」被**冻结**（既不归零、也无人写）= 新缺陷。
+ *   - `resetMovePose` 只写 **0**（幂等复位），不承载战斗位移 → 不构成「战斗通道」。
+ */
+export const CHOREO_WRITE_CHANNELS: Record<string, string[]> = {
+  // C 炮：executeCannon 六步（装填→瞄准→射击→后坐→淡出→淡入）直接驱动。
+  //   trebuchet.z / soldierL.x / soldierR.x / cart.x 已被 POSE_TABLE.C.capture 覆盖（冗余登记）；
+  //   **counterweight.z 此前完全遗漏**（POSE_TABLE 无此项）→ 本表补全。
+  C: ['trebuchet.z', 'counterweight.z', 'cart.x', 'soldierL.x', 'soldierR.x']
+};
+
+/**
+ * **程序化派生**某兵种的「战斗通道」集合（判定粒度 = 通道键 `sub.axis`，R-Z3）。
+ * **禁止手工维护零散黑名单**（R-Z2）—— 战斗通道必须随数据自动演化。
+ *
+ * 来源（任一命中即入集）：
+ *   ① `POSE_TABLE[type].move ∪ capture` 的**全部** stage 的 `channels`（**非 idle 态**；
+ *      idle 是待机侧、正是要被 `_busy` 归零的集合）；
+ *   ② `DISSOLVE_POSE[type].subGroupActions` 的旋转通道（`rotX` → `sub.x`，`rotZ` → `sub.z`；
+ *      `translateY` 是 position 通道，不入集 —— `zeroChannels` 只写 rotation）；
+ *   ③ `CHOREO_WRITE_CHANNELS[type]`（编排层绕过 POSE_TABLE 的直写）。
+ *
+ * ★ S0.1 修正：原实现只取 `capture`，**漏了 `move` 与编排层直写** —— 语义上偏离 R-Z2 字面要求。
+ *   后果：`P.armL.x`/`P.legL.x`/`P.legR.x`/`A.arms.x` 被误收进 `zeroChannels`，
+ *   `_busy` 期间（animator.tickIdle）每帧被归零 → **吞掉 P 的移动左臂/双腿随动、
+ *   A 的移动摆臂**（与历史 `ROOK.horses.rotation.x` 同类缺陷）。本轮修回。
+ */
+export function deriveCombatChannels(type: string): Set<string> {
+  const out = new Set<string>();
+  const entry = (POSE_TABLE as Record<string, any>)[type];
+  if (entry) {
+    for (const state of ['move', 'capture'] as const) {
+      const st = entry[state];
+      if (!st) continue;
+      for (const stage of ['anticipation', 'action', 'recovery'] as const) {
+        const seg = st[stage];
+        const chs = seg && seg.channels;
+        if (!Array.isArray(chs)) continue;
+        for (const c of chs) {
+          const k = _normRotationChannel(String(c));
+          if (k) out.add(k);
+        }
+      }
+    }
+  }
+  const dis = (DISSOLVE_POSE as Record<string, any>)[type];
+  const sga = dis && dis.subGroupActions;
+  if (sga && typeof sga === 'object') {
+    for (const sub of Object.keys(sga)) {
+      const a = (sga as Record<string, any>)[sub];
+      if (!a || typeof a !== 'object') continue;
+      if (a.rotX !== undefined) out.add(`${sub}.x`);
+      if (a.rotZ !== undefined) out.add(`${sub}.z`);
+    }
+  }
+  for (const c of CHOREO_WRITE_CHANNELS[type] || []) out.add(c);
+  return out;
+}
+
+const _zeroCache = new Map<string, string[]>();
+
+/**
+ * 派生某兵种的 `zeroChannels`（`_busy` 期间幂等归零的**待机专属**通道）：
+ *
+ *   `zeroChannels(type) = writtenChannels(VIGNETTE[type]) − deriveCombatChannels(type)`
+ *
+ * 并**过滤到已注册子组**：未在 `SUBGROUP_JOINTS[type]` 注册的子组（概念通道 `scroll`/`winch`/`gear`）
+ * 在 animator 中本就安全跳过，收录无意义 —— 与既有手抄表的做法一致（这也是 DP-4 修复
+ * `K.banner.z` 越界后，`K` 恰好收敛为 `['body.x','rArm.x']` 的原因）。
+ *
+ * 不变量（由 `check-piece-contract.mjs` 逐型逐通道断言）：`zeroChannels ∩ deriveCombatChannels === ∅`。
+ */
+export function deriveZeroChannels(type: string): string[] {
+  const hit = _zeroCache.get(type);
+  if (hit) return hit;
+  const def = (VIGNETTE as Record<string, VignetteDef | undefined>)[type];
+  const out: string[] = [];
+  if (def) {
+    const combat = deriveCombatChannels(type);
+    const joints = SUBGROUP_JOINTS[type];
+    for (const ch of writtenChannels(def)) {
+      if (combat.has(ch)) continue;
+      const dot = ch.indexOf('.');
+      const sub = dot >= 0 ? ch.slice(0, dot) : ch;
+      if (!joints || !joints[sub]) continue;
+      out.push(ch);
+    }
+  }
+  _zeroCache.set(type, out);
+  return out;
+}
+
+/**
+ * 七兵种个性化待机 vignette 参数（R-2 重构；数据唯一真相源，animator.tickIdle 读取）。
+ *
+ * 模型（取代旧「sum of sines 呼吸 + 正弦微颤 + 门控脉冲」假待机）：
+ *   - 每兵种一套**分步、闭合、兵种特性化** vignette 序列（见 src/render/combat/vignette.ts
+ *     的 VIGNETTE 表，权威口径为系统设计.md §3.2.M5.19）。
+ *   - 通道纪律（R-1 红线）：VigCh 只写子组 rotation（sg[sub].rotation[axis]）；
+ *     禁写 root / orient / idleGroup，禁写任何 position。
+ *
+ * 三级激活增益（animator.tickIdle 实现，主理人裁定 D2）：
+ *   - _busy            → 按 zeroChannels 幂等归零（保持现状，不改）
+ *   - !sel && far      → L1 IDLE_BASE：仅 baseline（静态基准），L2/L3 停写并冻结当前值
+ *   - !sel && !far     → 怠速层：全通道 × IDLE_BASE_GAIN = 0.25（极小幅度机械怠速，无呼吸）
+ *   - sel（任意视距）  → L2/L3 全量 vignette：全部分段通道 + 机械层，增益 1.0
+ * 三档之间以 crossfadeSec 为时长的增益斜坡过渡，进入 / 退出 / 远景恢复均不跳变。
+ *
+ * 性能预算：!sel && far → 32 枚 × 1–3 条 baseline ≈ 64 次/帧；!sel && !far → 32 × ~4 ≈ 130；
+ *   sel → +~5（外加 C 炮机械层 2 条）。
+ *
+ * ★ S0 护栏（M-08a · DP-4）：`zeroChannels` 由**自动派生**（`deriveZeroChannels`）生成，
+ *   **不再手工维护**（R-Z2）。纪律：`zeroChannels` 只能收录「待机写入 ∩ 战斗不写」的通道，
+ *   否则 `_busy` 期间每帧归零会吞掉战斗动作（历史 bug：`ROOK.horses.rotation.x` 被吞；
+ *   以及 M-07 复核确认的 `K.banner.z` 越界 —— 该通道既是待机通道又是 `POSE_TABLE.K` 四态
+ *   都在驱动的战斗通道，本轮由派生自动剔除）。
+ */
+export const IDLE_PIECE = {
+  [PT.PAWN]: {
+    desc: '持矛挺立 → 举目远眺瞭望 → 收手 → 小幅踏步 → 矛尖顿地（P）',
+    vignette: VIGNETTE.P,
+    zeroChannels: deriveZeroChannels(PT.PAWN)
+  },
+  [PT.HORSE]: {
+    desc: '昂首 → 前蹄扬起 → 刨地 → 前蹄落回 → 甩鬃（N，root 贴地）',
+    vignette: VIGNETTE.N,
+    zeroChannels: deriveZeroChannels(PT.HORSE)
+  },
+  [PT.ELEPHANT]: {
+    desc: '执笏秉笔 → 摇扇沉思 → 收扇 → 谋士揖礼 → 起身回中（B）',
+    vignette: VIGNETTE.B,
+    zeroChannels: deriveZeroChannels(PT.ELEPHANT)
+  },
+  [PT.ADVISOR]: {
+    desc: '按剑戒备 → 小幅移步护卫 → 举手整饬甲胄 → 手回按剑（A，全场最静）',
+    vignette: VIGNETTE.A,
+    zeroChannels: deriveZeroChannels(PT.ADVISOR)
+  },
+  [PT.ROOK]: {
+    desc: '御马兵控缰 → 双马刨地 → 持戈兵瞭望挥戈（R，车轮待机锁定禁空转）',
+    vignette: VIGNETTE.R,
+    zeroChannels: deriveZeroChannels(PT.ROOK)
+  },
+  [PT.CANNON]: {
+    desc: '双兵检修投石机：擦拭 → 上油 → 齿轮绞盘联动 → 校正瞄准 → 退后端详（C，含机械层）',
+    vignette: VIGNETTE.C,
+    zeroChannels: deriveZeroChannels(PT.CANNON)
+  },
+  [PT.KING]: {
+    desc: '按剑凝思 → 手指示意 → 收手 → 展阅简牍 → 卷收归位（K，坐于席位）',
+    vignette: VIGNETTE.K,
+    zeroChannels: deriveZeroChannels(PT.KING)
   }
 };
 

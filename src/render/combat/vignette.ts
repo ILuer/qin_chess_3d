@@ -13,12 +13,13 @@
  * 通道避让纪律（§4.3，最易踩的坑）：
  *   zeroChannels 只能收录「待机写入 ∩ 战斗不写」的通道。**战斗通道严禁进 zeroChannels**，
  *   否则 _busy 期间每帧归零会把战斗动作吞掉（历史 ROOK `horses.rotation.x` 即此类 bug）。
- *   各兵种战斗通道黑名单（由旧 IDLE_PIECE 注释与 §3.2.M5.19 各「交接约束」汇总）：
- *     P: armR.x, shield.x        N: bodyHorse.x, rider.x
- *     A: sword.z                 B: arms.z, bodyRobe.x
- *     R: horses.x, driver.x, spearman.x
- *     C: soldierL.x, soldierR.x, trebuchet.z, counterweight.*
- *     K: sword.z, throne.x
+ *   ★ S0 护栏（M-08a · DP-4）：原先散落在各兵种定义里的「战斗通道黑名单」已**删除**，
+ *     改由 `CombatConstants.deriveZeroChannels(type)` **程序化派生**
+ *     （= `writtenChannels(VIGNETTE[type]) − deriveCombatChannels(type)`），
+ *     战斗通道集由 `POSE_TABLE[type].move ∪ capture` ∪ `DISSOLVE_POSE[type]` ∪
+ *     `CHOREO_WRITE_CHANNELS[type]`（编排层直写）自动演化（R-Z2）。
+ *     ★ S0.1（M-08a2）：`deriveCombatChannels` 的语义边界扩到 **move ∪ capture**（原只 capture）。
+ *     健康度由 `scripts/check-piece-contract.mjs` 逐型断言（`zeroChannels ∩ 战斗通道 = ∅`）。
  *
  * 建模段缺失子组处理（主理人裁定 §3 末尾）：
  *   §3.2.M5.19.8 标注「建模段新增」的子组，绝大多数**尚未**在 pieceFactory.SUBGROUP_JOINTS
@@ -66,7 +67,10 @@ export interface VignetteDef {
   baseline: VigCh[];          // 静态基准（L1 IDLE_BASE；1–3 条，取自文档「点选激活」的 L1 基准）
   segments: VigSeg[];         // 5 段（R 车 6 段）
   mech?: VigMech[];           // C 炮：winch(ratio 2) / gear(ratio 8)（待建模段）
-  zeroChannels: string[];     // _busy 时幂等归零的待机专属通道（⊆ 实际写入通道，且不含战斗通道）
+  // ★ S0 护栏（M-08a · DP-4）：`zeroChannels` 字段已**移除** —— 原为逐兵种手工维护的
+  //   「战斗通道黑名单」，M-07 复核确认其中的 `K.banner.z` 越界（该通道亦被 POSE_TABLE.K 四态驱动）。
+  //   现由 `CombatConstants.ts` 的 `deriveZeroChannels(type)` **程序化派生**
+  //   （`writtenChannels(VIGNETTE[type]) − deriveCombatChannels(type)`），杜绝手工维护漏项。
 }
 
 /** 怠速层增益（「折中」激活：全盘极小幅度微动，仅选中播全量）。 */
@@ -103,7 +107,7 @@ function seg(name: string, weight: number, channels: VigCh[]): VigSeg {
 const KING: VignetteDef = {
   loopSec: 7.0, crossfadeSec: 0.25, variantCount: 2,
   baseline: [ch('sword', 'z', 0.05), ch('body', 'x', 0.04)],
-  zeroChannels: ['rArm.x', 'body.x', 'banner.z'],
+  // zeroChannels 由 deriveZeroChannels() 派生（S0 · DP-4）→ 本表不再手工维护
   segments: [
     seg('按剑凝思', 0.18, [
       ch('sword', 'z', 0.05),   // 微沉 +0.05（坐姿凝思）
@@ -142,7 +146,6 @@ const KING: VignetteDef = {
 const ADVISOR: VignetteDef = {
   loopSec: 4.5, crossfadeSec: 0.20, variantCount: 2,
   baseline: [ch('sword', 'z', 0.055), ch('arms', 'x', -0.035)],
-  zeroChannels: ['body.z', 'arms.x'],
   segments: [
     seg('按剑戒备', 0.20, [
       ch('sword', 'z', 0.055),  // +0.055
@@ -176,7 +179,6 @@ const ADVISOR: VignetteDef = {
 const ELEPHANT: VignetteDef = {
   loopSec: 6.0, crossfadeSec: 0.22, variantCount: 2,
   baseline: [ch('arms', 'z', 0.06)],
-  zeroChannels: ['arms.x'],
   segments: [
     seg('执笏秉笔', 0.20, [
       ch('arms', 'z', 0.12)     // 执笏 +0.12
@@ -209,7 +211,6 @@ const ELEPHANT: VignetteDef = {
 const HORSE: VignetteDef = {
   loopSec: 4.0, crossfadeSec: 0.15, variantCount: 3,
   baseline: [ch('bodyHorse', 'x', -0.04), ch('rider', 'x', 0.05)],
-  zeroChannels: ['legFL.x', 'bodyHorse.y'],
   segments: [
     seg('昂首', 0.18, [
       ch('bodyHorse', 'x', -0.10), // 扬首 −0.10（首帧入口值）
@@ -240,8 +241,7 @@ const HORSE: VignetteDef = {
 const ROOK: VignetteDef = {
   loopSec: 5.5, crossfadeSec: 0.20, variantCount: 4,
   baseline: [ch('driver', 'x', 0.03)],
-  // 纪律：horses.x / driver.x / spearman.x 均为战斗通道 → 绝不进 zeroChannels。
-  zeroChannels: ['body.x', 'spearman.y', 'spearman.z'],
+  // 纪律：horses.x / driver.x / spearman.x 均为战斗通道 → 由派生天然排除。
   segments: [
     seg('御马兵控缰', 0.18, [
       ch('driver', 'x', 0.07)      // 收缰 +0.07
@@ -280,8 +280,7 @@ const ROOK: VignetteDef = {
 const CANNON: VignetteDef = {
   loopSec: 8.0, crossfadeSec: 0.25, variantCount: 4,
   baseline: [ch('soldierL', 'x', -0.04), ch('soldierR', 'x', -0.04), ch('trebuchet', 'z', 0)],
-  // 全部肢体通道均被 windUp/strike 覆盖，settle 会复位 → 无需额外归零。
-  zeroChannels: [],
+  // 全部肢体通道均被 windUp/strike 覆盖，settle 会复位 → 派生结果为零集。
   mech: [
     { sub: 'winch', periodRatio: 2 }, // T_w = loopSec_i / 2
     { sub: 'gear', periodRatio: 8 }   // T_g = loopSec_i / 8
@@ -316,7 +315,6 @@ const CANNON: VignetteDef = {
 const PAWN: VignetteDef = {
   loopSec: 3.5, crossfadeSec: 0.18, variantCount: 3,
   baseline: [ch('armR', 'z', 0.08), ch('body', 'x', 0)],
-  zeroChannels: ['armR.z', 'body.x', 'armL.x', 'body.y', 'legL.x', 'legR.x'],
   segments: [
     seg('持矛挺立', 0.20, [
       ch('armR', 'z', 0.08),    // 持矛 +0.08
