@@ -388,8 +388,8 @@ const _EMPTY_SET: Set<string> = new Set();
  *     DC-2 禁新贴图   —— 顶点色烘焙沿用既有 `_sampleMap` 路径；
  *     DC-3 子组内按族合并，绝不跨子组合并（演出子组必须保持独立 Object3D）。
  *
- * 白名单 = 03 §6.2 A 档 must 全量 8 项：
- *   P.spear / P.shield、K.banner / K.crown、A.sword / A.shield、R.wheelL / R.wheelR
+ * 白名单 = 03 §6.2 A 档 must（M-06 后由 8 项降为 6 项；R.wheelL/R 见下方 M-06 ⑥）：
+ *   P.spear / P.shield、K.banner / K.crown、A.sword / A.shield
  *
  * 代价核算（04 文档 §4 · M-05 实测更正）：金属顶点占比 < 12% 的子组会自动回退单族
  *   （Parts.build 的既有逻辑）。**更正（ADR-β）**：原注释称「R 车轮命中该回退 —— 毂盖
@@ -397,12 +397,18 @@ const _EMPTY_SET: Set<string> = new Set();
  *   顶点占比实测 ≈20%（≥12% 阈值），故 **R.wheelL/R 各 +1 mesh（双族）**，
  *   实测 R 型 mesh 8→10（+2/盘）。真正命中回退的是 **C.wheelL/R**（未入白名单，恒单族）。
  *   其余 6 项（P.spear/shield、K.banner/crown、A.sword/shield）各 +1 mesh/实例。
+ *
+ * ★ M-06 ⑥（07 裁定 §5 · 用户拍板）：**R.wheelL/R 移出白名单**（走单族）。
+ *   取舍依据：触发双族的金属件只有单枚 r≈0.032 的毂盖；棋类主视角为俯视，车轮绕 Y 旋转
+ *   90° 呈细边、毂盖盘面完全侧对镜头，金属高光**不可见** → 美术代价 ≈0。收益：每枚 R
+ *   −2 mesh × 4 枚 = **回收 8 dc**。**注意**：白名单只决定子组内是否按材质族拆 2 mesh，
+ *   **子组本身始终是独立 Object3D Group** → R.wheelL/R 的**换装能力不受影响**
+ *   （M-05「R 六辐轮」变体仍挂在同一 wheelL/wheelR 关节上，仍可用）。
  */
 const ACCESSORY_WHITELIST: Record<string, Set<string>> = {
   P: new Set(['spear', 'shield']),
   K: new Set(['banner', 'crown']),
-  A: new Set(['sword', 'shield']),
-  R: new Set(['wheelL', 'wheelR'])
+  A: new Set(['sword', 'shield'])
 };
 
 class MultiParts {
@@ -1312,7 +1318,10 @@ function buildKing(mp: any, M: any, K: any, side: string): void {
   Pt.add(box(0.300, 0.070, 0.180), M.woodDeep,  { pos: [0, FOOT + 0.250, +0.130] }); // 屏座（压座垫，落地）
   Pt.add(box(0.040, 0.400, 0.180), M.woodDeep,  { pos: [+0.148, FOOT + 0.350, +0.130] }); // 右侧翼板（座身→屏心）
   Pt.add(box(0.040, 0.400, 0.180), M.woodDeep,  { pos: [-0.148, FOOT + 0.350, +0.130] }); // 左侧翼板
-  Pt.add(box(0.280, 0.330, 0.044), M.woodDeep,  { pos: [0, FOOT + 0.450, +0.216] }); // 屏心主板 0.285→0.615
+  Pt.add(box(0.280, 0.370, 0.044), M.woodDeep,  { pos: [0, FOOT + 0.470, +0.216] }); // 屏心主板 0.285→0.655
+  //  ★ M-06 ②（07 裁定 §3）：主板顶由 piece-local 0.615 上延到 0.655（世界 0.819），与
+  //    上横枨下沿（世界 0.7975）重叠 ≈0.021 焊接 → 消除原 0.0288 的「金枨浮在屏上」小缝
+  //    （orphan gapToMain 0.0288 → 0）。屏顶（上横枨顶 = 世界 0.85）保持不变。
   Pt.add(box(0.250, 0.300, 0.030), M.wood,      { pos: [0, FOOT + 0.450, +0.211] }); // 内衬分层
   Pt.add(box(0.320, 0.042, 0.070), M.accent,    { pos: [0, FOOT + 0.659, +0.210] }); // 上横枨（原夔龙纹金属圆梁）
   Pt.add(box(0.290, 0.026, 0.056), M.accentDim, { pos: [0, FOOT + 0.450, +0.212] }); // 中横枨
@@ -1551,6 +1560,15 @@ const MULTI_GROUP_TYPES = new Set(['K', 'C', 'R', 'P', 'A', 'N', 'B']);
  *   本轮按「pivot = 该子组真实旋转中心（去基座坐标，= 作者 y − FOOT）」逐项校准，
  *   语义锚点（肩/髋/腰/轮心）不变，只是补回 FOOT 差或修正 z 遗留错误。
  *   ⚠ 不驱动旋转的子组（K.crown 只走 translateY）本轮不校，见 04 文档遗留风险。
+ *
+ * ★ M-06 关节收尾（07-残余缺陷美术裁定 §2/§6，全量残余）：M-03 后残留 4 处 pivotOutside
+ *   （K.banner 0.218 / K.crown 0.215 / A.arms 0.036 / C.cart 0.032），本轮全部清零。
+ *   注：**D2 已证伪** —— 实测各 K 命名子组 localPos ≡ joint（比值 1.0，见 `_m06-audit.json`
+ *   的 A.types.K.subgroups[*].localPos），`g.position.set(jx,jy,jz)` 与几何 translate(−joint)
+ *   同在 idleGroup 局部系、同被 idleGroup.scale(1.25) 等比缩放 → 二者恒相消，**不存在
+ *   25% 关节/几何错配**。故本轮只改 pivot 的**数值**（旋转中心选择），不动缩放机制。
+ *   所有改动均为「旋转枢轴选择」，静态外观恒不变（translate(−J)+position(J) 相消），
+ *   `DISSOLVE_POSE` 的 translateY 语义亦不受影响（位移量与 pivot 无关）。
  */
 const SUBGROUP_JOINTS: Record<string, Record<string, any>> = {
   // ★ Sprint 1 重构：兵/卒 P 拆为 armL/armR、legL/legR，新增独立 shield，戈(spear)挂 armR 子节点。
@@ -1566,7 +1584,9 @@ const SUBGROUP_JOINTS: Record<string, Record<string, any>> = {
     spear: [0.170, 0.440, -0.020]    // 戈握把（作为 armR 子节点，随右臂挥动）
   },
   // ★ M-03 #14：sword 子组向躯干内收 0.044（z −0.170 → −0.126），使剑柄落入握持范围。
-  A: { body: [0, 0.334, 0], arms: [0, 0.378, 0], sword: [0, 0.328, -0.126], shield: [0, 0.45, -0.20] },
+  // ★ M-06 ④：arms pivot.y 0.378 → 0.474（= 真肩点，双大臂 strut 起点作者 y 0.560 − FOOT；
+  //   原 0.378 落在臂盒 [0.414,0.506] 之下 0.036，绕空点公转）。x=0 保持（双臂共用枢轴）。
+  A: { body: [0, 0.334, 0], arms: [0, 0.474, 0], sword: [0, 0.328, -0.126], shield: [0, 0.45, -0.20] },
   // ★ M-03 #16：四腿 hip 由 0.300（作者坐标）校准为 0.300−FOOT=0.214（真髋点，= strut 起点）。
   N: { bodyHorse: [0, 0.128, 0], legFL: [+0.076, 0.214, -0.140], legFR: [-0.076, 0.214, -0.140], legBL: [+0.080, 0.214, 0.165], legBR: [-0.080, 0.214, 0.165], rider: [0, 0.328, 0] },
   // ★ Sprint 4 写实：象 B 拆 robe→bodyRobe + hem（下摆独立可飘动子组），
@@ -1582,10 +1602,20 @@ const SUBGROUP_JOINTS: Record<string, Record<string, any>> = {
   // ★ R-1 修复同步：counterweight 关节由 [0,0.250,-0.150] 改为箱体实际中心 [0,cwY,cwZ]；
   //   wheelL/R 的 y 由 0.060 改为 CANNON_HUB（=FOOT+外半径，与 R 车 joint.y===HUB 同规约）。
   // ★ M-03 #11：wheelL/R 的 z 由 0.110 校正为 0.000（轮几何整体在 z=0，轮心才是自转轴）。
-  C: { trebuchet: [0, 0.308, 0], cart: [0, 0.114, 0], soldierL: [-0.25, 0.248, 0.09], soldierR: [0.25, 0.248, 0.09], counterweight: [0, 0.182, -0.105], wheelL: [-0.145, 0.160, 0.000], wheelR: [0.145, 0.160, 0.000] },
+  // ★ M-06 ⑤：cart pivot.y 0.114 → 0.041（= 木底座自身 AABB 中心 [−0.001,0.082]，
+  //   语义锚点 = 车体中心；原 0.114 在底座之上 0.032，绕空点公转）。
+  //   注：地面接触层纪律 —— 仅改**旋转枢轴**，未引入任何竖向平移通道；
+  //   DISSOLVE_POSE.C.cart 的 translateY 语义与 pivot 无关，保持不变。
+  C: { trebuchet: [0, 0.308, 0], cart: [0, 0.041, 0], soldierL: [-0.25, 0.248, 0.09], soldierR: [0.25, 0.248, 0.09], counterweight: [0, 0.182, -0.105], wheelL: [-0.145, 0.160, 0.000], wheelR: [0.145, 0.160, 0.000] },
   // ★ M-03 #13：sword pivot → 剑柄握持段（作者 0.171+0.204−FOOT≈0.289，x 取剑身轴 0.162）；
   //   rArm pivot → 真肩点（作者 FOOT+0.480 − FOOT = 0.480）。
-  K: { body: [0, 0.378, 0], throne: [0, 0.028, 0], crown: [0, 0.964, 0], sword: [0.162, 0.289, -0.018], banner: [0, 0.394, 0], rArm: [0.140, 0.480, 0.000], capeHem: [0, 0.420, -0.010] }
+  // ★ M-06 ①②③（07 裁定 §2.1/§2.2/§3，全量残余）：
+  //   crown  pivot.y 0.964 → 0.688（= 冕体 AABB 中心 piece-local，世界 0.86；原 1.205 在
+  //          冕顶之上 0.215）。**仅位移驱动**（DISSOLVE_POSE 冕落 translateY），translateY 语义不变。
+  //   banner pivot.x 0 → 0.228 且 z 0 → 0.126（= 旗杆轴线，世界 x 0.285/z 0.158）：
+  //          POSE_TABLE 以 rotation.z 驱动到 ±0.30 rad，原 pivot 落在棋子中轴 x=0（离旗面 0.218），
+  //          旗底会被抬离地面 ≈0.10 并整体横移；对齐旗杆轴线后绕旗面自身摆动，旗底 ownMinY 恒 ≈0。
+  K: { body: [0, 0.378, 0], throne: [0, 0.028, 0], crown: [0, 0.688, 0], sword: [0.162, 0.289, -0.018], banner: [0.228, 0.394, 0.126], rArm: [0.140, 0.480, 0.000], capeHem: [0, 0.420, -0.010] }
 };
 
 /**

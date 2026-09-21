@@ -17,11 +17,13 @@
  * 槽位口径（03 §2.1 契约落地）：
  *   本轮覆盖 **11 个槽位 / 14 个子组**（任务书称「10 槽位」，实为 11 —— 见 06 文档
  *   §0 口径更正；P.spear 归 `weapon`、R.wheelL+R 归 `wheel`、C.soldierL+R 归 `crew`…）：
- *     A 档（8，已在 pieceFactory.ACCESSORY_WHITELIST 豁免 forceSingle 走双族）：
+ *     A 档（6，已在 pieceFactory.ACCESSORY_WHITELIST 豁免 forceSingle 走双族）：
  *       P.weapon(spear) P.shield  K.headgear(crown) K.backBanner(banner)
- *       A.weapon(sword) A.shield  R.wheel(wheelL/wheelR)
- *     B 档（本轮**扩入槽位覆盖**，但按 ADR-β 守 DC-6 走单族，不扩白名单）：
+ *       A.weapon(sword) A.shield
+ *     B 档（**扩入槽位覆盖**，但按 ADR-β 守 DC-6 走单族，不扩白名单）：
  *       C.wheel(wheelL/wheelR)  C.crew(soldierL/soldierR)  R.crew(spearman)  K.cape(capeHem)
+ *       R.wheel(wheelL/wheelR)  ← **M-06 ⑥ 由 A 档降入 B 档**（用户拍板移出白名单，回收 8 dc；
+ *                                 俯视下毂盖高光不可见，美术代价≈0；换装能力不受影响，见 pieceFactory 注释）
  */
 
 /* ============================================================
@@ -166,7 +168,7 @@ export const SLOT_TABLE: Record<string, Record<string, SlotSpec>> = {
       label: '头饰（鹖冠 → 变体冠式）',
       subgroups: ['crown'],
       kind: 'single',
-      anchor: [0, 0.964, 0],
+      anchor: [0, 0.688, 0],
       orientation: '竖直向上（旋转轴须垂直）',
       envelope: { note: '高 ≤ 0.36；宽 ≤ 0.20', maxLen: 0.36, maxSpan: 0.20 },
       animationChannels: ['DISSOLVE_POSE.K.crown.translateY（冕落；纯位移，非旋转）'],
@@ -180,7 +182,7 @@ export const SLOT_TABLE: Record<string, Record<string, SlotSpec>> = {
       label: '帅旗（帅旗 → 燕尾旌旗）',
       subgroups: ['banner'],
       kind: 'single',
-      anchor: [0, 0.394, 0],
+      anchor: [0.228, 0.394, 0.126],
       orientation: '旗杆为转轴（z 旋转 = 旗面摆动）',
       envelope: { note: '宽 ≤ 0.45、高 ≤ 0.70（现状旗体 ≈0.30×0.42）', maxSpan: 0.45, maxLen: 0.70 },
       animationChannels: ['banner.rotation.z（idle +0.034 / move +0.06 / capture −0.30）'],
@@ -216,8 +218,9 @@ export const SLOT_TABLE: Record<string, Record<string, SlotSpec>> = {
       animationChannels: ['wheelL.rotation.x / wheelR.rotation.x（move 0.80 / capture 1.20）'],
       parentSubgroup: null,
       originalTri: 684,
-      originalMeshes: 2,
-      dclass: 'A'
+      // M-06 ⑥ 用户拍板移出白名单 → 每侧单族 1 mesh（原双族 2）。三角数不变（684）。
+      originalMeshes: 1,
+      dclass: 'B'
     },
     crew: {
       slot: 'crew',

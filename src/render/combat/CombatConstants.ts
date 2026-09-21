@@ -18,10 +18,50 @@ import { VIGNETTE } from './vignette.ts';
 
 /**
  * 全盘 draw call 预算上限（Phase D4 / 验收 V8）。
- * 依据：docs/design/piece-animation-spec.md §5.2 性能预算（新增子组后总 draw call ≤155，现 141~145）。
- * 用途：性能剖析门禁（qa/tests/node/perf-contract.test.js PERF-001）+ 浏览器 profiling 对照基准。
+ *
+ * ★ M-06 重立（2026-09-21，**由纸面值改为实测基线**）：
+ *   旧值 155 出自 docs/design/piece-animation-spec.md §5.2，早于 M-03 的「子组重构 +
+ *   配件白名单（ADR-α）」—— 该白名单以「+~60 dc 换金属高光」为代价，155 已与现状脱节。
+ *   现按**真实游戏场景实测基线**重立：
+ *     M-03(5abc72e) 239 → M-05(de70082) 279 → **M-06 = 271**（车轮白名单回退回收 8 dc）。
+ *   口径：GL 层 draw* 计数与 renderer.info.render.calls 双路，取默认开局相机稳态中位数。
+ *
+ * 防劣化机制（CI 不可行 — 项目 CI 仅 npm ci + typecheck + build，**无浏览器/GPU**，
+ *   直接测 draw call 不可行；且包体红线禁新增依赖、禁 PROD 产物变大）：
+ *     - 本常量 + DRAW_CALL_BUDGET_META 为唯一真相源（纯数据，未被运行时代码 import，
+ *       bundle 里被 tree-shake → **零 PROD 产物体积**）；
+ *     - 判定入口 drawCallBudgetVerdict() 供 devtools/game-dc-probe.mjs 复跑比对；
+ *     - 发布前人工闸门：`node devtools/game-dc-probe.mjs`（复用真实 index.html）→ 与
+ *       DRAW_CALL_BUDGET 比对，超阈值即失败并在验收报告登记（见 08 文档 §③）。
+ *   ⚠ 未选「dev 档运行时 console.warn」：无 build define 可用，强行内联会在 PROD 增字节，
+ *     违反红线，故降级为「零体积的常量+判定入口 + 人工探针闸门」。
  */
-export const DRAW_CALL_BUDGET = 155;
+export const DRAW_CALL_BUDGET = 271;
+
+/** draw call 预算的实测溯源元数据（纯数据，供探针/报告引用；不参与运行时逻辑）。 */
+export const DRAW_CALL_BUDGET_META = {
+  unit: 'GL draw* calls / 帧（真实游戏场景，默认开局相机，稳态中位数）',
+  baseline: 271,
+  measuredAt: '2026-09-21',
+  measuredBy: 'devtools/game-dc-probe.mjs（CDP 注入真实 index.html，非合成子场景）',
+  commit: 'M-06 (de70082→)',
+  history: { m03: 239, m05: 279, m06: 271 },
+  accounting: '279 − 8（R.wheelL/wheelR 移出 ACCESSORY_WHITELIST：4 枚 R × 2 mesh 回收）',
+  headroom: '低模 LOD 未启用；满盘 32 枚全部入视锥 → 该值为上界。'
+} as const;
+
+/**
+ * draw call 预算单一判定入口（纯函数、无副作用）。
+ * @param calls 实测 GL draw* 帧计数（或 renderer.info.render.calls）
+ * @returns ok=false 表示超预算（over>0）
+ */
+export function drawCallBudgetVerdict(calls: number): { calls: number; budget: number; ok: boolean; over: number; ratio: number } {
+  const over = calls - DRAW_CALL_BUDGET;
+  return {
+    calls, budget: DRAW_CALL_BUDGET, ok: over <= 0, over,
+    ratio: DRAW_CALL_BUDGET > 0 ? calls / DRAW_CALL_BUDGET : 0
+  };
+}
 
 // ═══════════════════════════════════════════════════════════════
 // §0.5 全局速度可调框架（Sprint 1：决策 2 + 5 的钩子）

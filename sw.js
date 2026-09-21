@@ -36,7 +36,10 @@
 // v2.0.5-20260921：Task M-05 棋子模型资产化落地（新增 src/render/accessories.ts 槽位契约 +
 //   src/render/pieceVariants.ts 变体几何 + pieceFactory 可选 variantSet 管线）→ dist/main.js 变更；
 //   线上默认行为不变（默认 variantSet=undefined 走原几何路径）。
-const __SHELL_VERSION__ = 'qin-chess-shell-v2.0.5-20260921';
+// v2.0.6-20260921：Task M-06 棋子穿模/异常分离「全量残余」修复（K.banner/K.crown/A.arms/C.cart
+//   四关节 pivot 校正 + K 座屏缝焊接 + R.wheelL/R 移出配件白名单回收 8 dc）→ dist/main.js 变更；
+//   除有意修复项外静态外观与 M-05 一致（pivot 修正静默、换装缺省路径不变）。
+const __SHELL_VERSION__ = 'qin-chess-shell-v2.0.6-20260921';
 const CACHE_NAME = __SHELL_VERSION__;
 
 // 稳定文件名的应用外壳（不含构建哈希 chunk）
