@@ -46,6 +46,10 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { getMaterials, getBannerMaterial } from './materials.ts';
+// ★ M-05 资产化：槽位契约（纯数据）+ 变体覆盖执行器（注册 11 个变体几何函数）。
+//   默认路径（opts.variantSet 缺省）**不触碰**这两条新链路 → 与现状逐比特等价。
+import { variantKey } from './accessories.ts';
+import { applySlotOverrides } from './pieceVariants.ts';
 
 /* ============================================================
  * 常量
@@ -387,9 +391,12 @@ const _EMPTY_SET: Set<string> = new Set();
  * 白名单 = 03 §6.2 A 档 must 全量 8 项：
  *   P.spear / P.shield、K.banner / K.crown、A.sword / A.shield、R.wheelL / R.wheelR
  *
- * 代价核算（04 文档 §4）：金属顶点占比 < 12% 的子组会自动回退单族（Parts.build
- *   的既有逻辑），R 车轮即命中该回退 —— 毂盖只占约 9% 顶点，故 R.wheelL/R 实际
- *   Δmesh = 0。其余 6 项各 +1 mesh/实例。
+ * 代价核算（04 文档 §4 · M-05 实测更正）：金属顶点占比 < 12% 的子组会自动回退单族
+ *   （Parts.build 的既有逻辑）。**更正（ADR-β）**：原注释称「R 车轮命中该回退 —— 毂盖
+ *   只占约 9% 顶点 ⇒ R.wheelL/R Δmesh=0」，与实测不符 —— R 车轮毂盖(accentDim 金属)
+ *   顶点占比实测 ≈20%（≥12% 阈值），故 **R.wheelL/R 各 +1 mesh（双族）**，
+ *   实测 R 型 mesh 8→10（+2/盘）。真正命中回退的是 **C.wheelL/R**（未入白名单，恒单族）。
+ *   其余 6 项（P.spear/shield、K.banner/crown、A.sword/shield）各 +1 mesh/实例。
  */
 const ACCESSORY_WHITELIST: Record<string, Set<string>> = {
   P: new Set(['spear', 'shield']),
@@ -1594,7 +1601,7 @@ const SUBGROUP_PARENTS: Record<string, Record<string, string>> = {
 
 const _templates = new Map();
 
-function buildTemplate(type: string, side: string, lodLevel: number): any {
+function buildTemplate(type: string, side: string, lodLevel: number, variantSet?: Record<string, string> | undefined): any {
  try {
   // L4b：LOD 段数开关。降段仅作用于 R/C/K 三型（lod-spec §2.2）；
   // P/N/B/A 本期不降段（体量小、辨识风险高），_lodLevel 恒 0，几何与现状逐字节一致。
@@ -1627,6 +1634,12 @@ function buildTemplate(type: string, side: string, lodLevel: number): any {
   // 多分组构建器接收 MultiParts 作为第四参数
   if (useMulti) {
     fn(mp, M, K, side);
+    // ★ M-05 资产化：命中变体的槽位清空原几何并重建为变体几何。
+    //   variantSet 缺省（默认路径）时 applySlotOverrides 首个判断即返回 → 零改动。
+    if (variantSet) {
+      const glyph = (PIECE_GLYPH[side] && PIECE_GLYPH[side]![type]) || '';
+      applySlotOverrides(mp, type, side, variantSet, M, K, glyph, SUBGROUP_JOINTS[type] || null);
+    }
   } else {
     fn(P, M, K);
   }
@@ -1777,16 +1790,21 @@ export function createPieceMesh(type: string, side: string, opts?: any): any {
  try {
   // L4b：低模模板独立缓存桶（lod0 沿用旧 key，向后兼容）
   const lodLevel = (opts && opts.lodLevel >= 1) ? 1 : 0;
-  const key = lodLevel > 0 ? type + side + ':lod1' : type + side;
-  const tpl = _getTemplate(type, side, lodLevel);
+  const lodKey = lodLevel > 0 ? type + side + ':lod1' : type + side;
+  // ★ M-05 资产化：可选变体装配表（缺省 undefined → 完全走原几何路径，缓存键与外显行为零变化）
+  const variantSet: Record<string, string> | undefined = (opts && opts.variantSet) ? opts.variantSet : undefined;
+  const vk = variantSet ? variantKey(variantSet) : '';
+  const tpl = _getTemplate(type, side, lodLevel, variantSet);
 
   const group = tpl.root.clone(true);
   tpl.count++;
 
-  group.name = 'piece_' + key;
+  group.name = 'piece_' + lodKey + (vk ? '@' + vk : '');
   group.userData.pieceType = type;
   group.userData.pieceSide = side;
   group.userData.lodLevel = lodLevel;   // L4b：实例携带模板档位，供工程切换逻辑判读
+  group.userData.variantSet = variantSet || null;   // M-05：换装态装配表（默认 null）
+  group.userData.variantKey = vk;                    // M-05：换装态缓存键（默认 ''）
   group.userData._tpl = tpl;            // L4b：当前模板引用（setPieceLod 切换后迁移，供 dispose 计数）
   group.userData.glyph = PIECE_GLYPH[side]![type];
   group.userData.topY = PIECE_TOP_Y[type] || 0.9;
@@ -1858,7 +1876,7 @@ export function setPieceLod(group: any, lodLevel: number): boolean {
   // P/N/B/A 不在 LOD 范围（lod-spec §2.2）：buildTemplate 恒建完整几何，无低模模板可切
   if (target === 1 && (type !== 'R' && type !== 'C' && type !== 'K')) return false;
 
-  const tpl = _getTemplate(type, side, target);
+  const tpl = _getTemplate(type, side, target, group.userData.variantSet || undefined);
   const from = _collectSubgroupMeshes(group);
   const to = _collectSubgroupMeshes(tpl.root);
   let swapped = 0;
@@ -1905,12 +1923,15 @@ function _collectSubgroupMeshes(root: any): any {
   return map;
 }
 
-/** L4b：按档位取模板（lod0 沿用旧 key，向后兼容；无则构建） */
-function _getTemplate(type: string, side: string, lodLevel: number): any {
-  const key = lodLevel >= 1 ? type + side + ':lod1' : type + side;
+/** L4b：按档位取模板（lod0 沿用旧 key，向后兼容；无则构建）
+ *  ★ M-05：变体装配并入缓存键（`base@slot:vid|slot:vid`）；variantSet 缺省 → 键不变。 */
+function _getTemplate(type: string, side: string, lodLevel: number, variantSet?: Record<string, string> | undefined): any {
+  const vk = variantSet ? variantKey(variantSet) : '';
+  const base = lodLevel >= 1 ? type + side + ':lod1' : type + side;
+  const key = vk ? base + '@' + vk : base;
   let tpl = _templates.get(key);
   if (!tpl) {
-    tpl = buildTemplate(type, side, lodLevel);
+    tpl = buildTemplate(type, side, lodLevel, vk ? variantSet : undefined);
     _templates.set(key, tpl);
   }
   return tpl;
