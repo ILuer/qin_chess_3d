@@ -45,16 +45,18 @@ export const DRAW_CALL_BUDGET = 310;
 /** draw call 预算的实测溯源元数据（纯数据，供探针/报告引用；不参与运行时逻辑）。
  *  ★ S2b（M-08d2 · 2026-09-22）：head 物化 +28 dc（271→299，逐型 P+10/A+4/N+8/R+4/K+2，
  *  与 pieceMeshes 250→278 逐项吻合；infoTris 110786 不变 = 几何零改动，纯分组重排）。
- *  预算上限按用户裁定的 S2b「精选档 ≈310」重立（实测 299，余量 11）；S3–S5 再按实测续立。 */
+ *  ★ S2b-step2：A.arms→armR/armL 肩拆分 +4 dc（299→303，A 满盘 4 枚 ×+1 mesh；
+ *  pieceMeshes 278→282，infoTris 110786 仍不变）。
+ *  预算上限按用户裁定的 S2b「精选档 ≈310」重立（实测 303，余量 7）；S3–S5 再按实测续立。 */
 export const DRAW_CALL_BUDGET_META = {
   unit: 'GL draw* calls / 帧（真实游戏场景，默认开局相机，稳态中位数）',
-  baseline: 299,
+  baseline: 303,
   budgetCap: 310,
   measuredAt: '2026-09-22',
   measuredBy: 'devtools/game-dc-probe.mjs（CDP 注入真实 index.html，非合成子场景；⚠ 探针已补 Network.setBypassServiceWorker —— 游戏 sw.js 会用缓存旧 bundle 污染实测）',
   commit: 'M-08d2 S2b (faad6dd→)',
-  history: { m03: 239, m05: 279, m06: 271, s2b: 299 },
-  accounting: '271 + 28（head 物化：P/A/N/K 拆头 + R.driverHead，每子组 1 mesh；C/R.spearman 刻意不拆 —— crew 变体槽位整组重建风险）',
+  history: { m03: 239, m05: 279, m06: 271, s2b: 299, s2b2: 303 },
+  accounting: '271 + 28（head 物化：P/A/N/K 拆头 + R.driverHead；C/R.spearman 刻意不拆 —— crew 变体槽位整组重建风险） + 4（A.arms→armR/armL 肩拆分，4 枚 ×+1）',
   headroom: '低模 LOD 未启用；满盘 32 枚全部入视锥 → 该值为上界。'
 } as const;
 
@@ -541,15 +543,17 @@ export const POSE_TABLE: Record<string, Record<string, any>> = {
   },
   [PT.ADVISOR]: {
     // ★ Sprint 1：A 防御姿态（双手拄剑身前 + shield 微抬）/ 护卫碎步 / 战吼劈砍。
+    // ★ S2b-step2（M-08d2 · §7.3 #1）：A.arms 拆为 armR/armL —— 原 `arms.rotation.x`
+    //   等值镜像到 armR.x + armL.x（双臂同步；pivot 已校准至真肩点）。capture 段本不含 arms，不动。
     idle: {
       anticipation: { sub: { body: { rotation: { z: 0.014 } } }, duration: 0.87, ease: 'easeOutQuad', channels: ['body.rotation.z'] },
-      action: { sub: { sword: { rotation: { z: 0.024 } }, shield: { rotation: { x: 0.030 } }, arms: { rotation: { x: 0.012 } } }, duration: 2.5, ease: 'easeOutQuad', channels: ['sword.rotation.z', 'shield.rotation.x', 'arms.rotation.x'] },
-      recovery: { sub: { body: { rotation: { z: 0 } }, shield: { rotation: { x: 0 } }, arms: { rotation: { x: 0 } } }, duration: 0.5, ease: 'easeInOutQuad', channels: ['body.rotation.z', 'shield.rotation.x', 'arms.rotation.x'] }
+      action: { sub: { sword: { rotation: { z: 0.024 } }, shield: { rotation: { x: 0.030 } }, armR: { rotation: { x: 0.012 } }, armL: { rotation: { x: 0.012 } } }, duration: 2.5, ease: 'easeOutQuad', channels: ['sword.rotation.z', 'shield.rotation.x', 'armR.rotation.x', 'armL.rotation.x'] },
+      recovery: { sub: { body: { rotation: { z: 0 } }, shield: { rotation: { x: 0 } }, armR: { rotation: { x: 0 } }, armL: { rotation: { x: 0 } } }, duration: 0.5, ease: 'easeInOutQuad', channels: ['body.rotation.z', 'shield.rotation.x', 'armR.rotation.x', 'armL.rotation.x'] }
     },
     move: {
       anticipation: { sub: { sword: { rotation: { z: -0.08 } }, shield: { rotation: { x: -0.06 } } }, duration: 0.14, ease: 'easeOutQuad', channels: ['sword.rotation.z', 'shield.rotation.x'] },
-      action: { sub: { sword: { rotation: { z: -0.12 } }, shield: { rotation: { x: -0.10 } }, arms: { rotation: { x: -0.06 } } }, duration: 0.08, ease: 'easeInCubic', channels: ['sword.rotation.z', 'shield.rotation.x', 'arms.rotation.x'] },
-      recovery: { sub: { sword: { rotation: { z: 0 } }, shield: { rotation: { x: 0 } }, arms: { rotation: { x: 0 } } }, duration: 0.26, ease: 'easeInOutQuad', channels: ['sword.rotation.z', 'shield.rotation.x', 'arms.rotation.x'] }
+      action: { sub: { sword: { rotation: { z: -0.12 } }, shield: { rotation: { x: -0.10 } }, armR: { rotation: { x: -0.06 } }, armL: { rotation: { x: -0.06 } } }, duration: 0.08, ease: 'easeInCubic', channels: ['sword.rotation.z', 'shield.rotation.x', 'armR.rotation.x', 'armL.rotation.x'] },
+      recovery: { sub: { sword: { rotation: { z: 0 } }, shield: { rotation: { x: 0 } }, armR: { rotation: { x: 0 } }, armL: { rotation: { x: 0 } } }, duration: 0.26, ease: 'easeInOutQuad', channels: ['sword.rotation.z', 'shield.rotation.x', 'armR.rotation.x', 'armL.rotation.x'] }
     },
     capture: {
       anticipation: { sub: { sword: { rotation: { z: -0.4 } }, shield: { rotation: { x: -0.15 } }, body: { rotation: { x: -0.05 } } }, duration: 0.13, ease: 'easeOutQuad', channels: ['sword.rotation.z', 'shield.rotation.x', 'body.rotation.x'] },

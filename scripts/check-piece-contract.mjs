@@ -111,10 +111,11 @@ for (const key of Object.keys(GOLD_14)) {
   chk(JSON.stringify(got) === JSON.stringify(GOLD_14[key]),
     `[②] 黄金值漂移 ${key}: 期望 ${j(GOLD_14[key])} 实际 ${j(got)}`);
 }
-// 全表 45 关节（更强证据：证明整表搬移未改数。★ S2b +5：P/A/N/K.head、R.driverHead）
+// 全表 47 关节（更强证据：证明整表搬移未改数。★ S2b +5：P/A/N/K.head、R.driverHead；
+// ★ S2b-step2 +2−1：A.armR/armL 增、A.arms 退役 → 46）
 const GOLD_ALL = {
   P: { body: [0, 0.334, 0], head: [0, 0.585, 0], armR: [0.096, 0.419, 0], armL: [-0.096, 0.419, 0], legR: [0.055, 0.300, 0], legL: [-0.055, 0.300, 0], shield: [-0.176, 0.400, -0.058], spear: [0.170, 0.440, -0.020] },
-  A: { body: [0, 0.334, 0], head: [0, 0.663, 0], arms: [0, 0.474, 0], sword: [0, 0.328, -0.126], shield: [0, 0.45, -0.20] },
+  A: { body: [0, 0.334, 0], head: [0, 0.663, 0], armR: [0.140, 0.474, -0.006], armL: [-0.140, 0.474, -0.006], sword: [0, 0.328, -0.126], shield: [0, 0.45, -0.20] },
   N: { bodyHorse: [0, 0.128, 0], head: [0, 0.691, 0.008], legFL: [0.076, 0.214, -0.140], legFR: [-0.076, 0.214, -0.140], legBL: [0.080, 0.214, 0.165], legBR: [-0.080, 0.214, 0.165], rider: [0, 0.328, 0] },
   B: { bodyRobe: [0, 0.368, 0], hem: [0, 0.110, 0], arms: [0, 0.328, -0.10] },
   R: { horses: [0, 0.168, -0.24], body: [0, 0.288, 0.02], driverHead: [0.050, 0.7365, -0.0534], driver: [0.050, 0.4465, -0.050], spearman: [-0.050, 0.451, 0.080], wheelL: [-0.26, 0.330, 0], wheelR: [0.26, 0.330, 0] },
@@ -130,7 +131,7 @@ for (const type of Object.keys(GOLD_ALL)) {
       `[②] 全表黄金值漂移 ${type}.${sub}: 期望 ${j(GOLD_ALL[type][sub])} 实际 ${j(got)}`);
   }
 }
-chk(goldenAllN === 45, `[②] 全表关节数应为 45（40 + S2b 5 个 head），实际 ${goldenAllN}`);
+chk(goldenAllN === 46, `[②] 全表关节数应为 46（45 − A.arms + A.armR/armL），实际 ${goldenAllN}`);
 // 反向：不得有新增/缺失关节
 // ⚠ P1 复核：本「keys 比较」**部分构造性恒真** —— `GOLD_ALL` 的字面量键在 S0 搬移时抄自
 //   同一张表，且 ② 已逐值 pin 全部 40 关节；此处仅作「键集合」的二道钉，独立发现力有限。
@@ -338,8 +339,11 @@ for (const ch of ['armL.x', 'legR.x', 'legL.x']) {
   chk(!deriveZeroChannels('P').includes(ch), `[⑦] P.zeroChannels 仍含 move 通道 ${ch}（S0.1 未修）`);
   chk(deriveCombatChannels('P').has(ch), `[⑦] P 战斗通道集应含 move 通道 ${ch}`);
 }
+// ★ S2b-step2：A 的 move 战斗通道 arms.x → armR.x + armL.x（等值镜像，§7.3 #1）
 chk(!deriveZeroChannels('A').includes('arms.x'), `[⑦] A.zeroChannels 仍含 move 通道 arms.x（S0.1 未修）`);
-chk(deriveCombatChannels('A').has('arms.x'), `[⑦] A 战斗通道集应含 move 通道 arms.x`);
+chk(deriveCombatChannels('A').has('armR.x') && deriveCombatChannels('A').has('armL.x'), `[⑦] A 战斗通道集应含镜像后的 armR.x + armL.x（S2b-step2）`);
+chk(!deriveCombatChannels('A').has('arms.x'), `[⑦] A 战斗通道集不应再含合并节点 arms.x（S2b-step2）`);
+chk(!deriveZeroChannels('A').includes('armR.x') && !deriveZeroChannels('A').includes('armL.x'), `[⑦] A.zeroChannels 不应含战斗通道 armR.x/armL.x（S2b-step2）`);
 // 编排层直写覆盖证据（C 炮 executeCannon counterweight.z 此前完全遗漏）
 chk(deriveCombatChannels('C').has('counterweight.z'), `[⑦] C 战斗通道集应含编排层直写 counterweight.z`);
 chk(deriveCombatChannels('C').has('cart.x'), `[⑦] C 战斗通道集应含编排层直写 cart.x`);
@@ -432,7 +436,7 @@ const SPECS = {
 //   （crew 变体槽位整组重建会叠加重复头部，见 pieceJoints.ts 注）。
 const EXPECTED = {
   P: [['body', 'armR', 'armL', 'legR', 'legL', 'shield', 'spear', 'head']],
-  A: [['body', 'arms', 'sword', 'shield', 'head']],
+  A: [['body', 'armR', 'armL', 'sword', 'shield', 'head']],
   N: [['rider', 'head']],
   R: [['driver', 'driverHead'], ['spearman']],
   C: [['soldierL'], ['soldierR']],

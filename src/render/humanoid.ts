@@ -13,7 +13,8 @@
  * 设计要点（S1 关键）：
  *  1. **`grouping`** 决定「哪些关节成为独立 Object3D 子组」——
  *     - P：腿/臂各自独立子组 → `{ torso:'body', armR:'armR', armL:'armL', legR:'legR', legL:'legL' }`
- *     - A：双腿并入 body、双臂并入单个 arms → `{ torso:'body', legR:'body', legL:'body', armR:'arms', armL:'arms' }`
+ *     - A：双腿并入 body、头自 S2b 起独立 head；双臂原并入单个 arms，S2b-step2 起拆为
+ *       armR/armL 独立肩关节（§7.3 #1）→ `{ torso:'body', legR:'body', legL:'body', armR:'armR', armL:'armL' }`
  *     S1 用它**复刻现状**（零子组增减）；S2 起改为拆分（grouping 改成各 limb 独立）。
  *  2. `segments` 是**有序**列表，骨架件（`role:'bone'`）与服饰/装备件（`role:'apparel'`）同列 ——
  *     服饰件挂在所属骨骼下，由 `buildHumanoid` 按 `grouping` 路由到子组（即「注入点」）。
@@ -251,8 +252,9 @@ export const HUMAN_RIG_TREE: Record<string, Record<string, string>> = {
   A: {
     ...HUMAN_RIG_STD,
     body: 'idleGroup',
-    // A 现状：双臂共享单一 pivot（`arms` 子组）；腿/头并入 `body`
-    arms: 'torso',
+    // ★ S2b-step2：双臂拆为 armR/armL 独立肩关节（§7.3 #1）——二者的语义父链
+    //   已在 HUMAN_RIG_STD（armR/armL → torso），此处不再声明合并节点 `arms`。
+    //   ⚠ B.arms 仍保留（B 的合并双臂未拆，见 pieceJoints.ts B 行）。
     sword: 'handR',
     shield: 'forearmL'
   },
@@ -408,13 +410,16 @@ export const PAWN_SPEC: HumanoidSpec = {
 };
 
 /** 'A' 士/仕 —— 卫兵（武弁 + 筒袖铠，双手拄剑 + 圆盾）。数值逐点等于 `buildAdvisor` 内联路径。
- *  现状结构：双腿在 body 内联、双臂共享单一 `arms` pivot → spec 忠实建模为 4 关节
- *  （torso→body / arms→arms / sword / shield），零子组增减；per-limb 拆分属 S2。 */
+ *  S2b-step2（M-08d2）：双臂由单一 `arms` pivot 拆为 armR/armL 独立肩关节（§7.3 #1 几何前提）。
+ *  8 段臂/手零件按 x 正负逐字搬移（零数值改动）：右 4 段 → armR、左 4 段 → armL；
+ *  枢轴 = 各侧真肩点 [±0.140, 0.474, −0.006]（strut 起点 a，作者 y − FOOT）。
+ *  剑/盾挂点（sword→handR、shield→forearmL）未变 —— handR/forearmL 仍未物化，
+ *  与拆分前一样解析失败回落 idleGroup，行为逐帧一致。 */
 export const ADVISOR_SPEC: HumanoidSpec = {
   scale: 1,
   side: 'r',
   pose: 'stand',
-  grouping: { torso: 'body', head: 'head', arms: 'arms', sword: 'sword', shield: 'shield' },
+  grouping: { torso: 'body', head: 'head', armR: 'armR', armL: 'armL', sword: 'sword', shield: 'shield' },
   joints: [
     {
       name: 'torso', semantic: 'torso', parent: 'idleGroup', anchor: [0, 0.334, 0],
@@ -456,16 +461,24 @@ export const ADVISOR_SPEC: HumanoidSpec = {
         { role: 'apparel', prim: 'box', material: 'cloth', w: 0.012, h: 0.088, d: 0.008, pos: [-0.052, 0.716, 0.040], rot: [0.16, 0, -0.08] }
       ]
     },
+    // ★ S2b-step2（M-08d2）：单一 arms 关节拆为 armR/armL（§7.3 #1）——8 段零件按 x 正负
+    //   逐字搬移（数值零改动）；anchor = 各侧真肩点（strut 起点 a 作者 y − FOOT），
+    //   与 SUBGROUP_JOINTS.A.armR/armL 逐位一致（契约 ⑧-I2(d)）。
     {
-      name: 'arms', semantic: 'shoulder', parent: 'torso', anchor: [0, 0.474, 0],
+      name: 'armR', semantic: 'shoulder', parent: 'torso', anchor: [0.140, 0.474, -0.006],
       segments: [
         { role: 'bone', prim: 'strut', material: 'armorDeep', a: [0.140, 0.560, -0.006], b: [0.094, 0.556, -0.052], rTop: 0.032, rBot: 0.028, seg: 8 },
         { role: 'bone', prim: 'sph', material: 'armorDeep', r: 0.026, sw: 9, sh: 7, pos: [0.094, 0.556, -0.052] },
         { role: 'bone', prim: 'strut', material: 'armorDeep', a: [0.094, 0.556, -0.052], b: [0.048, 0.556, -0.154], rTop: 0.028, rBot: 0.024, seg: 8 },
+        { role: 'bone', prim: 'sph', material: 'skin', r: 0.032, sw: 10, sh: 8, pos: [0.036, 0.556, -0.168] }
+      ]
+    },
+    {
+      name: 'armL', semantic: 'shoulder', parent: 'torso', anchor: [-0.140, 0.474, -0.006],
+      segments: [
         { role: 'bone', prim: 'strut', material: 'armorDeep', a: [-0.140, 0.560, -0.006], b: [-0.094, 0.544, -0.052], rTop: 0.032, rBot: 0.028, seg: 8 },
         { role: 'bone', prim: 'sph', material: 'armorDeep', r: 0.026, sw: 9, sh: 7, pos: [-0.094, 0.544, -0.052] },
         { role: 'bone', prim: 'strut', material: 'armorDeep', a: [-0.094, 0.544, -0.052], b: [-0.048, 0.534, -0.154], rTop: 0.028, rBot: 0.024, seg: 8 },
-        { role: 'bone', prim: 'sph', material: 'skin', r: 0.032, sw: 10, sh: 8, pos: [0.036, 0.556, -0.168] },
         { role: 'bone', prim: 'sph', material: 'skin', r: 0.032, sw: 10, sh: 8, pos: [-0.036, 0.532, -0.168] }
       ]
     },

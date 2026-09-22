@@ -138,18 +138,22 @@ const KING: VignetteDef = {
 };
 
 // --- A 仕/士（loop 4.5s, crossfade 0.20s, 5 段, 2 变体）---------------------
-// L1 基准：sword.z=0.055, arms.x=−0.035（全场最静）
-// 交付：按剑戒备 ✓ / 整饬甲胄 ✓（arms.x）/ 手回按剑 ✓
+// L1 基准：sword.z=0.055, armR.x=armL.x=−0.035（全场最静）
+// 交付：按剑戒备 ✓ / 整饬甲胄 ✓（armR/L.x）/ 手回按剑 ✓
 //       移步护卫左·右 —— `legL`/`legR`/`armor` 待建模段。**不用 shield.x 替代**
 //       （shield 是战斗相关子组，摆动盾牌既非「抬脚」也易与 windUp 打架）→ 该步如实缺省，
 //       仅保留 body.y 上身微扫（±0.08）。
+// ★ S2b-step2（M-08d2 · §7.3 #1）：A.arms 拆为 armR/armL —— 原 `arms.x` 通道**等值镜像**
+//   到 armR.x + armL.x（双臂同步语义与拆分前一致；pivot 由中轴 x=0 校准为真肩点 ±0.140，
+//   静态外观不变，旋转更贴解剖）。forearmR/L、handR/L 仍未物化，替换链其余环节延后。
 const ADVISOR: VignetteDef = {
   loopSec: 4.5, crossfadeSec: 0.20, variantCount: 2,
-  baseline: [ch('sword', 'z', 0.055), ch('arms', 'x', -0.035)],
+  baseline: [ch('sword', 'z', 0.055), ch('armR', 'x', -0.035), ch('armL', 'x', -0.035)],
   segments: [
     seg('按剑戒备', 0.20, [
       ch('sword', 'z', 0.055),  // +0.055
-      ch('arms', 'x', -0.035),  // −0.035
+      ch('armR', 'x', -0.035),  // −0.035（与 armL 同步）
+      ch('armL', 'x', -0.035),
       ch('body', 'z', 0)        // 正身 0
     ]),
     seg('小幅移步护卫·左', 0.22, [
@@ -161,11 +165,13 @@ const ADVISOR: VignetteDef = {
       ch('body', 'y', 0)        // 回中
     ]),
     seg('举手整饬甲胄', 0.24, [
-      ch('arms', 'x', -0.16)    // 抬手扶肩甲 −0.16
+      ch('armR', 'x', -0.16),   // 抬手扶肩甲 −0.16（与 armL 同步）
+      ch('armL', 'x', -0.16)
       // TODO(建模段补齐): 'armor' 为部件 y 微移（+0.01），VigCh 仅支持 rotation，略去。
     ]),
     seg('手回按剑', 0.12, [
-      ch('arms', 'x', -0.035),  // → −0.035（闭合首帧）
+      ch('armR', 'x', -0.035),  // → −0.035（闭合首帧；与 armL 同步）
+      ch('armL', 'x', -0.035),
       ch('sword', 'z', 0.055)   // → +0.055（闭合首帧）
     ])
   ]
