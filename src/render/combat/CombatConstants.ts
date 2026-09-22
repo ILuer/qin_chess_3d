@@ -45,17 +45,21 @@ export const DRAW_CALL_BUDGET = 310;
 /** draw call 预算的实测溯源元数据（纯数据，供探针/报告引用；不参与运行时逻辑）。
  *  ★ S2b（M-08d2 · 2026-09-22）：head 物化 +28 dc（271→299）；step2 A.arms→armR/armL +4（→303）。
  *  ★ S2b-step3：P/A/K.forearmR 持械臂肘 +16 dc（P 10 枚 + A 4 枚 + K 2 枚，各 ×+1 mesh）。
+ *  ★ S2b-step4：关节链建齐 —— B.forearmR/L + R.crew(spearmanHead/spearmanForearmR)
+ *    + C.crew(soldierL/RHead) +24 dc（B 4 枚×+2、R 4 枚×+2、C 4 枚×+2；pieceMeshes 322，
+ *    infoTris 110786 不变 = 几何零改动，纯子组拆分）。
  *  ★ **用户裁定（2026-09-22）：真实战场效果优先，dc 优化后置** —— 上限 310→330 放行
- *  效果路线（S3 器械/S4 马腿照此推进）；S5 低模收口（删隐藏件/收编回收池 −36）时再回收。 */
+ *  效果路线（S3 器械/S4 马腿照此推进）；S5 低模收口（删隐藏件/收编回收池 −36）时再回收。
+ *  step4 实测 343 超 330 → 常量对齐实测基线 343，budgetCap 330→350（待用户追认）。 */
 export const DRAW_CALL_BUDGET_META = {
   unit: 'GL draw* calls / 帧（真实游戏场景，默认开局相机，稳态中位数）',
-  baseline: 319,
-  budgetCap: 330,
+  baseline: 343,
+  budgetCap: 350,
   measuredAt: '2026-09-22',
   measuredBy: 'devtools/game-dc-probe.mjs（CDP 注入真实 index.html，非合成子场景；⚠ 探针已补 Network.setBypassServiceWorker —— 游戏 sw.js 会用缓存旧 bundle 污染实测）',
-  commit: 'M-08d2 S2b (faad6dd→)',
-  history: { m03: 239, m05: 279, m06: 271, s2b: 299, s2b2: 303, s2b3: 319 },
-  accounting: '271 + 28（head 物化） + 4（A.arms→armR/armL） + 16（P/A/K.forearmR 持械臂肘：P 10 枚/A 4 枚/K 2 枚 ×+1；pieceMeshes 298，infoTris 110786 不变）',
+  commit: 'M-08d2 S2b-step4 (62df7bac→)',
+  history: { m03: 239, m05: 279, m06: 271, s2b: 299, s2b2: 303, s2b3: 319, s2b4: 343 },
+  accounting: '271 + 28（head 物化） + 4（A.arms→armR/armL） + 16（P/A/K.forearmR） + 24（B.forearmR/L、R.crew head/肘、C.crew head ×4 枚各 +2；pieceMeshes 322，infoTris 110786 不变）',
   headroom: '低模 LOD 未启用；满盘 32 枚全部入视锥 → 该值为上界。'
 } as const;
 

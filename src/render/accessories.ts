@@ -245,7 +245,9 @@ export const SLOT_TABLE: Record<string, Record<string, SlotSpec>> = {
     crew: {
       slot: 'crew',
       label: '乘员（持戈兵 → 持戟兵）',
-      subgroups: ['spearman'],
+      // ★ S2b-step4：crew 头/肘物化 → 槽位扩入 spearmanHead / spearmanForearmR
+      //   （applySlotOverrides 逐子组清空重建；halberdier 变体构建器按 ctx.subgroup 分支）。
+      subgroups: ['spearman', 'spearmanHead', 'spearmanForearmR'],
       kind: 'single',
       anchor: anchorOf('R', 'spearman'),
       orientation: '朝向 −Z 前（躯干质心为旋转中心）',
@@ -275,7 +277,9 @@ export const SLOT_TABLE: Record<string, Record<string, SlotSpec>> = {
     crew: {
       slot: 'crew',
       label: '操作兵（介帻兵 → 尖顶笠工兵）',
-      subgroups: ['soldierL', 'soldierR'],
+      // ★ S2b-step4：crew 头物化 → 槽位扩入 soldierLHead / soldierRHead
+      //   （sapper 变体构建器按 ctx.subgroup 分支；镜像符号改由子组名派生）。
+      subgroups: ['soldierL', 'soldierLHead', 'soldierR', 'soldierRHead'],
       kind: 'pair',
       anchor: [-0.25, 0.248, 0.09],
       orientation: '朝向 −Z 前（躯干质心为旋转中心）',

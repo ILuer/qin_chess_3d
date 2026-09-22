@@ -270,9 +270,11 @@ export const HUMAN_RIG_TREE: Record<string, Record<string, string>> = {
     ...HUMAN_RIG_STD,
     horses: 'idleGroup', body: 'idleGroup',
     driver: 'body', spearman: 'body',
-    // ★ S2b：御手头颈独立子组（driverHead 物化；spearman 头刻意不拆 —— crew 变体槽位
-    //   整组重建会与拆出的 head 叠加成重复几何，见 pieceJoints.ts 注）。
+    // ★ S2b：御手头颈独立子组（driverHead 物化）。
+    // ★ S2b-step4：crew 头/肘物化 + 变体路径同步改造（SLOT_TABLE R.crew 扩入，
+    //   halberdier 变体构建器按 ctx.subgroup 分支重建，不再叠加重复头部）。
     driverHead: 'driver',
+    spearmanHead: 'spearman', spearmanForearmR: 'spearman',
     wheelL: 'body', wheelR: 'body'
   },
   // C 抛石车（器械 + 两名操作兵）。
@@ -280,6 +282,9 @@ export const HUMAN_RIG_TREE: Record<string, Record<string, string>> = {
     ...HUMAN_RIG_STD,
     trebuchet: 'idleGroup', cart: 'trebuchet',
     soldierL: 'cart', soldierR: 'cart',
+    // ★ S2b-step4：操作兵头颈独立子组（crew 头物化 + 变体路径同步改造）。
+    //   C 兵默认推车无持械臂 → 肘按精选档跳过。
+    soldierLHead: 'soldierL', soldierRHead: 'soldierR',
     counterweight: 'trebuchet', wheelL: 'cart', wheelR: 'cart'
   },
   // K 主帅（坐姿人物 body + 右臂 rArm + 王座/冠/剑/旗/披风）。
@@ -293,6 +298,9 @@ export const HUMAN_RIG_TREE: Record<string, Record<string, string>> = {
   //   保证「已物化 ⊆ 已声明」对 B 亦成立。
   B: {
     ...HUMAN_RIG_STD,
+    // ★ S2b-step4：B 持械双臂肘物化（B 无 spec、内联单路径；肘嵌套 arms —— B 的上臂段
+    //   在 arms 组内，无独立 armR/armL 子组，故覆盖 STD 的 forearmR/L 父链）。
+    forearmR: 'arms', forearmL: 'arms',
     bodyRobe: 'idleGroup', hem: 'waist', arms: 'torso'
   }
 };
@@ -633,10 +641,11 @@ export function driverSpec(ox: number, oz: number, s: number, oy = 0.086): Human
         ]
       },
       // ★ S2b（M-08d2）：head 物化 —— 头颈 + 盔 3 零件自 torso 拆出（表达式逐字未改）。
-      //   anchor 与 SUBGROUP_JOINTS.R.driverHead 同表达式（sc=0.85, oy=0.405 时
-      //   y=0.7365 / z=−0.0534，契约 ⑧-I2(d) 逐位对上）。
+      //   ★ S2b-step4 枢轴 FOOT 口径修正：原表达式误存作者 y（0.376·sc+oy+0.014·sc），
+      //     现减 FOOT 得 piece-local（sc=0.85, oy=0.405 时 y=0.6505...，与 SUBGROUP_JOINTS.R.driverHead
+      //     逐位相等，契约 ⑧-I2(d)）。世界位置不受影响（translate(−J)+position(J) 相消）。
       {
-        name: 'head', semantic: 'head', parent: 'torso', anchor: [ox, 0.376 * sc + oy + 0.014 * sc, oz - 0.004 * sc],
+        name: 'head', semantic: 'head', parent: 'torso', anchor: [ox, 0.376 * sc + (oy - FOOT) + 0.014 * sc, oz - 0.004 * sc],
         segments: [
           { role: 'bone', prim: 'cyl', material: 'skin', rt: 0.024 * sc, rb: 0.026 * sc, h: 0.028 * sc, seg: 8, pos: [ox, 0.376 * sc + oy, oz] },
           { role: 'bone', prim: 'sph', material: 'skin', r: 0.044 * sc, sw: 10, sh: 8, pos: [ox, 0.416 * sc + oy, oz - 0.004 * sc] },
@@ -662,14 +671,17 @@ export function driverSpec(ox: number, oz: number, s: number, oy = 0.086): Human
 
 /** 持戈兵 spec 工厂（R `spearman` 子组）—— 立姿，右臂持戈、左臂垂放。
  *  数值逐点等于内联（`sc = s||1`）。**长戈为武器 → 由 `pieceFactory` 内联续写**，
- *  故本 spec 到左臂为止（`armR`/`armL` 两关节；长戈旧位置在两臂之间）。 */
+ *  故本 spec 到左臂为止（`armR`/`armL` 两关节；长戈旧位置在两臂之间）。
+ *  ★ S2b-step4（M-08d2）：crew 头 + 持械臂肘物化 —— head 3 零件自 torso 拆出、
+ *  forearmR 3 零件自 armR 拆出（表达式逐字未改）；grouping 路由到 `spearmanHead` /
+ *  `spearmanForearmR`（SLOT_TABLE R.crew 已扩入，变体重建按 ctx.subgroup 分支）。 */
 export function spearmanSpec(ox: number, oz: number, s: number, oy = 0.086): HumanoidSpec {
   const sc = s || 1.0;
   return {
     scale: 1,
     side: 'r',
     pose: 'stand',
-    grouping: { legs: 'spearman', torso: 'spearman', armR: 'spearman', armL: 'spearman' },
+    grouping: { legs: 'spearman', torso: 'spearman', armR: 'spearman', armL: 'spearman', head: 'spearmanHead', forearmR: 'spearmanForearmR' },
     joints: [
       {
         name: 'legs', semantic: 'hip', parent: 'torso', anchor: [-0.050, 0.451, 0.080],
@@ -690,7 +702,16 @@ export function spearmanSpec(ox: number, oz: number, s: number, oy = 0.086): Hum
           { role: 'apparel', prim: 'cyl', material: 'armor', rt: 0.068 * sc, rb: 0.072 * sc, h: 0.018 * sc, seg: 10, pos: [ox, 0.266 * sc + oy, oz] },
           { role: 'apparel', prim: 'sph', material: 'armorDeep', r: 0.040 * sc, sw: 9, sh: 7, pos: [ox + 0.074 * sc, 0.310 * sc + oy, oz] },
           { role: 'apparel', prim: 'sph', material: 'armorDeep', r: 0.040 * sc, sw: 9, sh: 7, pos: [ox - 0.074 * sc, 0.310 * sc + oy, oz] },
-          { role: 'apparel', prim: 'cyl', material: 'accentDim', rt: 0.026 * sc, rb: 0.028 * sc, h: 0.024 * sc, seg: 8, pos: [ox, 0.352 * sc + oy, oz] },
+          { role: 'apparel', prim: 'cyl', material: 'accentDim', rt: 0.026 * sc, rb: 0.028 * sc, h: 0.024 * sc, seg: 8, pos: [ox, 0.352 * sc + oy, oz] }
+        ]
+      },
+      // ★ S2b-step4（M-08d2）：crew 头物化 —— 头颈 + 兜鍪 3 零件自 torso 拆出（表达式逐字未改）。
+      //   枢轴 = 寰关节（颈 skin 柱顶缘 piece-local；sc=0.88, oy=0.405 时 y=0.66396），
+      //   与 SUBGROUP_JOINTS.R.spearmanHead 逐位相等（契约 ⑧-I2(d)）。
+      //   运行时嵌套于 spearman 子组；变体重建时随 R.crew 槽位一并清空重建。
+      {
+        name: 'head', semantic: 'head', parent: 'torso', anchor: [ox, 0.378 * sc + (oy - FOOT) + 0.014 * sc, oz],
+        segments: [
           { role: 'bone', prim: 'cyl', material: 'skin', rt: 0.024 * sc, rb: 0.026 * sc, h: 0.028 * sc, seg: 8, pos: [ox, 0.378 * sc + oy, oz] },
           { role: 'bone', prim: 'sph', material: 'skin', r: 0.044 * sc, sw: 10, sh: 8, pos: [ox, 0.418 * sc + oy, oz - 0.004 * sc] },
           { role: 'apparel', prim: 'dome', material: 'armor', r: 0.042 * sc, sw: 10, sh: 6, frac: 0.56, pos: [ox, 0.438 * sc + oy, oz - 0.004 * sc] }
@@ -699,7 +720,16 @@ export function spearmanSpec(ox: number, oz: number, s: number, oy = 0.086): Hum
       {
         name: 'armR', semantic: 'shoulder', parent: 'torso', anchor: [-0.050, 0.451, 0.080],
         segments: [
-          { role: 'bone', prim: 'strut', material: 'armorDeep', a: [ox + 0.070 * sc, 0.306 * sc + oy, oz], b: [ox + 0.098 * sc, 0.288 * sc + oy, oz - 0.040 * sc], rTop: 0.026 * sc, rBot: 0.022 * sc, seg: 8 },
+          { role: 'bone', prim: 'strut', material: 'armorDeep', a: [ox + 0.070 * sc, 0.306 * sc + oy, oz], b: [ox + 0.098 * sc, 0.288 * sc + oy, oz - 0.040 * sc], rTop: 0.026 * sc, rBot: 0.022 * sc, seg: 8 }
+        ]
+      },
+      // ★ S2b-step4（M-08d2）：持械臂肘物化 —— 肘球 + 前臂 + 手 3 零件自 armR 拆出（表达式逐字未改）。
+      //   枢轴 = 肘关节（肘球 piece-local；sc=0.88, oy=0.405 时 [0.03624, 0.57244, 0.0448]）。
+      //   ⚠ crew 的 armR 未独立物化（上臂段在 spearman 组内），forearmR 运行时嵌套于 spearman；
+      //   左臂（非持械）按精选档不拆肘。长戈挂点不动（随接线轮带姿态评审）。
+      {
+        name: 'forearmR', semantic: 'elbow', parent: 'armR', anchor: [ox + 0.098 * sc, 0.288 * sc + (oy - FOOT), oz - 0.040 * sc],
+        segments: [
           { role: 'bone', prim: 'sph', material: 'armorDeep', r: 0.022 * sc, sw: 8, sh: 6, pos: [ox + 0.098 * sc, 0.288 * sc + oy, oz - 0.040 * sc] },
           { role: 'bone', prim: 'strut', material: 'armorDeep', a: [ox + 0.098 * sc, 0.288 * sc + oy, oz - 0.040 * sc], b: [ox + 0.124 * sc, 0.272 * sc + oy, oz - 0.084 * sc], rTop: 0.022 * sc, rBot: 0.018 * sc, seg: 8 },
           { role: 'bone', prim: 'sph', material: 'skin', r: 0.026 * sc, sw: 9, sh: 7, pos: [ox + 0.126 * sc, 0.268 * sc + oy, oz - 0.086 * sc] }
@@ -720,7 +750,10 @@ export function spearmanSpec(ox: number, oz: number, s: number, oy = 0.086): Hum
 
 /** 操作兵 spec 工厂（C `soldierL`/`soldierR` 子组）—— 推车/转绞盘姿态。
  *  `group` 决定 grouping 目标（`soldierL` 或 `soldierR`）。数值逐点等于内联
- *  （`sc = s||0.85`、`mx = mirrorX||1`、`legH = 0.038*sc`）。无武器 → 全量 spec。 */
+ *  （`sc = s||0.85`、`mx = mirrorX||1`、`legH = 0.038*sc`）。无武器 → 全量 spec。
+ *  ★ S2b-step4（M-08d2）：crew 头物化 —— 头颈 + 介帻 4 零件自 torso 拆出（表达式逐字未改），
+ *  grouping 路由到 `soldierLHead`/`soldierRHead`（SLOT_TABLE C.crew 已扩入，变体重建按
+ *  ctx.subgroup 分支）。C 兵默认推车无持械臂 → 肘按精选档跳过。 */
 export function cannonSoldierSpec(group: string, ox: number, oy: number, s: number, mirrorX: number): HumanoidSpec {
   const sc = s || 0.85;
   const mx = mirrorX || 1;
@@ -730,7 +763,7 @@ export function cannonSoldierSpec(group: string, ox: number, oy: number, s: numb
     scale: 1,
     side: 'r',
     pose: 'operate',
-    grouping: { legs: group, torso: group, arms: group },
+    grouping: { legs: group, torso: group, arms: group, head: `${group}Head` },
     joints: [
       {
         name: 'legs', semantic: 'hip', parent: 'torso', anchor,
@@ -756,7 +789,16 @@ export function cannonSoldierSpec(group: string, ox: number, oy: number, s: numb
           { role: 'apparel', prim: 'cyl', material: 'armor', rt: 0.060 * sc, rb: 0.064 * sc, h: 0.016 * sc, seg: 10, pos: [ox, oy + legH + 0.228 * sc, 0.016 * mx] },
           { role: 'apparel', prim: 'sph', material: 'armorDeep', r: 0.034 * sc, sw: 9, sh: 7, pos: [ox + 0.062 * sc * mx, oy + legH + 0.268 * sc, 0.016 * mx] },
           { role: 'apparel', prim: 'sph', material: 'armorDeep', r: 0.034 * sc, sw: 9, sh: 7, pos: [ox - 0.062 * sc * mx, oy + legH + 0.268 * sc, 0.016 * mx] },
-          { role: 'apparel', prim: 'cyl', material: 'accentDim', rt: 0.024 * sc, rb: 0.026 * sc, h: 0.022 * sc, seg: 8, pos: [ox, oy + legH + 0.304 * sc, 0.018 * mx] },
+          { role: 'apparel', prim: 'cyl', material: 'accentDim', rt: 0.024 * sc, rb: 0.026 * sc, h: 0.022 * sc, seg: 8, pos: [ox, oy + legH + 0.304 * sc, 0.018 * mx] }
+        ]
+      },
+      // ★ S2b-step4（M-08d2）：crew 头物化 —— 头颈 + 介帻 4 零件自 torso 拆出（表达式逐字未改）。
+      //   枢轴 = 寰关节（颈 skin 柱顶缘 piece-local；sc=0.95, oy=FOOT 时 y=0.35815，
+      //   z 随士兵镜像 0.018·mx），与 SUBGROUP_JOINTS.C.soldierL/RHead 逐位相等（契约 ⑧-I2(d)）。
+      //   运行时嵌套于 soldierL/soldierR 子组；变体重建时随 C.crew 槽位一并清空重建。
+      {
+        name: 'head', semantic: 'head', parent: 'torso', anchor: [ox, oy + legH + 0.326 * sc + 0.013 * sc - FOOT, 0.018 * mx],
+        segments: [
           { role: 'bone', prim: 'cyl', material: 'skin', rt: 0.022 * sc, rb: 0.024 * sc, h: 0.026 * sc, seg: 8, pos: [ox, oy + legH + 0.326 * sc, 0.018 * mx] },
           { role: 'bone', prim: 'sph', material: 'skin', r: 0.040 * sc, sw: 10, sh: 8, pos: [ox, oy + legH + 0.362 * sc, 0.014 * mx] },
           { role: 'apparel', prim: 'cyl', material: 'clothDeep', rt: 0.056 * sc, rb: 0.060 * sc, h: 0.010 * sc, seg: 12, pos: [ox, oy + legH + 0.392 * sc, 0.014 * mx] },
@@ -840,10 +882,11 @@ export function kingSpec(): HumanoidSpec {
         ]
       },
       // ★ S2b-step3（M-08d2）：forearmR 物化 —— 肘球 + 前臂 + 手 3 零件自 rArm 拆出（数值逐字未改），
-      //   枢轴 = 肘关节 [0.160, 0.446, 0.040]（肘球 FOOT+0.360）；§7.3 #10 的 forearmR.x 通道前提。
+      //   枢轴 = 肘关节 [0.160, 0.360, 0.040]（肘球 piece-local；★ S2b-step4 修正：原误存作者 y
+      //   FOOT+0.360=0.446，枢轴偏高 0.086 —— 世界位置不变，仅旋转中心回到肘）；§7.3 #10 前提。
       //   运行时嵌套于 rArm 子组（SUBGROUP_PARENTS.K）；佩剑挂点不动。
       {
-        name: 'forearmR', semantic: 'elbow', parent: 'armR', anchor: [0.160, 0.446, 0.040],
+        name: 'forearmR', semantic: 'elbow', parent: 'armR', anchor: [0.160, 0.360, 0.040],
         segments: [
           { role: 'bone', prim: 'sph', material: 'armorDeep', r: 0.030, sw: 10, sh: 8, pos: [0.160, FOOT + 0.360, 0.040] },
           { role: 'bone', prim: 'strut', material: 'armorDeep', a: [0.160, FOOT + 0.360, 0.040], b: [0.160, FOOT + 0.275, 0.020], rTop: 0.030, rBot: 0.026, seg: 8 },

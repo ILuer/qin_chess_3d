@@ -681,7 +681,12 @@ function buildHorse(mp: any, M: any, K: any, side: string): void {
 function buildElephant(mp: any, M: any, K: any, side: string): void {
   const robeP = mp.get('bodyRobe'); // 袍身躯干 + 头 + 帽（静止主体，绕袍身关节微动）
   const hemP = mp.get('hem');       // 下摆（独立子组，绕腰 pivot [0,0.200,0] 飘动）
-  const armsP = mp.get('arms');     // 宽袖 + 双手 + 简牍（绕肩关节摆动）
+  const armsP = mp.get('arms');     // 宽袖大臂 + 双手 + 简牍（绕肩关节摆动）
+  // ★ S2b-step4（M-08d2）：持械双臂肘物化 —— 肘球 + 小臂 + 袖口环拆入 forearmR/L
+  //   （枢轴 = 肘球局部 [±0.140, 0.376, −0.026]；静态外观恒不变）。双手 + 简牍留 arms
+  //   （捧持物随前臂的驱动语义属接线轮，带姿态评审）。B 无 spec → 内联单路径直接拆。
+  const forearmRP = mp.get('forearmR');
+  const forearmLP = mp.get('forearmL');
 
   // 履（接触面用鞋底材质）
   robeP.add(box(0.070, 0.035, 0.100), M.bootSole, { pos: [0.048, FOOT + 0.018, -0.030] });
@@ -741,19 +746,23 @@ function buildElephant(mp: any, M: any, K: any, side: string): void {
   hemP.add(tor(0.170, 0.014, 5, 18), M.accentDim, { pos: [0, 0.130, 0], rot: [Math.PI / 2, 0, 0] });
 
   // 宽袖 + 双手 + 简牍（arms，绕肩关节摆动，anatomy 大臂 + 小臂 + 手）
-  // 右臂 大臂 + 小臂
+  // ★ S2b-step4：大臂段留 arms；肘球 + 小臂 + 袖口环 → forearmR/L（嵌套 arms，见 buildElephant 顶部注）
+  // 右臂 大臂
   armsP.strut(M.robe, [+0.104, 0.545, -0.010], [+0.140, 0.462, -0.026], 0.062, 0.072, 12);
-  armsP.add(sph(0.034, 8, 6), M.robe, { pos: [+0.140, 0.462, -0.026] });
-  armsP.strut(M.robe, [+0.140, 0.462, -0.026], [+0.176, 0.378, -0.042], 0.060, 0.088, 12);
-  // 左臂 大臂 + 小臂
+  // 左臂 大臂
   armsP.strut(M.robe, [-0.104, 0.545, -0.010], [-0.140, 0.462, -0.026], 0.062, 0.072, 12);
-  armsP.add(sph(0.034, 8, 6), M.robe, { pos: [-0.140, 0.462, -0.026] });
-  armsP.strut(M.robe, [-0.140, 0.462, -0.026], [-0.176, 0.378, -0.042], 0.060, 0.088, 12);
+  // 右肘（肘球 + 小臂 + 袖口环）
+  forearmRP.add(sph(0.034, 8, 6), M.robe, { pos: [+0.140, 0.462, -0.026] });
+  forearmRP.strut(M.robe, [+0.140, 0.462, -0.026], [+0.176, 0.378, -0.042], 0.060, 0.088, 12);
+  forearmRP.add(tor(0.084, 0.012, 5, 14), M.clothDeep, { pos: [+0.172, 0.394, -0.040], rot: [1.30, 0, -0.38] });
+  // 左肘（肘球 + 小臂 + 袖口环）
+  forearmLP.add(sph(0.034, 8, 6), M.robe, { pos: [-0.140, 0.462, -0.026] });
+  forearmLP.strut(M.robe, [-0.140, 0.462, -0.026], [-0.176, 0.378, -0.042], 0.060, 0.088, 12);
+  forearmLP.add(tor(0.084, 0.012, 5, 14), M.clothDeep, { pos: [-0.172, 0.394, -0.040], rot: [1.30, 0, 0.38] });
   // ★ M-03 #9（袖口悬空环）：红环原落在 [±0.178, 0.372, −0.044]，比小臂末端
   //   （[±0.176, 0.378, −0.042]，端半径 0.088）低 0.006 且外偏，读作「悬在袖外的圈」。
   //   本次沿小臂轴向上内收（y +0.022 → 0.394，x ∓0.006，z +0.004），使环体嵌入袖口下缘。
-  armsP.add(tor(0.084, 0.012, 5, 14), M.clothDeep, { pos: [+0.172, 0.394, -0.040], rot: [1.30, 0, -0.38] });
-  armsP.add(tor(0.084, 0.012, 5, 14), M.clothDeep, { pos: [-0.172, 0.394, -0.040], rot: [1.30, 0, 0.38] });
+  //   （★ S2b-step4：环体随小臂拆入 forearmR/L，数值未改。）
   // 手（捧简牍）
   armsP.add(sph(0.032, 10, 8), M.skin, { pos: [+0.052, 0.498, -0.118] });
   armsP.add(sph(0.032, 10, 8), M.skin, { pos: [-0.052, 0.498, -0.118] });

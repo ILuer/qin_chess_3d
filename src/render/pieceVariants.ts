@@ -183,14 +183,26 @@ function buildCannonWheelIron(P: any, M: any, K: any, ctx: VariantBuildCtx): voi
 /**
  * C.crew · 操作兵 → **尖顶笠工兵**（gongbing）。
  * 躯干质心旋转语义不变；介帻帽 → 尖顶笠，配手持撬棍（姿态/装备差异）。
+ * ★ S2b-step4（M-08d2）：crew 头物化后的变体路径同步 —— C.crew 槽位扩为
+ *   ['soldierL','soldierLHead','soldierR','soldierRHead']，本构建器按 ctx.subgroup 分支
+ *   重建（不再叠加重复头部）；镜像符号 mx 改由子组名派生（原 ctx.index 语义随槽位扩容失效）。
  */
 function buildCannonSoldierSapper(P: any, M: any, K: any, ctx: VariantBuildCtx): void {
   const ox = ctx.anchor[0];                // ∓0.250
-  const mx = ctx.index === 0 ? 1 : -1;
+  const mx = ctx.subgroup.startsWith('soldierL') ? 1 : -1;
   const oy = FOOT;
   const sc = 0.95;
   const legH = 0.038 * sc;
-  // 腿 + 靴
+  // ── 头分支：头颈 + 尖顶笠 4 零件（集合同默认 spec；头颈表达式为变体自有值，逐字未改）──
+  if (ctx.subgroup.endsWith('Head')) {
+    P.add(cyl(0.022 * sc, 0.024 * sc, 0.026 * sc, 8), M.skin, { pos: [ox, oy + legH + 0.324 * sc, 0.018 * mx] });
+    P.add(sph(0.040 * sc, 10, 8), M.skin, { pos: [ox, oy + legH + 0.340 * sc, 0.014 * mx] });
+    // 尖顶笠（差异装备；顶高 ≤ 原版 0.421）
+    P.add(cyl(0.000, 0.066 * sc, 0.048 * sc, 12), M.cloth, { pos: [ox, oy + legH + 0.372 * sc, 0.014 * mx] });
+    P.add(tor(0.064 * sc, 0.007 * sc, 4, 12), M.leather, { pos: [ox, oy + legH + 0.352 * sc, 0.014 * mx], rot: [Math.PI / 2, 0, 0] });
+    return;
+  }
+  // ── 躯干分支：腿 + 靴 ──
   P.strut(M.clothDeep, [ox - 0.024 * sc * mx, oy + legH + 0.130 * sc, 0], [ox - 0.024 * sc * mx, oy + legH + 0.060 * sc, 0], 0.028 * sc, 0.024 * sc, 8);
   P.strut(M.clothDeep, [ox + 0.024 * sc * mx, oy + legH + 0.130 * sc, 0], [ox + 0.024 * sc * mx, oy + legH + 0.060 * sc, 0], 0.028 * sc, 0.024 * sc, 8);
   P.add(box(0.034 * sc, 0.022 * sc, 0.058 * sc), M.bootSole, { pos: [ox - 0.024 * sc * mx, oy + 0.011 * sc, -0.016 * sc] });
@@ -205,13 +217,8 @@ function buildCannonSoldierSapper(P: any, M: any, K: any, ctx: VariantBuildCtx):
   // 肩
   P.add(sph(0.034 * sc, 9, 7), M.armorDeep, { pos: [ox + 0.062 * sc * mx, oy + legH + 0.268 * sc, 0.016 * mx] });
   P.add(sph(0.034 * sc, 9, 7), M.armorDeep, { pos: [ox - 0.062 * sc * mx, oy + legH + 0.268 * sc, 0.016 * mx] });
-  // 颈 + 头
+  // 颈（盆领；头颈 + 笠 4 零件 → Head 分支）
   P.add(cyl(0.024 * sc, 0.026 * sc, 0.022 * sc, 8), M.accentDim, { pos: [ox, oy + legH + 0.304 * sc, 0.018 * mx] });
-  P.add(cyl(0.022 * sc, 0.024 * sc, 0.026 * sc, 8), M.skin, { pos: [ox, oy + legH + 0.324 * sc, 0.018 * mx] });
-  P.add(sph(0.040 * sc, 10, 8), M.skin, { pos: [ox, oy + legH + 0.340 * sc, 0.014 * mx] });
-  // 尖顶笠（差异装备；顶高 ≤ 原版 0.421）
-  P.add(cyl(0.000, 0.066 * sc, 0.048 * sc, 12), M.cloth, { pos: [ox, oy + legH + 0.372 * sc, 0.014 * mx] });
-  P.add(tor(0.064 * sc, 0.007 * sc, 4, 12), M.leather, { pos: [ox, oy + legH + 0.352 * sc, 0.014 * mx], rot: [Math.PI / 2, 0, 0] });
   // 双臂前伸
   P.strut(M.armorDeep, [ox + 0.058 * sc * mx, oy + legH + 0.264 * sc, 0.016 * mx], [ox + 0.084 * sc * mx, oy + legH + 0.244 * sc, -0.020 * sc], 0.024 * sc, 0.020 * sc, 8);
   P.add(sph(0.020 * sc, 8, 6), M.armorDeep, { pos: [ox + 0.084 * sc * mx, oy + legH + 0.244 * sc, -0.020 * sc] });
@@ -230,12 +237,31 @@ function buildCannonSoldierSapper(P: any, M: any, K: any, ctx: VariantBuildCtx):
 /**
  * R.crew · 持戈兵 → **持戟兵**（chijibing）。
  * 躯干旋转语义不变；长戈 → 戟（矛尖 + 月牙侧刃）。
+ * ★ S2b-step4（M-08d2）：crew 头 + 持械臂肘物化后的变体路径同步 —— R.crew 槽位扩为
+ *   ['spearman','spearmanHead','spearmanForearmR']，本构建器按 ctx.subgroup 分支重建
+ *   （applySlotOverrides 逐子组清空 + 调用本函数），**不再叠加重复头部/前臂**。
+ *   分支间几何表达式逐字未改；头/肘零件集合与默认 spec（spearmanSpec）一致。
  */
 function buildRookHalberdier(P: any, M: any, K: any, ctx: VariantBuildCtx): void {
   const ox = ctx.anchor[0];                // −0.050
   const oz = ctx.anchor[2];                // 0.080
   const oy = 0.405;
   const sc = 0.88;
+  // ── 头分支：头颈 + 兜鍪 3 零件（默认 spec 同集合）──
+  if (ctx.subgroup === 'spearmanHead') {
+    P.add(cyl(0.024 * sc, 0.026 * sc, 0.028 * sc, 8), M.skin, { pos: [ox, 0.378 * sc + oy, oz] });
+    P.add(sph(0.044 * sc, 10, 8), M.skin, { pos: [ox, 0.418 * sc + oy, oz - 0.004 * sc] });
+    P.add(dome(0.042 * sc, 10, 6, 0.56), M.armor, { pos: [ox, 0.438 * sc + oy, oz - 0.004 * sc] });
+    return;
+  }
+  // ── 肘分支：肘球 + 前臂 + 手 3 零件（默认 spec 同集合；持械臂 = 右臂）──
+  if (ctx.subgroup === 'spearmanForearmR') {
+    P.add(sph(0.022 * sc, 8, 6), M.armorDeep, { pos: [ox + 0.098 * sc, 0.288 * sc + oy, oz - 0.040 * sc] });
+    P.strut(M.armorDeep, [ox + 0.098 * sc, 0.288 * sc + oy, oz - 0.040 * sc], [ox + 0.124 * sc, 0.272 * sc + oy, oz - 0.084 * sc], 0.022 * sc, 0.018 * sc, 8);
+    P.add(sph(0.026 * sc, 9, 7), M.skin, { pos: [ox + 0.126 * sc, 0.268 * sc + oy, oz - 0.086 * sc] });
+    return;
+  }
+  // ── 躯干分支（spearman）：腿/下身/躯干/肩/盆领 + 右大臂 + 戟 + 左臂全 ──
   // 腿 + 靴
   P.strut(M.clothDeep, [ox, 0.150 * sc + oy, oz], [ox, 0.080 * sc + oy, oz], 0.034, 0.030, 8);
   P.strut(M.clothDeep, [ox + 0.020 * sc, 0.150 * sc + oy, oz], [ox + 0.022 * sc, 0.080 * sc + oy, oz], 0.028, 0.024, 8);
@@ -250,16 +276,10 @@ function buildRookHalberdier(P: any, M: any, K: any, ctx: VariantBuildCtx): void
   // 肩
   P.add(sph(0.040 * sc, 9, 7), M.armorDeep, { pos: [ox + 0.074 * sc, 0.310 * sc + oy, oz] });
   P.add(sph(0.040 * sc, 9, 7), M.armorDeep, { pos: [ox - 0.074 * sc, 0.310 * sc + oy, oz] });
-  // 颈 + 头 + 兜鍪
+  // 颈（盆领；头颈 3 零件 → spearmanHead 分支）
   P.add(cyl(0.026 * sc, 0.028 * sc, 0.024 * sc, 8), M.accentDim, { pos: [ox, 0.352 * sc + oy, oz] });
-  P.add(cyl(0.024 * sc, 0.026 * sc, 0.028 * sc, 8), M.skin, { pos: [ox, 0.378 * sc + oy, oz] });
-  P.add(sph(0.044 * sc, 10, 8), M.skin, { pos: [ox, 0.418 * sc + oy, oz - 0.004 * sc] });
-  P.add(dome(0.042 * sc, 10, 6, 0.56), M.armor, { pos: [ox, 0.438 * sc + oy, oz - 0.004 * sc] });
-  // 右臂持戟
+  // 右大臂（持戟；肘球 + 前臂 + 手 → spearmanForearmR 分支）
   P.strut(M.armorDeep, [ox + 0.070 * sc, 0.306 * sc + oy, oz], [ox + 0.098 * sc, 0.288 * sc + oy, oz - 0.040 * sc], 0.026 * sc, 0.022 * sc, 8);
-  P.add(sph(0.022 * sc, 8, 6), M.armorDeep, { pos: [ox + 0.098 * sc, 0.288 * sc + oy, oz - 0.040 * sc] });
-  P.strut(M.armorDeep, [ox + 0.098 * sc, 0.288 * sc + oy, oz - 0.040 * sc], [ox + 0.124 * sc, 0.272 * sc + oy, oz - 0.084 * sc], 0.022 * sc, 0.018 * sc, 8);
-  P.add(sph(0.026 * sc, 9, 7), M.skin, { pos: [ox + 0.126 * sc, 0.268 * sc + oy, oz - 0.086 * sc] });
   // 戟（杆 + 矛尖 + 月牙侧刃 + 反刃 + 铜箍）
   P.add(cyl(0.010 * sc, 0.012 * sc, 0.520 * sc, 8), M.woodDeep, { pos: [ox + 0.122 * sc, 0.350 * sc + oy, oz - 0.080 * sc], rot: [-0.55, 0, 0] });
   P.add(cyl(0.000, 0.022 * sc, 0.090 * sc, 8), K.bronze, { pos: [ox + 0.122 * sc, 0.640 * sc + oy, oz - 0.180 * sc], rot: [-0.55, 0, 0] });

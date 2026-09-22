@@ -75,8 +75,14 @@ export const JOINT_DOF: Record<string, JointDof> = {
   footR: H('footR', 'shinR', 'ankle', { x: [-0.60, 0.70], z: [-0.30, 0.30] }, ['移动落步'], true),
   footL: H('footL', 'shinL', 'ankle', { x: [-0.60, 0.70], z: [-0.30, 0.30] }, ['移动落步'], true),
 
-  // ★ S2b（M-08d2）：御手头颈独立子组（限位沿用 head；spearman/soldier 头未物化，见 pieceJoints.ts）。
+  // ★ S2b（M-08d2）：御手头颈独立子组（限位沿用 head）。
+  // ★ S2b-step4（M-08d2）：crew 头 + R 持械臂肘物化（限位沿用 head / forearmR；
+  //   消费方待接线轮落 POSE_TABLE/编舞后充实）。B.forearmR/L 复用标准 forearmR/forearmL 条目。
   driverHead: H('driverHead', 'driver', 'head', { x: [-0.25, 0.30], y: [-0.50, 0.50], z: [-0.20, 0.20] }, ['待机', '移动', '吃子', '受击'], true),
+  spearmanHead: H('spearmanHead', 'spearman', 'head', { x: [-0.25, 0.30], y: [-0.50, 0.50], z: [-0.20, 0.20] }, ['待机', '移动', '吃子', '受击'], true),
+  spearmanForearmR: H('spearmanForearmR', 'spearman', 'elbow', { x: [-2.40, 0], y: [-1.20, 1.20] }, ['吃子', '待机持戈'], true),
+  soldierLHead: H('soldierLHead', 'soldierL', 'head', { x: [-0.25, 0.30], y: [-0.50, 0.50], z: [-0.20, 0.20] }, ['待机', '移动', '吃子', '受击'], true),
+  soldierRHead: H('soldierRHead', 'soldierR', 'head', { x: [-0.25, 0.30], y: [-0.50, 0.50], z: [-0.20, 0.20] }, ['待机', '移动', '吃子', '受击'], true),
 
   // ── 马匹（§7.2 马匹行）──
   bodyHorse: HS('bodyHorse', 'idleGroup', 'horseBody', { x: [-0.60, 0.60], y: [-0.40, 0.40], z: [-0.35, 0.35] }, ['待机', '移动', '吃子', '崩解']),

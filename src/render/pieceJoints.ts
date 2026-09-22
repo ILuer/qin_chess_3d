@@ -91,10 +91,10 @@ export const SUBGROUP_JOINTS: Record<string, Record<string, Vec3>> = {
   A: { body: [0, 0.334, 0], head: [0, 0.663, 0], armR: [0.140, 0.474, -0.006], armL: [-0.140, 0.474, -0.006], forearmR: [0.094, 0.470, -0.052], sword: [0, 0.328, -0.126], shield: [0, 0.45, -0.20] },
   // ★ M-03 #16：四腿 hip 由 0.300（作者坐标）校准为 0.300−FOOT=0.214（真髋点，= strut 起点）。
   N: { bodyHorse: [0, 0.128, 0], head: [0, 0.691, 0.008], legFL: [+0.076, 0.214, -0.140], legFR: [-0.076, 0.214, -0.140], legBL: [+0.080, 0.214, 0.165], legBR: [-0.080, 0.214, 0.165], rider: [0, 0.328, 0] },
-  // ★ Sprint 4 写实：象 B 拆 robe→bodyRobe + hem（下摆独立可飘动子组），
-  //   arms 暂不动（零增量，Sprint 4 不拆袖）。hem 绕腰 pivot [0,0.200,0] 残留 1 mesh/枚。
-  // ★ M-03 #17：hem pivot 由 0.200（作者坐标）校准为 0.110（下摆顶缘 = 腰，绕此摆动）。
-  B: { bodyRobe: [0, 0.368, 0], hem: [0, 0.110, 0], arms: [0, 0.328, -0.10] },
+  // ★ S2b-step4（M-08d2 · 2026-09-22）：B 持械双臂肘物化（§7.3 精选档「持械臂的肘」；
+  //   B 双手捧简牍 → 左右肘都拆）。枢轴 = 肘球（作者 [±0.140,0.462,−0.026] − FOOT）。
+  //   静态外观恒不变；手 + 简牍留 arms（捧持物随前臂的驱动语义属接线轮，带姿态评审）。
+  B: { bodyRobe: [0, 0.368, 0], hem: [0, 0.110, 0], arms: [0, 0.328, -0.10], forearmR: [0.140, 0.376, -0.026], forearmL: [-0.140, 0.376, -0.026] },
   // ★ M-03 #2/#4/#12：
   //   driver  [0.05, 0.378, 0.40] → [0.050, 0.4465, −0.050]（真髋：作者 0.150×0.85+0.405−FOOT；
   //           z 由遗留错误 0.40 校正到实际站位 −0.030，并按 #12 外扩 0.02 → −0.050）
@@ -103,7 +103,16 @@ export const SUBGROUP_JOINTS: Record<string, Record<string, Vec3>> = {
   //   driverHead 锚点 = 御手颈柱顶缘（sc=0.85, oy=0.405 同 buildChariot 实参；
   //   y = 0.376·sc+oy+0.014·sc = 0.7365，z = oz−0.004·sc = −0.0534 —— 与 driverSpec
   //   工厂同表达式，契约 ⑧-I2(d) 逐位对上）。
-  R: { horses: [0, 0.168, -0.24], body: [0, 0.288, 0.02], driverHead: [0.050, 0.7365, -0.0534], driver: [0.050, 0.4465, -0.050], spearman: [-0.050, 0.451, 0.080], wheelL: [-0.26, 0.330, 0], wheelR: [0.26, 0.330, 0] },
+  // ★ S2b-step4（M-08d2 · 2026-09-22）：
+  //   ① driverHead 枢轴 FOOT 口径修正 —— step1 误存作者 y（0.376·sc+oy+0.014·sc = 0.7365），
+  //      正确 piece-local = 作者 − FOOT = 0.6505。**世界位置不变**（translate(−J)+position(J) 相消），
+  //      仅旋转枢轴下移 0.086 回到颈柱顶缘（head 通道接线前必须校正）。
+  //   ② spearmanHead 物化（crew 头，寰关节 = 颈 skin 柱顶缘局部 0.66396；z = 颈柱轴 oz）。
+  //      变体路径同步改造：SLOT_TABLE R.crew 扩入 spearmanHead，halberdier 变体构建器按
+  //      ctx.subgroup 分支重建（不再叠加重复头部）。
+  //   ③ spearmanForearmR 物化（持械臂肘，精选档；肘球局部 [0.03624, 0.57244, 0.0448]）。
+  //      嵌套于 spearman（crew 的 armR 未独立物化，上臂段在 spearman 组内）。
+  R: { horses: [0, 0.168, -0.24], body: [0, 0.288, 0.02], driverHead: [0.050, 0.6505000000000001, -0.0534], driver: [0.050, 0.4465, -0.050], spearman: [-0.050, 0.451, 0.080], spearmanHead: [-0.050, 0.66396, 0.08], spearmanForearmR: [0.036239999999999994, 0.5724400000000001, 0.0448], wheelL: [-0.26, 0.330, 0], wheelR: [0.26, 0.330, 0] },
   // ★ R-1 修复同步：counterweight 关节由 [0,0.250,-0.150] 改为箱体实际中心 [0,cwY,cwZ]；
   //   wheelL/R 的 y 由 0.060 改为 CANNON_HUB（=FOOT+外半径，与 R 车 joint.y===HUB 同规约）。
   // ★ M-03 #11：wheelL/R 的 z 由 0.110 校正为 0.000（轮几何整体在 z=0，轮心才是自转轴）。
@@ -111,7 +120,11 @@ export const SUBGROUP_JOINTS: Record<string, Record<string, Vec3>> = {
   //   语义锚点 = 车体中心；原 0.114 在底座之上 0.032，绕空点公转）。
   //   注：地面接触层纪律 —— 仅改**旋转枢轴**，未引入任何竖向平移通道；
   //   DISSOLVE_POSE.C.cart 的 translateY 语义与 pivot 无关，保持不变。
-  C: { trebuchet: [0, 0.308, 0], cart: [0, 0.041, 0], soldierL: [-0.25, 0.248, 0.09], soldierR: [0.25, 0.248, 0.09], counterweight: [0, 0.182, -0.105], wheelL: [-0.145, 0.160, 0.000], wheelR: [0.145, 0.160, 0.000] },
+  // ★ S2b-step4（M-08d2 · 2026-09-22）：soldierL/RHead 物化（crew 头，寰关节 = 颈 skin 柱顶缘
+  //   局部 0.35815；z 随士兵镜像 0.018·mx）。变体路径同步改造：SLOT_TABLE C.crew 扩入两个
+  //   head 子组，sapper 变体构建器按 ctx.subgroup 分支重建（mx 改由子组名派生）。
+  //   C 兵默认推车/绞盘无持械臂 → 肘按精选档跳过（变体工兵撬棍臂随接线轮再议）。
+  C: { trebuchet: [0, 0.308, 0], cart: [0, 0.041, 0], soldierL: [-0.25, 0.248, 0.09], soldierR: [0.25, 0.248, 0.09], soldierLHead: [-0.25, 0.35814999999999997, 0.018], soldierRHead: [0.25, 0.35814999999999997, -0.018], counterweight: [0, 0.182, -0.105], wheelL: [-0.145, 0.160, 0.000], wheelR: [0.145, 0.160, 0.000] },
   // ★ M-03 #13：sword pivot → 剑柄握持段（作者 0.171+0.204−FOOT≈0.289，x 取剑身轴 0.162）；
   //   rArm pivot → 真肩点（作者 FOOT+0.480 − FOOT = 0.480）。
   // ★ M-06 ①②③（07 裁定 §2.1/§2.2/§3，全量残余）：
@@ -120,7 +133,10 @@ export const SUBGROUP_JOINTS: Record<string, Record<string, Vec3>> = {
   //   banner pivot.x 0 → 0.228 且 z 0 → 0.126（= 旗杆轴线，世界 x 0.285/z 0.158）：
   //          POSE_TABLE 以 rotation.z 驱动到 ±0.30 rad，原 pivot 落在棋子中轴 x=0（离旗面 0.218），
   //          旗底会被抬离地面 ≈0.10 并整体横移；对齐旗杆轴线后绕旗面自身摆动，旗底 ownMinY 恒 ≈0。
-  K: { body: [0, 0.378, 0], head: [0, 0.626, -0.005], throne: [0, 0.028, 0], crown: [0, 0.688, 0], sword: [0.162, 0.289, -0.018], banner: [0.228, 0.394, 0.126], rArm: [0.140, 0.480, 0.000], forearmR: [0.160, 0.446, 0.040], capeHem: [0, 0.420, -0.010] }
+  // ★ S2b-step4 枢轴 FOOT 口径修正：forearmR 误存作者 y（FOOT+0.360 = 0.446，肘球作者 y），
+  //   正确 piece-local = 0.360（肘球局部）。世界位置不变，仅旋转枢轴回到肘关节
+  //   （§7.3 #10 的 forearmR.x 通道接线前必须校正）。
+  K: { body: [0, 0.378, 0], head: [0, 0.626, -0.005], throne: [0, 0.028, 0], crown: [0, 0.688, 0], sword: [0.162, 0.289, -0.018], banner: [0.228, 0.394, 0.126], rArm: [0.140, 0.480, 0.000], forearmR: [0.160, 0.360, 0.040], capeHem: [0, 0.420, -0.010] }
 };
 
 /**
@@ -142,10 +158,15 @@ export const SUBGROUP_PARENTS: Record<string, Record<string, string>> = {
   //   上臂被战斗/待机通道旋转时前臂刚性跟随（与拆分前「前臂段在上臂 mesh 内」逐帧一致）；
   //   forearmR 自身 rotation（§7.3 #3/#10）绕肘关节局部转动。武器挂点本轮不动
   //   （P.spear 留 armR、A.sword 留 idleGroup —— 改挂属驱动语义，随接线轮带姿态评审）。
+  // ★ S2b-step4：B.forearmR/L 嵌套 arms（B 上臂段在 arms 组内）；crew 头/肘嵌套所属乘员组
+  //   （crew 的 armR 未独立物化，spearmanForearmR 直接挂 spearman）。变体整组重建时
+  //   这些子组随 SLOT_TABLE.crew.subgroups 一并清空重建（不叠加重复几何）。
+  B: { forearmR: 'arms', forearmL: 'arms' },
   P: { spear: 'armR', head: 'body', forearmR: 'armR' },
   A: { head: 'body', forearmR: 'armR' },
   N: { head: 'rider' },
-  R: { driverHead: 'driver' },
+  R: { driverHead: 'driver', spearmanHead: 'spearman', spearmanForearmR: 'spearman' },
+  C: { soldierLHead: 'soldierL', soldierRHead: 'soldierR' },
   K: { head: 'body', forearmR: 'rArm' }
 };
 
