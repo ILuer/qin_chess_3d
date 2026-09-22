@@ -111,15 +111,15 @@ for (const key of Object.keys(GOLD_14)) {
   chk(JSON.stringify(got) === JSON.stringify(GOLD_14[key]),
     `[②] 黄金值漂移 ${key}: 期望 ${j(GOLD_14[key])} 实际 ${j(got)}`);
 }
-// 全表 40 关节（更强证据：证明整表搬移未改数）
+// 全表 45 关节（更强证据：证明整表搬移未改数。★ S2b +5：P/A/N/K.head、R.driverHead）
 const GOLD_ALL = {
-  P: { body: [0, 0.334, 0], armR: [0.096, 0.419, 0], armL: [-0.096, 0.419, 0], legR: [0.055, 0.300, 0], legL: [-0.055, 0.300, 0], shield: [-0.176, 0.400, -0.058], spear: [0.170, 0.440, -0.020] },
-  A: { body: [0, 0.334, 0], arms: [0, 0.474, 0], sword: [0, 0.328, -0.126], shield: [0, 0.45, -0.20] },
-  N: { bodyHorse: [0, 0.128, 0], legFL: [0.076, 0.214, -0.140], legFR: [-0.076, 0.214, -0.140], legBL: [0.080, 0.214, 0.165], legBR: [-0.080, 0.214, 0.165], rider: [0, 0.328, 0] },
+  P: { body: [0, 0.334, 0], head: [0, 0.585, 0], armR: [0.096, 0.419, 0], armL: [-0.096, 0.419, 0], legR: [0.055, 0.300, 0], legL: [-0.055, 0.300, 0], shield: [-0.176, 0.400, -0.058], spear: [0.170, 0.440, -0.020] },
+  A: { body: [0, 0.334, 0], head: [0, 0.663, 0], arms: [0, 0.474, 0], sword: [0, 0.328, -0.126], shield: [0, 0.45, -0.20] },
+  N: { bodyHorse: [0, 0.128, 0], head: [0, 0.691, 0.008], legFL: [0.076, 0.214, -0.140], legFR: [-0.076, 0.214, -0.140], legBL: [0.080, 0.214, 0.165], legBR: [-0.080, 0.214, 0.165], rider: [0, 0.328, 0] },
   B: { bodyRobe: [0, 0.368, 0], hem: [0, 0.110, 0], arms: [0, 0.328, -0.10] },
-  R: { horses: [0, 0.168, -0.24], body: [0, 0.288, 0.02], driver: [0.050, 0.4465, -0.050], spearman: [-0.050, 0.451, 0.080], wheelL: [-0.26, 0.330, 0], wheelR: [0.26, 0.330, 0] },
+  R: { horses: [0, 0.168, -0.24], body: [0, 0.288, 0.02], driverHead: [0.050, 0.7365, -0.0534], driver: [0.050, 0.4465, -0.050], spearman: [-0.050, 0.451, 0.080], wheelL: [-0.26, 0.330, 0], wheelR: [0.26, 0.330, 0] },
   C: { trebuchet: [0, 0.308, 0], cart: [0, 0.041, 0], soldierL: [-0.25, 0.248, 0.09], soldierR: [0.25, 0.248, 0.09], counterweight: [0, 0.182, -0.105], wheelL: [-0.145, 0.160, 0.000], wheelR: [0.145, 0.160, 0.000] },
-  K: { body: [0, 0.378, 0], throne: [0, 0.028, 0], crown: [0, 0.688, 0], sword: [0.162, 0.289, -0.018], banner: [0.228, 0.394, 0.126], rArm: [0.140, 0.480, 0.000], capeHem: [0, 0.420, -0.010] }
+  K: { body: [0, 0.378, 0], head: [0, 0.626, -0.005], throne: [0, 0.028, 0], crown: [0, 0.688, 0], sword: [0.162, 0.289, -0.018], banner: [0.228, 0.394, 0.126], rArm: [0.140, 0.480, 0.000], capeHem: [0, 0.420, -0.010] }
 };
 let goldenAllN = 0;
 for (const type of Object.keys(GOLD_ALL)) {
@@ -130,7 +130,7 @@ for (const type of Object.keys(GOLD_ALL)) {
       `[②] 全表黄金值漂移 ${type}.${sub}: 期望 ${j(GOLD_ALL[type][sub])} 实际 ${j(got)}`);
   }
 }
-chk(goldenAllN === 40, `[②] 全表关节数应为 40，实际 ${goldenAllN}`);
+chk(goldenAllN === 45, `[②] 全表关节数应为 45（40 + S2b 5 个 head），实际 ${goldenAllN}`);
 // 反向：不得有新增/缺失关节
 // ⚠ P1 复核：本「keys 比较」**部分构造性恒真** —— `GOLD_ALL` 的字面量键在 S0 搬移时抄自
 //   同一张表，且 ② 已逐值 pin 全部 40 关节；此处仅作「键集合」的二道钉，独立发现力有限。
@@ -147,7 +147,15 @@ console.log(`  14 槽位子组锚点 + 全表 ${goldenAllN} 关节逐位校验`)
  * ═══════════════════════════════════════════════════════════════ */
 section('③ 父链完整性（父存在 + 无环）');
 let edgeCount = 0;
-const GOLD_PARENTS = { P: { spear: 'armR' } };
+// ★ S2b：父链表扩至 head 嵌套（head→body/rider、driverHead→driver）。
+//   ③ 的「父存在于同型 joints」与无环检测对任意表结构有效；此快照钉死 S2b 新表。
+const GOLD_PARENTS = {
+  P: { spear: 'armR', head: 'body' },
+  A: { head: 'body' },
+  N: { head: 'rider' },
+  R: { driverHead: 'driver' },
+  K: { head: 'body' }
+};
 // ⚠ P1 复核：`GOLD_PARENTS` 快照把整张父链表钉死为「仅 1 条 P.spear→armR」，
 //   使下方「父存在于同型 joints」循环在构造上恒真（表已固定 ⇒ 父必然存在）。
 //   真正有独立价值的只有**无环检测**（对任意表结构有效）。
@@ -420,13 +428,15 @@ const SPECS = {
   K: [kingSpec()]
 };
 // spec **覆盖的子组集**（钉死，防「悄悄扩/缩子组」）—— 必须 ⊆ SUBGROUP_JOINTS[type]。
+// ★ S2b：P/A/N/K +R.driver 拆出 head/driverHead；R.spearman / C.soldierL/R 刻意不拆
+//   （crew 变体槽位整组重建会叠加重复头部，见 pieceJoints.ts 注）。
 const EXPECTED = {
-  P: [['body', 'armR', 'armL', 'legR', 'legL', 'shield', 'spear']],
-  A: [['body', 'arms', 'sword', 'shield']],
-  N: [['rider']],
-  R: [['driver'], ['spearman']],
+  P: [['body', 'armR', 'armL', 'legR', 'legL', 'shield', 'spear', 'head']],
+  A: [['body', 'arms', 'sword', 'shield', 'head']],
+  N: [['rider', 'head']],
+  R: [['driver', 'driverHead'], ['spearman']],
   C: [['soldierL'], ['soldierR']],
-  K: [['body', 'rArm']]
+  K: [['body', 'rArm', 'head']]
 };
 for (const type of Object.keys(SPECS)) {
   const tree = HUMAN_RIG_TREE[type];
@@ -470,7 +480,7 @@ console.log('  I2：已物化 ⊆ 已声明（7 型）；spec 只路由到真实
 // ── I3 · 关节可动域总表 + JSON 快照 ──
 const dofNames = Object.keys(JOINT_DOF);
 const dofHuman = dofNames.filter((n) => JOINT_DOF[n].group === 'human');
-chk(dofHuman.length === 16, `[⑧-I3] JOINT_DOF human 组应 16，实际 ${dofHuman.length}`);
+chk(dofHuman.length === 17, `[⑧-I3] JOINT_DOF human 组应 17（16 标准身 + S2b driverHead），实际 ${dofHuman.length}`);
 for (const n of dofNames) {
   const d = JOINT_DOF[n];
   chk(d.name === n, `[⑧-I3] ${n} name 字段不一致`);

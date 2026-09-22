@@ -859,8 +859,6 @@ function buildChariot(mp: any, M: any, K: any, side: string): void {
   const PB = mp.base;       // 底座等公共零件（车轮拆出后仅剩车轴）
   const Ph = mp.get('horses'); // 双马
   const Pc = mp.get('body');   // 车体
-  const Pd = mp.get('driver'); // 御马兵
-  const Ps = mp.get('spearman');// 持戈兵
   const Pwl = mp.get('wheelL'); // A4 新增子组：左轮（轮转）
   const Pwr = mp.get('wheelR'); // A4 新增子组：右轮（轮转）
 
@@ -921,13 +919,15 @@ function buildChariot(mp: any, M: any, K: any, side: string): void {
   const hxR = 0.110, hzR = -0.420;
   buildOneHorse(Ph, M, K, hxR, hzR, 0.98);
 
-  /* ======== 御马兵（driver 组，站在车舆前部偏右）========
-   * ★ M-03 #12：oz −0.030 → −0.050（与持戈兵各外扩 0.02，缓解躯干重叠） */
-  buildDriver(Pd, M, K, 0.050, -0.050, 0.85, 0.405);
+  /* ======== 御马兵（driver + driverHead 组，站在车舆前部偏右）========
+   * ★ M-03 #12：oz −0.030 → −0.050（与持戈兵各外扩 0.02，缓解躯干重叠）
+   * ★ S2b：传真 mp + 组名（旧签名收单个 Parts，spec 无法拆出独立 head 子组） */
+  buildDriver(mp, M, K, 'driver', 0.050, -0.050, 0.85, 0.405);
 
   /* ======== 持戈兵（spearman 组，站在车舆后部偏左）========
-   * ★ M-03 #12：oz 0.060 → 0.080 */
-  buildSpearman(Ps, M, K, -0.050, 0.080, 0.88, 0.405);
+   * ★ M-03 #12：oz 0.060 → 0.080
+   * ⚠ S2b：spearman **不拆 head**（crew 变体槽位整组重建会叠加重复头部）。 */
+  buildSpearman(mp, M, K, 'spearman', -0.050, 0.080, 0.88, 0.405);
 }
 
 /** 单侧车轮（A4：wheelL/wheelR 独立子组，绕车轴 HUB pivot 自转）。
@@ -1007,13 +1007,16 @@ function buildOneHorse(P: any, M: any, K: any, ox: number, oz: number, scl: numb
     { pos: [ox, 0.364 * s + 0.086, oz + 0.016 * s], scale: [1, 1, 1.38*s] });
 }
 
-/** 御马兵（站姿，双手握缰绳状） */
-function buildDriver(P: any, M: any, K: any, ox: number, oz: number, s: number, oy = 0.086): void {
+/** 御马兵（站姿，双手握缰绳状）
+ *  ★ S2b：签名改为收 `mp`（真 MultiParts）+ `group` 组名 —— spec 的 driverHead 才能拆成
+ *    独立子组；旧内联路径经 `P = mp.get(group)` 取同一收集器，逐字不变。 */
+function buildDriver(mp: any, M: any, K: any, group: string, ox: number, oz: number, s: number, oy = 0.086): void {
+  const P: any = mp.get(group);
   // ★ S2（M-08d）：御手改由 spec 驱动（`driverSpec`，逐点等价；无武器 → 全量 spec）。
-  //   单子组注入：用 `{ get: () => P }` 假 MultiParts 把关节全量路由到 `driver` 子组。
+  //   （旧「假 MultiParts 单子组注入」已由真 mp + group 取代 —— S2b head 拆分需要真路由。）
   if ((typeof __HUMANOID_RIG__ === 'boolean') ? __HUMANOID_RIG__ : true) {
     if (HUMAN_FOOT !== FOOT) console.error('[RENDER:pieceFactory] humanoid FOOT 漂移', HUMAN_FOOT, FOOT);
-    buildHumanoid({ get: () => P }, M, K, driverSpec(ox, oz, s, oy), HUMANOID_PRIMS);
+    buildHumanoid(mp, M, K, driverSpec(ox, oz, s, oy), HUMANOID_PRIMS);
     return;
   }
   const sc = s || 1.0;
@@ -1057,14 +1060,17 @@ function buildDriver(P: any, M: any, K: any, ox: number, oz: number, s: number, 
   P.add(sph(0.026 * sc, 9, 7), M.skin, { pos: [ox - 0.067 * sc, 0.248 * sc + oy, oz - 0.072 * sc] });
 }
 
-/** 持戈兵（站姿，双手持长戈） */
-function buildSpearman(P: any, M: any, K: any, ox: number, oz: number, s: number, oy = 0.086): void {
+/** 持戈兵（站姿，双手持长戈）
+ *  ★ S2b：签名改为收 `mp` + `group`（同 buildDriver）；
+ *    ⚠ 本人形**不拆 head** —— spearman 是 crew 变体槽位，applySlotOverrides 整组重建。 */
+function buildSpearman(mp: any, M: any, K: any, group: string, ox: number, oz: number, s: number, oy = 0.086): void {
+  const P: any = mp.get(group);
   const sc = s || 1.0;
   // ★ S2（M-08d）：持戈兵人形改由 spec 驱动（`spearmanSpec`，逐点等价；无武器→全量 spec）。
   //   **长戈为武器 → 仍内联**（旧位在两臂之间；spec 发射后长戈落在臂后，零件集合不变）。
   if ((typeof __HUMANOID_RIG__ === 'boolean') ? __HUMANOID_RIG__ : true) {
     if (HUMAN_FOOT !== FOOT) console.error('[RENDER:pieceFactory] humanoid FOOT 漂移', HUMAN_FOOT, FOOT);
-    buildHumanoid({ get: () => P }, M, K, spearmanSpec(ox, oz, s, oy), HUMANOID_PRIMS);
+    buildHumanoid(mp, M, K, spearmanSpec(ox, oz, s, oy), HUMANOID_PRIMS);
     // 长戈
     P.add(cyl(0.010 * sc, 0.012 * sc, 0.480 * sc, 8), M.woodDeep,
       { pos: [ox + 0.122 * sc, 0.340 * sc + oy, oz - 0.080 * sc], rot: [-0.55, 0, 0] });
@@ -1129,8 +1135,8 @@ function buildSpearman(P: any, M: any, K: any, ox: number, oz: number, s: number
 function buildCannon(mp: any, M: any, K: any, side: string): void {
   const Pcart = mp.get('cart'); // 木底座（底梁 + 铁角 + 绞盘，DISSOLVE_POSE 散架）
   const Pt = mp.get('trebuchet');// 抛石机本体
-  const PL = mp.get('soldierL'); // 左侧士兵
-  const PR = mp.get('soldierR'); // 右侧士兵
+  // ★ S2b：soldierL/R 的 Parts 改由 buildCannonSoldier 内部 mp.get(group) 创建
+  //   （原此处预创建后传入 —— 签名改造后不再需要；子组创建顺序变化无功能影响）。
   const Pcw = mp.get('counterweight'); // 配重箱（随抛臂反向运动）
   const Pwl = mp.get('wheelL');  // 推行左轮
   const Pwr = mp.get('wheelR');  // 推行右轮
@@ -1279,20 +1285,23 @@ function buildCannon(mp: any, M: any, K: any, side: string): void {
     { pos: [0.174, 0.312, 0.126], rot: [0, Math.PI / 2, 0] }
   );
 
-  /* ======== 左侧士兵（soldierL 组）======== */
-  buildCannonSoldier(PL, M, K, 'soldierL', -0.250, FOOT, 0.95, 1);
+  /* ======== 左侧士兵（soldierL 组）========
+   * ⚠ S2b：soldierL/R **不拆 head**（crew 变体槽位整组重建会叠加重复头部）。 */
+  buildCannonSoldier(mp, M, K, 'soldierL', -0.250, FOOT, 0.95, 1);
 
   /* ======== 右侧士兵（soldierR 组）======== */
-  buildCannonSoldier(PR, M, K, 'soldierR', 0.250, FOOT, 0.95, -1);
+  buildCannonSoldier(mp, M, K, 'soldierR', 0.250, FOOT, 0.95, -1);
 }
 
-/** 炮兵（推车/操作绞盘姿态，mirrorX=-1 时镜像翻转） */
-function buildCannonSoldier(P: any, M: any, K: any, group: string, ox: number, oy: number, s: number, mirrorX: number): void {
+/** 炮兵（推车/操作绞盘姿态，mirrorX=-1 时镜像翻转）
+ *  ★ S2b：签名改为收 `mp` + `group`（同 buildDriver；本型不拆 head）。 */
+function buildCannonSoldier(mp: any, M: any, K: any, group: string, ox: number, oy: number, s: number, mirrorX: number): void {
+  const P: any = mp.get(group);
   // ★ S2（M-08d）：操作兵改由 spec 驱动（`cannonSoldierSpec`，逐点等价；无武器→全量 spec）。
   //   `group`（soldierL / soldierR）供 grouping 目标与契约 I2 使用。
   if ((typeof __HUMANOID_RIG__ === 'boolean') ? __HUMANOID_RIG__ : true) {
     if (HUMAN_FOOT !== FOOT) console.error('[RENDER:pieceFactory] humanoid FOOT 漂移', HUMAN_FOOT, FOOT);
-    buildHumanoid({ get: () => P }, M, K, cannonSoldierSpec(group, ox, oy, s, mirrorX), HUMANOID_PRIMS);
+    buildHumanoid(mp, M, K, cannonSoldierSpec(group, ox, oy, s, mirrorX), HUMANOID_PRIMS);
     return;
   }
   const sc = s || 0.85;
@@ -1751,20 +1760,21 @@ function buildTemplate(type: string, side: string, lodLevel: number, variantSet?
     //   修正：嵌套子组的 Group.position 改为（J_self − ΣJ_祖先），
     //   于是 world = J_armR + (J_spear − J_armR) + (G − J_spear) = G（几何回到设计位），
     //   且该子组的**世界旋转枢轴仍恰好是 J_spear**（戈绕握把转、随右臂摆），语义不变。
-    const ancestorSum = (name: string): number[] => {
-      // （S0：`SUBGROUP_JOINTS` 值类型收紧为 `Vec3` 后，此处显式标注元组类型以
-      //  满足 noUncheckedIndexedAccess —— 纯类型注解，行为不变。）
-      const acc: [number, number, number] = [0, 0, 0];
-      if (!parentTable || !jointTable) return acc;
-      const seen = new Set<string>();
-      let cur = parentTable[name];
-      while (cur && !seen.has(cur)) {
-        seen.add(cur);
-        const j = jointTable[cur];
-        if (j) { acc[0] += j[0]; acc[1] += j[1]; acc[2] += j[2]; }
-        cur = parentTable[cur];
-      }
-      return acc;
+    // ★ S2b（M-08d2 · 2026-09-22）：父链锚定公式修正 —— **只减直接父锚点**。
+    //   原「父链求和」（J_self − ΣJ_祖先）仅在**单层嵌套**下代数正确：三层链
+    //   idleGroup→A→B→C 的 world(C) = J_A + (J_B−J_A) + (J_C−J_A−J_B) = J_C − J_A ≠ J_C。
+    //   正确定位是**递归的局部相对量**：P_child = J_self − P_parent（父组 position 已含
+    //   其自身父链的扣减），展开后恒有 world(S) = J_S（任意深度成立）。
+    //   对现有唯一嵌套 P.spear（单层，armR 无祖父）数值**逐位零变化**；
+    //   S2b 的 head 嵌套（P/A/K.head→body、N.head→rider、R.driverHead→driver）自此
+    //   建立在正确公式上。另补两条健壮性：父组未物化（无几何）或父组未注册锚点时，
+    //   不做扣减（父组 position 恒为原点或 0，扣减反而错位）。
+    const parentAnchor = (name: string, parentMaterialized: boolean): [number, number, number] => {
+      if (!parentTable || !jointTable || !parentMaterialized) return [0, 0, 0];
+      const p = parentTable[name];
+      if (!p) return [0, 0, 0];
+      const j = jointTable[p];
+      return j ? [j[0], j[1], j[2]] : [0, 0, 0];
     };
 
     for (const name of Object.keys(allGroups)) {
@@ -1777,7 +1787,9 @@ function buildTemplate(type: string, side: string, lodLevel: number, variantSet?
       // （修复障碍②：子组绕中心公转而非绕关节自转）。
       const joint = jointTable && jointTable[name];
       if (joint) {
-        const off = ancestorSum(name);
+        const parentName = parentTable && parentTable[name];
+        const parentOk = !!(parentName && Object.prototype.hasOwnProperty.call(allGroups, parentName));
+        const off = parentAnchor(name, parentOk);
         const jx = joint[0], jy = joint[1], jz = joint[2];
         for (const m of meshes) m.geometry.translate(-jx, -jy, -jz);
         g.position.set(jx - (off[0] || 0), jy - (off[1] || 0), jz - (off[2] || 0));

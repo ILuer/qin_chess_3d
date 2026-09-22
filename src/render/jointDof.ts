@@ -75,6 +75,9 @@ export const JOINT_DOF: Record<string, JointDof> = {
   footR: H('footR', 'shinR', 'ankle', { x: [-0.60, 0.70], z: [-0.30, 0.30] }, ['移动落步'], true),
   footL: H('footL', 'shinL', 'ankle', { x: [-0.60, 0.70], z: [-0.30, 0.30] }, ['移动落步'], true),
 
+  // ★ S2b（M-08d2）：御手头颈独立子组（限位沿用 head；spearman/soldier 头未物化，见 pieceJoints.ts）。
+  driverHead: H('driverHead', 'driver', 'head', { x: [-0.25, 0.30], y: [-0.50, 0.50], z: [-0.20, 0.20] }, ['待机', '移动', '吃子', '受击'], true),
+
   // ── 马匹（§7.2 马匹行）──
   bodyHorse: HS('bodyHorse', 'idleGroup', 'horseBody', { x: [-0.60, 0.60], y: [-0.40, 0.40], z: [-0.35, 0.35] }, ['待机', '移动', '吃子', '崩解']),
   horseNeck: HS('horseNeck', 'bodyHorse', 'horseNeck', { x: [-0.70, 0.50] }, ['待机', '人立']),

@@ -268,6 +268,9 @@ export const HUMAN_RIG_TREE: Record<string, Record<string, string>> = {
     ...HUMAN_RIG_STD,
     horses: 'idleGroup', body: 'idleGroup',
     driver: 'body', spearman: 'body',
+    // ★ S2b：御手头颈独立子组（driverHead 物化；spearman 头刻意不拆 —— crew 变体槽位
+    //   整组重建会与拆出的 head 叠加成重复几何，见 pieceJoints.ts 注）。
+    driverHead: 'driver',
     wheelL: 'body', wheelR: 'body'
   },
   // C 抛石车（器械 + 两名操作兵）。
@@ -316,7 +319,7 @@ export const PAWN_SPEC: HumanoidSpec = {
   side: 'r',
   pose: 'stand',
   grouping: {
-    torso: 'body', armR: 'armR', armL: 'armL',
+    torso: 'body', head: 'head', armR: 'armR', armL: 'armL',
     legR: 'legR', legL: 'legL', shield: 'shield', spear: 'spear'
   },
   joints: [
@@ -333,7 +336,14 @@ export const PAWN_SPEC: HumanoidSpec = {
         { role: 'apparel', prim: 'cyl', material: 'armor', rt: 0.116, rb: 0.120, h: 0.022, seg: 14, pos: [0, 0.492, 0] },
         { role: 'apparel', prim: 'sph', material: 'armorDeep', r: 0.050, sw: 10, sh: 8, pos: [0.098, 0.523, 0] },
         { role: 'apparel', prim: 'sph', material: 'armorDeep', r: 0.050, sw: 10, sh: 8, pos: [-0.098, 0.523, 0] },
-        { role: 'apparel', prim: 'cyl', material: 'accentDim', rt: 0.062, rb: 0.080, h: 0.024, seg: 12, pos: [0, 0.542, 0] },
+        { role: 'apparel', prim: 'cyl', material: 'accentDim', rt: 0.062, rb: 0.080, h: 0.024, seg: 12, pos: [0, 0.542, 0] }
+      ]
+    },
+    // ★ S2b（M-08d2）：head 物化 —— 头颈 5 零件自 torso 拆出（数值逐字未改），
+    //   枢轴 = 寰关节 [0,0.585,0]（颈柱顶缘）；运行时嵌套于 body 子组（SUBGROUP_PARENTS.P）。
+    {
+      name: 'head', semantic: 'head', parent: 'torso', anchor: [0, 0.585, 0],
+      segments: [
         { role: 'bone', prim: 'cyl', material: 'skin', rt: 0.030, rb: 0.032, h: 0.038, seg: 8, pos: [0, 0.566, 0] },
         { role: 'bone', prim: 'sph', material: 'skin', r: 0.056, sw: 12, sh: 10, pos: [0, 0.618, -0.006] },
         { role: 'apparel', prim: 'cyl', material: 'clothDeep', rt: 0.072, rb: 0.076, h: 0.012, seg: 14, pos: [0, 0.657, -0.004] },
@@ -404,7 +414,7 @@ export const ADVISOR_SPEC: HumanoidSpec = {
   scale: 1,
   side: 'r',
   pose: 'stand',
-  grouping: { torso: 'body', arms: 'arms', sword: 'sword', shield: 'shield' },
+  grouping: { torso: 'body', head: 'head', arms: 'arms', sword: 'sword', shield: 'shield' },
   joints: [
     {
       name: 'torso', semantic: 'torso', parent: 'idleGroup', anchor: [0, 0.334, 0],
@@ -429,7 +439,14 @@ export const ADVISOR_SPEC: HumanoidSpec = {
         { role: 'apparel', prim: 'cyl', material: 'armorDeep', rt: 0.050, rb: 0.060, h: 0.180, seg: 10, pos: [-0.146, 0.472, -0.006] },
         { role: 'apparel', prim: 'dome', material: 'armor', r: 0.072, sw: 12, sh: 7, frac: 0.60, pos: [0.140, 0.582, 0] },
         { role: 'apparel', prim: 'dome', material: 'armor', r: 0.072, sw: 12, sh: 7, frac: 0.60, pos: [-0.140, 0.582, 0] },
-        { role: 'apparel', prim: 'cyl', material: 'accentDim', rt: 0.064, rb: 0.086, h: 0.030, seg: 12, pos: [0, 0.615, 0] },
+        { role: 'apparel', prim: 'cyl', material: 'accentDim', rt: 0.064, rb: 0.086, h: 0.030, seg: 12, pos: [0, 0.615, 0] }
+      ]
+    },
+    // ★ S2b（M-08d2）：head 物化 —— 头颈 + 武弁帽 7 零件自 torso 拆出（数值逐字未改），
+    //   枢轴 = 寰关节 [0,0.663,0]；运行时嵌套于 body 子组（SUBGROUP_PARENTS.A）。
+    {
+      name: 'head', semantic: 'head', parent: 'torso', anchor: [0, 0.663, 0],
+      segments: [
         { role: 'bone', prim: 'cyl', material: 'skin', rt: 0.028, rb: 0.030, h: 0.030, seg: 8, pos: [0, 0.648, 0] },
         { role: 'bone', prim: 'sph', material: 'skin', r: 0.056, sw: 12, sh: 10, pos: [0, 0.715, -0.004] },
         { role: 'apparel', prim: 'cyl', material: 'accentDim', rt: 0.062, rb: 0.068, h: 0.024, seg: 12, pos: [0, 0.756, -0.002] },
@@ -499,7 +516,7 @@ export const RIDER_SPEC: HumanoidSpec = {
   scale: 1,
   side: 'r',
   pose: 'ride',
-  grouping: { legs: 'rider', torso: 'rider', arms: 'rider' },
+  grouping: { legs: 'rider', torso: 'rider', head: 'head', arms: 'rider' },
   joints: [
     {
       name: 'legs', semantic: 'hip', parent: 'torso', anchor: [0, 0.328, 0],
@@ -523,7 +540,15 @@ export const RIDER_SPEC: HumanoidSpec = {
         { role: 'apparel', prim: 'cyl', material: 'armor', rt: 0.101, rb: 0.104, h: 0.020, seg: 12, pos: [0, 0.548, 0.010] },
         { role: 'apparel', prim: 'cyl', material: 'armor', rt: 0.099, rb: 0.102, h: 0.020, seg: 12, pos: [0, 0.608, 0.010] },
         { role: 'apparel', prim: 'sph', material: 'armorDeep', r: 0.045, sw: 10, sh: 8, pos: [0.086, 0.652, 0.010] },
-        { role: 'apparel', prim: 'sph', material: 'armorDeep', r: 0.045, sw: 10, sh: 8, pos: [-0.086, 0.652, 0.010] },
+        { role: 'apparel', prim: 'sph', material: 'armorDeep', r: 0.045, sw: 10, sh: 8, pos: [-0.086, 0.652, 0.010] }
+      ]
+    },
+    // ★ S2b（M-08d2）：head 物化 —— 头颈 + 兜鍪 + 缨 5 零件自 torso 拆出（数值逐字未改），
+    //   枢轴 = 寰关节 [0,0.691,0.008]；运行时嵌套于 rider 子组（SUBGROUP_PARENTS.N），
+    //   骑手躯干起伏时头部刚性跟随（与拆分前行为一致）。
+    {
+      name: 'head', semantic: 'head', parent: 'torso', anchor: [0, 0.691, 0.008],
+      segments: [
         { role: 'bone', prim: 'cyl', material: 'skin', rt: 0.026, rb: 0.028, h: 0.030, seg: 8, pos: [0, 0.676, 0.008] },
         { role: 'bone', prim: 'sph', material: 'skin', r: 0.050, sw: 12, sh: 10, pos: [0, 0.716, 0.002] },
         { role: 'apparel', prim: 'cyl', material: 'armorDeep', rt: 0.058, rb: 0.070, h: 0.032, seg: 12, pos: [0, 0.704, 0.002] },
@@ -554,7 +579,7 @@ export function driverSpec(ox: number, oz: number, s: number, oy = 0.086): Human
     scale: 1,
     side: 'r',
     pose: 'stand',
-    grouping: { legs: 'driver', torso: 'driver', arms: 'driver' },
+    grouping: { legs: 'driver', torso: 'driver', head: 'driverHead', arms: 'driver' },
     joints: [
       {
         name: 'legs', semantic: 'hip', parent: 'torso', anchor: [0.050, 0.4465, -0.050],
@@ -575,7 +600,15 @@ export function driverSpec(ox: number, oz: number, s: number, oy = 0.086): Human
           { role: 'apparel', prim: 'cyl', material: 'armor', rt: 0.066 * sc, rb: 0.070 * sc, h: 0.018 * sc, seg: 10, pos: [ox, 0.264 * sc + oy, oz] },
           { role: 'apparel', prim: 'sph', material: 'armorDeep', r: 0.038 * sc, sw: 9, sh: 7, pos: [ox + 0.072 * sc, 0.308 * sc + oy, oz] },
           { role: 'apparel', prim: 'sph', material: 'armorDeep', r: 0.038 * sc, sw: 9, sh: 7, pos: [ox - 0.072 * sc, 0.308 * sc + oy, oz] },
-          { role: 'apparel', prim: 'cyl', material: 'accentDim', rt: 0.026 * sc, rb: 0.028 * sc, h: 0.024 * sc, seg: 8, pos: [ox, 0.350 * sc + oy, oz] },
+          { role: 'apparel', prim: 'cyl', material: 'accentDim', rt: 0.026 * sc, rb: 0.028 * sc, h: 0.024 * sc, seg: 8, pos: [ox, 0.350 * sc + oy, oz] }
+        ]
+      },
+      // ★ S2b（M-08d2）：head 物化 —— 头颈 + 盔 3 零件自 torso 拆出（表达式逐字未改）。
+      //   anchor 与 SUBGROUP_JOINTS.R.driverHead 同表达式（sc=0.85, oy=0.405 时
+      //   y=0.7365 / z=−0.0534，契约 ⑧-I2(d) 逐位对上）。
+      {
+        name: 'head', semantic: 'head', parent: 'torso', anchor: [ox, 0.376 * sc + oy + 0.014 * sc, oz - 0.004 * sc],
+        segments: [
           { role: 'bone', prim: 'cyl', material: 'skin', rt: 0.024 * sc, rb: 0.026 * sc, h: 0.028 * sc, seg: 8, pos: [ox, 0.376 * sc + oy, oz] },
           { role: 'bone', prim: 'sph', material: 'skin', r: 0.044 * sc, sw: 10, sh: 8, pos: [ox, 0.416 * sc + oy, oz - 0.004 * sc] },
           { role: 'apparel', prim: 'dome', material: 'armor', r: 0.042 * sc, sw: 10, sh: 6, frac: 0.56, pos: [ox, 0.436 * sc + oy, oz - 0.004 * sc] }
@@ -727,7 +760,7 @@ export function kingSpec(): HumanoidSpec {
     scale: 1,
     side: 'r',
     pose: 'sit',
-    grouping: { torso: 'body', armR: 'rArm' },
+    grouping: { torso: 'body', head: 'head', armR: 'rArm' },
     joints: [
       {
         name: 'torso', semantic: 'torso', parent: 'idleGroup', anchor: [0, 0.378, 0],
@@ -755,7 +788,17 @@ export function kingSpec(): HumanoidSpec {
           { role: 'bone', prim: 'strut', material: 'armorDeep', a: [-0.140, PY(0.480), 0.000], b: [-0.160, PY(0.360), 0.040], rTop: 0.034, rBot: 0.030, seg: 8 },
           { role: 'bone', prim: 'sph', material: 'armorDeep', r: 0.030, sw: 10, sh: 8, pos: [-0.160, PY(0.360), 0.040] },
           { role: 'bone', prim: 'strut', material: 'armorDeep', a: [-0.160, PY(0.360), 0.040], b: [-0.160, PY(0.275), 0.020], rTop: 0.030, rBot: 0.026, seg: 8 },
-          { role: 'bone', prim: 'sph', material: 'skin', r: 0.030, sw: 10, sh: 8, pos: [-0.160, PY(0.275), 0.020] },
+          { role: 'bone', prim: 'sph', material: 'skin', r: 0.030, sw: 10, sh: 8, pos: [-0.160, PY(0.275), 0.020] }
+        ]
+      },
+      // ★ S2b（M-08d2）：head 物化 —— 头颈 + 束发 3 零件自 torso 拆出（数值逐字未改），
+      //   枢轴 = 寰关节 [0,PY(0.540),−0.005]；运行时嵌套于 body 子组（SUBGROUP_PARENTS.K）。
+      //   ⚠ K.crown（鹖冠）仍是 idleGroup 顶层独立子组（declared 树 crown:'head' 仅语义），
+      //     S2b 未把它挂到 head 下 —— 冕落 DISSOLVE_POSE 的 translateY 语义与嵌套无关，
+      //     若未来 head 通道启用，需先把 crown 挂到 head 下（登记于 09 §8.5 S2b 行）。
+      {
+        name: 'head', semantic: 'head', parent: 'torso', anchor: [0, PY(0.540), -0.005],
+        segments: [
           { role: 'bone', prim: 'cyl', material: 'skin', rt: 0.030, rb: 0.032, h: 0.040, seg: 8, pos: [0, PY(0.520), -0.005] },
           { role: 'bone', prim: 'sph', material: 'skin', r: 0.060, sw: 12, sh: 10, pos: [0, PY(0.580), -0.010] },
           { role: 'apparel', prim: 'strut', material: 'hair', a: [0, PY(0.560), -0.040], b: [0, PY(0.498), -0.020], rTop: 0.026, rBot: 0.008, seg: 6 }

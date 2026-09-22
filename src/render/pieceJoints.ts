@@ -64,8 +64,13 @@ export const SUBGROUP_JOINTS: Record<string, Record<string, Vec3>> = {
   // ★ Sprint 1 重构：兵/卒 P 拆为 armL/armR、legL/legR，新增独立 shield，戈(spear)挂 armR 子节点。
   //   零新 Mesh（仅重新分组到 Group 容器），draw call 不增。
   // ★ M-03 #15：armR/armL 的 y 由 0.505（作者坐标）校准为 0.505−FOOT=0.419（真肩点）。
+  // ★ S2b head 物化（M-08d2 · 2026-09-22）：head = 头颈独立子组（枢轴 = 寰关节，颈柱顶缘）。
+  //   静态外观恒不变（translate(−J)+position(J) 相消）；拆分动机 = §7.3 #11 的 head 通道
+  //   与后续动作细分。R.spearman / C.soldierL/R **刻意不拆**：crew 是变体槽位，
+  //   applySlotOverrides 整组重建会把变体自带头部与新 head 子组叠加成重复几何。
   P: {
     body: [0, 0.334, 0],
+    head: [0, 0.585, 0],       // 寰关节（颈柱 0.566±0.019 顶缘）
     armR: [0.096, 0.419, 0],   // 右肩（= 作者 0.505 − FOOT）
     armL: [-0.096, 0.419, 0],  // 左肩
     legR: [0.055, 0.300, 0],   // 右胯（踏步绕胯转）
@@ -76,9 +81,9 @@ export const SUBGROUP_JOINTS: Record<string, Record<string, Vec3>> = {
   // ★ M-03 #14：sword 子组向躯干内收 0.044（z −0.170 → −0.126），使剑柄落入握持范围。
   // ★ M-06 ④：arms pivot.y 0.378 → 0.474（= 真肩点，双大臂 strut 起点作者 y 0.560 − FOOT；
   //   原 0.378 落在臂盒 [0.414,0.506] 之下 0.036，绕空点公转）。x=0 保持（双臂共用枢轴）。
-  A: { body: [0, 0.334, 0], arms: [0, 0.474, 0], sword: [0, 0.328, -0.126], shield: [0, 0.45, -0.20] },
+  A: { body: [0, 0.334, 0], head: [0, 0.663, 0], arms: [0, 0.474, 0], sword: [0, 0.328, -0.126], shield: [0, 0.45, -0.20] },
   // ★ M-03 #16：四腿 hip 由 0.300（作者坐标）校准为 0.300−FOOT=0.214（真髋点，= strut 起点）。
-  N: { bodyHorse: [0, 0.128, 0], legFL: [+0.076, 0.214, -0.140], legFR: [-0.076, 0.214, -0.140], legBL: [+0.080, 0.214, 0.165], legBR: [-0.080, 0.214, 0.165], rider: [0, 0.328, 0] },
+  N: { bodyHorse: [0, 0.128, 0], head: [0, 0.691, 0.008], legFL: [+0.076, 0.214, -0.140], legFR: [-0.076, 0.214, -0.140], legBL: [+0.080, 0.214, 0.165], legBR: [-0.080, 0.214, 0.165], rider: [0, 0.328, 0] },
   // ★ Sprint 4 写实：象 B 拆 robe→bodyRobe + hem（下摆独立可飘动子组），
   //   arms 暂不动（零增量，Sprint 4 不拆袖）。hem 绕腰 pivot [0,0.200,0] 残留 1 mesh/枚。
   // ★ M-03 #17：hem pivot 由 0.200（作者坐标）校准为 0.110（下摆顶缘 = 腰，绕此摆动）。
@@ -88,7 +93,10 @@ export const SUBGROUP_JOINTS: Record<string, Record<string, Vec3>> = {
   //           z 由遗留错误 0.40 校正到实际站位 −0.030，并按 #12 外扩 0.02 → −0.050）
   //   spearman[−0.05,0.378, 0.46] → [−0.050, 0.451, 0.080]（同理；z 0.060 外扩 → 0.080）
   //   horses  z −0.30 → −0.24（随马群整体后移 0.06 同步跟随，保持相对枢轴不变）
-  R: { horses: [0, 0.168, -0.24], body: [0, 0.288, 0.02], driver: [0.050, 0.4465, -0.050], spearman: [-0.050, 0.451, 0.080], wheelL: [-0.26, 0.330, 0], wheelR: [0.26, 0.330, 0] },
+  //   driverHead 锚点 = 御手颈柱顶缘（sc=0.85, oy=0.405 同 buildChariot 实参；
+  //   y = 0.376·sc+oy+0.014·sc = 0.7365，z = oz−0.004·sc = −0.0534 —— 与 driverSpec
+  //   工厂同表达式，契约 ⑧-I2(d) 逐位对上）。
+  R: { horses: [0, 0.168, -0.24], body: [0, 0.288, 0.02], driverHead: [0.050, 0.7365, -0.0534], driver: [0.050, 0.4465, -0.050], spearman: [-0.050, 0.451, 0.080], wheelL: [-0.26, 0.330, 0], wheelR: [0.26, 0.330, 0] },
   // ★ R-1 修复同步：counterweight 关节由 [0,0.250,-0.150] 改为箱体实际中心 [0,cwY,cwZ]；
   //   wheelL/R 的 y 由 0.060 改为 CANNON_HUB（=FOOT+外半径，与 R 车 joint.y===HUB 同规约）。
   // ★ M-03 #11：wheelL/R 的 z 由 0.110 校正为 0.000（轮几何整体在 z=0，轮心才是自转轴）。
@@ -105,7 +113,7 @@ export const SUBGROUP_JOINTS: Record<string, Record<string, Vec3>> = {
   //   banner pivot.x 0 → 0.228 且 z 0 → 0.126（= 旗杆轴线，世界 x 0.285/z 0.158）：
   //          POSE_TABLE 以 rotation.z 驱动到 ±0.30 rad，原 pivot 落在棋子中轴 x=0（离旗面 0.218），
   //          旗底会被抬离地面 ≈0.10 并整体横移；对齐旗杆轴线后绕旗面自身摆动，旗底 ownMinY 恒 ≈0。
-  K: { body: [0, 0.378, 0], throne: [0, 0.028, 0], crown: [0, 0.688, 0], sword: [0.162, 0.289, -0.018], banner: [0.228, 0.394, 0.126], rArm: [0.140, 0.480, 0.000], capeHem: [0, 0.420, -0.010] }
+  K: { body: [0, 0.378, 0], head: [0, 0.626, -0.005], throne: [0, 0.028, 0], crown: [0, 0.688, 0], sword: [0.162, 0.289, -0.018], banner: [0.228, 0.394, 0.126], rArm: [0.140, 0.480, 0.000], capeHem: [0, 0.420, -0.010] }
 };
 
 /**
@@ -115,11 +123,19 @@ export const SUBGROUP_JOINTS: Record<string, Record<string, Vec3>> = {
  * 父组的关节锚定（translate -joint + position joint）已先完成，子组再以自身 joint
  * 叠加，world 位置正确。
  *
- * ⚠ 嵌套子组必须扣减父链 ΣJ（`buildTemplate` 的 `ancestorSum()`，红线 ANC）：
- *   子组 Group.position = J_self − ΣJ_祖先。
+ * ★ S2b head 嵌套（M-08d2）：head 挂所属人形躯干子组下 —— 躯干被战斗/待机通道旋转时
+ *   头部刚性跟随（与拆分前「头在躯干 mesh 内」的行为逐帧一致）；head 自身的 rotation
+ *   通道（§7.3 #11）则绕寰关节局部转动。
+ *
+ * ⚠ 嵌套子组锚定用「**只减直接父锚点**」（`buildTemplate` 的 `parentAnchor`，S2b 修正）：
+ *   子组 Group.position = J_self − J_直接父。旧「ΣJ_祖先」公式对 ≥2 层嵌套代数错误。
  */
 export const SUBGROUP_PARENTS: Record<string, Record<string, string>> = {
-  P: { spear: 'armR' }
+  P: { spear: 'armR', head: 'body' },
+  A: { head: 'body' },
+  N: { head: 'rider' },
+  R: { driverHead: 'driver' },
+  K: { head: 'body' }
 };
 
 /**

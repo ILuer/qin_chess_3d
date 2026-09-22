@@ -40,17 +40,21 @@ import { SUBGROUP_JOINTS } from '../pieceJoints.ts';
  *   ⚠ 未选「dev 档运行时 console.warn」：无 build define 可用，强行内联会在 PROD 增字节，
  *     违反红线，故降级为「零体积的常量+判定入口 + 人工探针闸门」。
  */
-export const DRAW_CALL_BUDGET = 271;
+export const DRAW_CALL_BUDGET = 310;
 
-/** draw call 预算的实测溯源元数据（纯数据，供探针/报告引用；不参与运行时逻辑）。 */
+/** draw call 预算的实测溯源元数据（纯数据，供探针/报告引用；不参与运行时逻辑）。
+ *  ★ S2b（M-08d2 · 2026-09-22）：head 物化 +28 dc（271→299，逐型 P+10/A+4/N+8/R+4/K+2，
+ *  与 pieceMeshes 250→278 逐项吻合；infoTris 110786 不变 = 几何零改动，纯分组重排）。
+ *  预算上限按用户裁定的 S2b「精选档 ≈310」重立（实测 299，余量 11）；S3–S5 再按实测续立。 */
 export const DRAW_CALL_BUDGET_META = {
   unit: 'GL draw* calls / 帧（真实游戏场景，默认开局相机，稳态中位数）',
-  baseline: 271,
-  measuredAt: '2026-09-21',
-  measuredBy: 'devtools/game-dc-probe.mjs（CDP 注入真实 index.html，非合成子场景）',
-  commit: 'M-06 (de70082→)',
-  history: { m03: 239, m05: 279, m06: 271 },
-  accounting: '279 − 8（R.wheelL/wheelR 移出 ACCESSORY_WHITELIST：4 枚 R × 2 mesh 回收）',
+  baseline: 299,
+  budgetCap: 310,
+  measuredAt: '2026-09-22',
+  measuredBy: 'devtools/game-dc-probe.mjs（CDP 注入真实 index.html，非合成子场景；⚠ 探针已补 Network.setBypassServiceWorker —— 游戏 sw.js 会用缓存旧 bundle 污染实测）',
+  commit: 'M-08d2 S2b (faad6dd→)',
+  history: { m03: 239, m05: 279, m06: 271, s2b: 299 },
+  accounting: '271 + 28（head 物化：P/A/N/K 拆头 + R.driverHead，每子组 1 mesh；C/R.spearman 刻意不拆 —— crew 变体槽位整组重建风险）',
   headroom: '低模 LOD 未启用；满盘 32 枚全部入视锥 → 该值为上界。'
 } as const;
 
