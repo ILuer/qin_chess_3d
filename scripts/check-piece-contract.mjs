@@ -111,16 +111,15 @@ for (const key of Object.keys(GOLD_14)) {
   chk(JSON.stringify(got) === JSON.stringify(GOLD_14[key]),
     `[②] 黄金值漂移 ${key}: 期望 ${j(GOLD_14[key])} 实际 ${j(got)}`);
 }
-// 全表 47 关节（更强证据：证明整表搬移未改数。★ S2b +5：P/A/N/K.head、R.driverHead；
-// ★ S2b-step2 +2−1：A.armR/armL 增、A.arms 退役 → 46）
+// 全表 49 关节（★ S2b +5 head；step2 +2−1 A.armR/armL；step3 +3 P/A/K.forearmR 持械臂肘）
 const GOLD_ALL = {
-  P: { body: [0, 0.334, 0], head: [0, 0.585, 0], armR: [0.096, 0.419, 0], armL: [-0.096, 0.419, 0], legR: [0.055, 0.300, 0], legL: [-0.055, 0.300, 0], shield: [-0.176, 0.400, -0.058], spear: [0.170, 0.440, -0.020] },
-  A: { body: [0, 0.334, 0], head: [0, 0.663, 0], armR: [0.140, 0.474, -0.006], armL: [-0.140, 0.474, -0.006], sword: [0, 0.328, -0.126], shield: [0, 0.45, -0.20] },
+  P: { body: [0, 0.334, 0], head: [0, 0.585, 0], armR: [0.096, 0.419, 0], armL: [-0.096, 0.419, 0], forearmR: [0.122, 0.352, -0.006], legR: [0.055, 0.300, 0], legL: [-0.055, 0.300, 0], shield: [-0.176, 0.400, -0.058], spear: [0.170, 0.440, -0.020] },
+  A: { body: [0, 0.334, 0], head: [0, 0.663, 0], armR: [0.140, 0.474, -0.006], armL: [-0.140, 0.474, -0.006], forearmR: [0.094, 0.470, -0.052], sword: [0, 0.328, -0.126], shield: [0, 0.45, -0.20] },
   N: { bodyHorse: [0, 0.128, 0], head: [0, 0.691, 0.008], legFL: [0.076, 0.214, -0.140], legFR: [-0.076, 0.214, -0.140], legBL: [0.080, 0.214, 0.165], legBR: [-0.080, 0.214, 0.165], rider: [0, 0.328, 0] },
   B: { bodyRobe: [0, 0.368, 0], hem: [0, 0.110, 0], arms: [0, 0.328, -0.10] },
   R: { horses: [0, 0.168, -0.24], body: [0, 0.288, 0.02], driverHead: [0.050, 0.7365, -0.0534], driver: [0.050, 0.4465, -0.050], spearman: [-0.050, 0.451, 0.080], wheelL: [-0.26, 0.330, 0], wheelR: [0.26, 0.330, 0] },
   C: { trebuchet: [0, 0.308, 0], cart: [0, 0.041, 0], soldierL: [-0.25, 0.248, 0.09], soldierR: [0.25, 0.248, 0.09], counterweight: [0, 0.182, -0.105], wheelL: [-0.145, 0.160, 0.000], wheelR: [0.145, 0.160, 0.000] },
-  K: { body: [0, 0.378, 0], head: [0, 0.626, -0.005], throne: [0, 0.028, 0], crown: [0, 0.688, 0], sword: [0.162, 0.289, -0.018], banner: [0.228, 0.394, 0.126], rArm: [0.140, 0.480, 0.000], capeHem: [0, 0.420, -0.010] }
+  K: { body: [0, 0.378, 0], head: [0, 0.626, -0.005], throne: [0, 0.028, 0], crown: [0, 0.688, 0], sword: [0.162, 0.289, -0.018], banner: [0.228, 0.394, 0.126], rArm: [0.140, 0.480, 0.000], forearmR: [0.160, 0.446, 0.040], capeHem: [0, 0.420, -0.010] }
 };
 let goldenAllN = 0;
 for (const type of Object.keys(GOLD_ALL)) {
@@ -131,7 +130,7 @@ for (const type of Object.keys(GOLD_ALL)) {
       `[②] 全表黄金值漂移 ${type}.${sub}: 期望 ${j(GOLD_ALL[type][sub])} 实际 ${j(got)}`);
   }
 }
-chk(goldenAllN === 46, `[②] 全表关节数应为 46（45 − A.arms + A.armR/armL），实际 ${goldenAllN}`);
+chk(goldenAllN === 49, `[②] 全表关节数应为 49（46 + P/A/K.forearmR），实际 ${goldenAllN}`);
 // 反向：不得有新增/缺失关节
 // ⚠ P1 复核：本「keys 比较」**部分构造性恒真** —— `GOLD_ALL` 的字面量键在 S0 搬移时抄自
 //   同一张表，且 ② 已逐值 pin 全部 40 关节；此处仅作「键集合」的二道钉，独立发现力有限。
@@ -151,11 +150,12 @@ let edgeCount = 0;
 // ★ S2b：父链表扩至 head 嵌套（head→body/rider、driverHead→driver）。
 //   ③ 的「父存在于同型 joints」与无环检测对任意表结构有效；此快照钉死 S2b 新表。
 const GOLD_PARENTS = {
-  P: { spear: 'armR', head: 'body' },
-  A: { head: 'body' },
+  // ★ S2b-step3：forearmR 嵌套于上臂子组（K 上臂子组名为 rArm）
+  P: { spear: 'armR', head: 'body', forearmR: 'armR' },
+  A: { head: 'body', forearmR: 'armR' },
   N: { head: 'rider' },
   R: { driverHead: 'driver' },
-  K: { head: 'body' }
+  K: { head: 'body', forearmR: 'rArm' }
 };
 // ⚠ P1 复核：`GOLD_PARENTS` 快照把整张父链表钉死为「仅 1 条 P.spear→armR」，
 //   使下方「父存在于同型 joints」循环在构造上恒真（表已固定 ⇒ 父必然存在）。
@@ -435,12 +435,12 @@ const SPECS = {
 // ★ S2b：P/A/N/K +R.driver 拆出 head/driverHead；R.spearman / C.soldierL/R 刻意不拆
 //   （crew 变体槽位整组重建会叠加重复头部，见 pieceJoints.ts 注）。
 const EXPECTED = {
-  P: [['body', 'armR', 'armL', 'legR', 'legL', 'shield', 'spear', 'head']],
-  A: [['body', 'armR', 'armL', 'sword', 'shield', 'head']],
+  P: [['body', 'armR', 'armL', 'forearmR', 'legR', 'legL', 'shield', 'spear', 'head']],
+  A: [['body', 'armR', 'armL', 'forearmR', 'sword', 'shield', 'head']],
   N: [['rider', 'head']],
   R: [['driver', 'driverHead'], ['spearman']],
   C: [['soldierL'], ['soldierR']],
-  K: [['body', 'rArm', 'head']]
+  K: [['body', 'rArm', 'forearmR', 'head']]
 };
 for (const type of Object.keys(SPECS)) {
   const tree = HUMAN_RIG_TREE[type];

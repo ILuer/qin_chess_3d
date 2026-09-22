@@ -73,6 +73,7 @@ export const SUBGROUP_JOINTS: Record<string, Record<string, Vec3>> = {
     head: [0, 0.585, 0],       // 寰关节（颈柱 0.566±0.019 顶缘）
     armR: [0.096, 0.419, 0],   // 右肩（= 作者 0.505 − FOOT）
     armL: [-0.096, 0.419, 0],  // 左肩
+    forearmR: [0.122, 0.352, -0.006], // 右肘（★ S2b-step3：肘球作者 [0.122,0.438,−0.006] − FOOT；持械臂肘，§7.3 #3 前提）
     legR: [0.055, 0.300, 0],   // 右胯（踏步绕胯转）
     legL: [-0.055, 0.300, 0],  // 左胯
     shield: [-0.176, 0.400, -0.058], // 盾心
@@ -87,7 +88,7 @@ export const SUBGROUP_JOINTS: Record<string, Record<string, Vec3>> = {
   //   静态外观恒不变（translate(−J)+position(J) 相消）；armR/armL 与 body 平级挂 idleGroup
   //   （与拆分前的 arms 同位，不嵌套 body —— 与 P 的 armR/armL 布局一致）。
   //   后续可承接通道：§7.3 #1 的 armR/L.*（forearmR/L、handR/L 仍未物化，继续延后）。
-  A: { body: [0, 0.334, 0], head: [0, 0.663, 0], armR: [0.140, 0.474, -0.006], armL: [-0.140, 0.474, -0.006], sword: [0, 0.328, -0.126], shield: [0, 0.45, -0.20] },
+  A: { body: [0, 0.334, 0], head: [0, 0.663, 0], armR: [0.140, 0.474, -0.006], armL: [-0.140, 0.474, -0.006], forearmR: [0.094, 0.470, -0.052], sword: [0, 0.328, -0.126], shield: [0, 0.45, -0.20] },
   // ★ M-03 #16：四腿 hip 由 0.300（作者坐标）校准为 0.300−FOOT=0.214（真髋点，= strut 起点）。
   N: { bodyHorse: [0, 0.128, 0], head: [0, 0.691, 0.008], legFL: [+0.076, 0.214, -0.140], legFR: [-0.076, 0.214, -0.140], legBL: [+0.080, 0.214, 0.165], legBR: [-0.080, 0.214, 0.165], rider: [0, 0.328, 0] },
   // ★ Sprint 4 写实：象 B 拆 robe→bodyRobe + hem（下摆独立可飘动子组），
@@ -119,7 +120,7 @@ export const SUBGROUP_JOINTS: Record<string, Record<string, Vec3>> = {
   //   banner pivot.x 0 → 0.228 且 z 0 → 0.126（= 旗杆轴线，世界 x 0.285/z 0.158）：
   //          POSE_TABLE 以 rotation.z 驱动到 ±0.30 rad，原 pivot 落在棋子中轴 x=0（离旗面 0.218），
   //          旗底会被抬离地面 ≈0.10 并整体横移；对齐旗杆轴线后绕旗面自身摆动，旗底 ownMinY 恒 ≈0。
-  K: { body: [0, 0.378, 0], head: [0, 0.626, -0.005], throne: [0, 0.028, 0], crown: [0, 0.688, 0], sword: [0.162, 0.289, -0.018], banner: [0.228, 0.394, 0.126], rArm: [0.140, 0.480, 0.000], capeHem: [0, 0.420, -0.010] }
+  K: { body: [0, 0.378, 0], head: [0, 0.626, -0.005], throne: [0, 0.028, 0], crown: [0, 0.688, 0], sword: [0.162, 0.289, -0.018], banner: [0.228, 0.394, 0.126], rArm: [0.140, 0.480, 0.000], forearmR: [0.160, 0.446, 0.040], capeHem: [0, 0.420, -0.010] }
 };
 
 /**
@@ -137,11 +138,15 @@ export const SUBGROUP_JOINTS: Record<string, Record<string, Vec3>> = {
  *   子组 Group.position = J_self − J_直接父。旧「ΣJ_祖先」公式对 ≥2 层嵌套代数错误。
  */
 export const SUBGROUP_PARENTS: Record<string, Record<string, string>> = {
-  P: { spear: 'armR', head: 'body' },
-  A: { head: 'body' },
+  // ★ S2b-step3：forearmR 嵌套于所属上臂子组（K 的上臂子组名为 rArm）——
+  //   上臂被战斗/待机通道旋转时前臂刚性跟随（与拆分前「前臂段在上臂 mesh 内」逐帧一致）；
+  //   forearmR 自身 rotation（§7.3 #3/#10）绕肘关节局部转动。武器挂点本轮不动
+  //   （P.spear 留 armR、A.sword 留 idleGroup —— 改挂属驱动语义，随接线轮带姿态评审）。
+  P: { spear: 'armR', head: 'body', forearmR: 'armR' },
+  A: { head: 'body', forearmR: 'armR' },
   N: { head: 'rider' },
   R: { driverHead: 'driver' },
-  K: { head: 'body' }
+  K: { head: 'body', forearmR: 'rArm' }
 };
 
 /**

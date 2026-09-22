@@ -321,7 +321,7 @@ export const PAWN_SPEC: HumanoidSpec = {
   side: 'r',
   pose: 'stand',
   grouping: {
-    torso: 'body', head: 'head', armR: 'armR', armL: 'armL',
+    torso: 'body', head: 'head', armR: 'armR', armL: 'armL', forearmR: 'forearmR',
     legR: 'legR', legL: 'legL', shield: 'shield', spear: 'spear'
   },
   joints: [
@@ -356,7 +356,15 @@ export const PAWN_SPEC: HumanoidSpec = {
     {
       name: 'armR', semantic: 'shoulder', parent: 'torso', anchor: [0.096, 0.419, 0],
       segments: [
-        { role: 'bone', prim: 'strut', material: 'clothDeep', a: [0.096, 0.505, 0.000], b: [0.122, 0.438, -0.006], rTop: 0.030, rBot: 0.026, seg: 8 },
+        { role: 'bone', prim: 'strut', material: 'clothDeep', a: [0.096, 0.505, 0.000], b: [0.122, 0.438, -0.006], rTop: 0.030, rBot: 0.026, seg: 8 }
+      ]
+    },
+    // ★ S2b-step3（M-08d2）：forearmR 物化 —— 肘球 + 前臂 + 手 3 零件自 armR 拆出（数值逐字未改），
+    //   枢轴 = 肘关节 [0.122, 0.352, −0.006]（肘球作者 y 0.438 − FOOT）；§7.3 #3 的 forearmR.x 通道前提。
+    //   运行时嵌套于 armR 子组（SUBGROUP_PARENTS.P），武器挂点不动（spear 仍挂 armR）。
+    {
+      name: 'forearmR', semantic: 'elbow', parent: 'armR', anchor: [0.122, 0.352, -0.006],
+      segments: [
         { role: 'bone', prim: 'sph', material: 'clothDeep', r: 0.026, sw: 9, sh: 7, pos: [0.122, 0.438, -0.006] },
         { role: 'bone', prim: 'strut', material: 'clothDeep', a: [0.122, 0.438, -0.006], b: [0.150, 0.372, -0.012], rTop: 0.026, rBot: 0.022, seg: 8 },
         { role: 'bone', prim: 'sph', material: 'skin', r: 0.032, sw: 10, sh: 8, pos: [0.156, 0.366, -0.014] }
@@ -419,7 +427,7 @@ export const ADVISOR_SPEC: HumanoidSpec = {
   scale: 1,
   side: 'r',
   pose: 'stand',
-  grouping: { torso: 'body', head: 'head', armR: 'armR', armL: 'armL', sword: 'sword', shield: 'shield' },
+  grouping: { torso: 'body', head: 'head', armR: 'armR', armL: 'armL', forearmR: 'forearmR', sword: 'sword', shield: 'shield' },
   joints: [
     {
       name: 'torso', semantic: 'torso', parent: 'idleGroup', anchor: [0, 0.334, 0],
@@ -467,7 +475,15 @@ export const ADVISOR_SPEC: HumanoidSpec = {
     {
       name: 'armR', semantic: 'shoulder', parent: 'torso', anchor: [0.140, 0.474, -0.006],
       segments: [
-        { role: 'bone', prim: 'strut', material: 'armorDeep', a: [0.140, 0.560, -0.006], b: [0.094, 0.556, -0.052], rTop: 0.032, rBot: 0.028, seg: 8 },
+        { role: 'bone', prim: 'strut', material: 'armorDeep', a: [0.140, 0.560, -0.006], b: [0.094, 0.556, -0.052], rTop: 0.032, rBot: 0.028, seg: 8 }
+      ]
+    },
+    // ★ S2b-step3（M-08d2）：forearmR 物化 —— 肘球 + 前臂 + 手 3 零件自 armR 拆出（数值逐字未改），
+    //   枢轴 = 肘关节 [0.094, 0.470, −0.052]（肘球作者 y 0.556 − FOOT）；§7.3 #1 前臂环节的前提。
+    //   运行时嵌套于 armR 子组（SUBGROUP_PARENTS.A）；sword/shield 挂点本轮不动。
+    {
+      name: 'forearmR', semantic: 'elbow', parent: 'armR', anchor: [0.094, 0.470, -0.052],
+      segments: [
         { role: 'bone', prim: 'sph', material: 'armorDeep', r: 0.026, sw: 9, sh: 7, pos: [0.094, 0.556, -0.052] },
         { role: 'bone', prim: 'strut', material: 'armorDeep', a: [0.094, 0.556, -0.052], b: [0.048, 0.556, -0.154], rTop: 0.028, rBot: 0.024, seg: 8 },
         { role: 'bone', prim: 'sph', material: 'skin', r: 0.032, sw: 10, sh: 8, pos: [0.036, 0.556, -0.168] }
@@ -773,7 +789,7 @@ export function kingSpec(): HumanoidSpec {
     scale: 1,
     side: 'r',
     pose: 'sit',
-    grouping: { torso: 'body', head: 'head', armR: 'rArm' },
+    grouping: { torso: 'body', head: 'head', armR: 'rArm', forearmR: 'forearmR' },
     joints: [
       {
         name: 'torso', semantic: 'torso', parent: 'idleGroup', anchor: [0, 0.378, 0],
@@ -820,7 +836,15 @@ export function kingSpec(): HumanoidSpec {
       {
         name: 'armR', semantic: 'shoulder', parent: 'torso', anchor: [0.140, 0.480, 0.000],
         segments: [
-          { role: 'bone', prim: 'strut', material: 'armorDeep', a: [0.140, FOOT + 0.480, 0.000], b: [0.160, FOOT + 0.360, 0.040], rTop: 0.034, rBot: 0.030, seg: 8 },
+          { role: 'bone', prim: 'strut', material: 'armorDeep', a: [0.140, FOOT + 0.480, 0.000], b: [0.160, FOOT + 0.360, 0.040], rTop: 0.034, rBot: 0.030, seg: 8 }
+        ]
+      },
+      // ★ S2b-step3（M-08d2）：forearmR 物化 —— 肘球 + 前臂 + 手 3 零件自 rArm 拆出（数值逐字未改），
+      //   枢轴 = 肘关节 [0.160, 0.446, 0.040]（肘球 FOOT+0.360）；§7.3 #10 的 forearmR.x 通道前提。
+      //   运行时嵌套于 rArm 子组（SUBGROUP_PARENTS.K）；佩剑挂点不动。
+      {
+        name: 'forearmR', semantic: 'elbow', parent: 'armR', anchor: [0.160, 0.446, 0.040],
+        segments: [
           { role: 'bone', prim: 'sph', material: 'armorDeep', r: 0.030, sw: 10, sh: 8, pos: [0.160, FOOT + 0.360, 0.040] },
           { role: 'bone', prim: 'strut', material: 'armorDeep', a: [0.160, FOOT + 0.360, 0.040], b: [0.160, FOOT + 0.275, 0.020], rTop: 0.030, rBot: 0.026, seg: 8 },
           { role: 'bone', prim: 'sph', material: 'skin', r: 0.030, sw: 10, sh: 8, pos: [0.160, FOOT + 0.275, 0.020] }
