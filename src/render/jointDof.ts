@@ -76,8 +76,9 @@ export const JOINT_DOF: Record<string, JointDof> = {
   footL: H('footL', 'shinL', 'ankle', { x: [-0.60, 0.70], z: [-0.30, 0.30] }, ['移动落步'], true),
 
   // ★ S2b（M-08d2）：御手头颈独立子组（限位沿用 head）。
-  // ★ S2b-step4（M-08d2）：crew 头 + R 持械臂肘物化（限位沿用 head / forearmR；
-  //   消费方待接线轮落 POSE_TABLE/编舞后充实）。B.forearmR/L 复用标准 forearmR/forearmL 条目。
+  // ★ S2b-step4（M-08d2）：crew 头 + R 持械臂肘物化（限位沿用 head / forearmR）。
+  //   ★ 接线轮（M-08d2-step5）：spearmanForearmR/spearmanHead/soldierLHead/soldierRHead 已接入
+  //   POSE_TABLE[*].capture（R 挺戟突刺+仰视锁定、C 俯身操机）。B.forearmR/L 复用标准条目（已接线）。
   driverHead: H('driverHead', 'driver', 'head', { x: [-0.25, 0.30], y: [-0.50, 0.50], z: [-0.20, 0.20] }, ['待机', '移动', '吃子', '受击'], true),
   spearmanHead: H('spearmanHead', 'spearman', 'head', { x: [-0.25, 0.30], y: [-0.50, 0.50], z: [-0.20, 0.20] }, ['待机', '移动', '吃子', '受击'], true),
   spearmanForearmR: H('spearmanForearmR', 'spearman', 'elbow', { x: [-2.40, 0], y: [-1.20, 1.20] }, ['吃子', '待机持戈'], true),
