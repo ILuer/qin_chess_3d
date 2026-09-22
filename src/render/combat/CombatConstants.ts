@@ -530,7 +530,9 @@ export const POSE_TABLE: Record<string, Record<string, any>> = {
     capture: {
       anticipation: { sub: { arms: { rotation: { z: -0.3 } }, bodyRobe: { rotation: { x: 0.15 } } }, duration: 0.18, ease: 'easeOutQuad', channels: ['arms.rotation.z', 'bodyRobe.rotation.x'] },
       action: { sub: { arms: { rotation: { z: 0.75 } }, bodyRobe: { rotation: { z: 0.40 } } }, duration: 0.09, ease: 'easeInCubic', channels: ['arms.rotation.z', 'bodyRobe.rotation.z'] },
-      recovery: { sub: { arms: { rotation: { z: 0 } }, bodyRobe: { rotation: { z: 0, x: 0 } } }, duration: 0.32, ease: 'easeInOutQuad', channels: ['arms.rotation.z', 'bodyRobe.rotation.z'] }
+      // ★ P1（M-08d2-b）：`sub` 驱动 `bodyRobe.{z,x}`，但 `channels` 原仅列 `z` ——
+      //   由 ⑨-I3b 双向集合等式捕获（「加 sub 忘加 channels」缺陷类）。已补 `bodyRobe.rotation.x`。
+      recovery: { sub: { arms: { rotation: { z: 0 } }, bodyRobe: { rotation: { z: 0, x: 0 } } }, duration: 0.32, ease: 'easeInOutQuad', channels: ['arms.rotation.z', 'bodyRobe.rotation.z', 'bodyRobe.rotation.x'] }
     }
   },
   [PT.ADVISOR]: {
@@ -677,11 +679,27 @@ export function deriveCombatChannels(type: string): Set<string> {
       if (!st) continue;
       for (const stage of ['anticipation', 'action', 'recovery'] as const) {
         const seg = st[stage];
-        const chs = seg && seg.channels;
-        if (!Array.isArray(chs)) continue;
-        for (const c of chs) {
-          const k = _normRotationChannel(String(c));
-          if (k) out.add(k);
+        // ★ P1（M-08d2-b）· 通道定义源 = `seg.sub`（**真正的驱动源**）：
+        //   运行时 `PieceChoreography._applyPose*` 按 `sub` 写 `sg[sub].rotation[axis]`，
+        //   故 `sub` 才是事实来源；`seg.channels` 只是**手工并行维护的冗余副本**。
+        //   历史缺陷：本函数原先只读 `channels` → 有人加 `sub` 忘加 `channels` 时，
+        //   该通道漏出派生集 → 留在 `deriveZeroChannels` 差集 → `_busy` 每帧归零 →
+        //   `POSE_TABLE` 同时在写 ⇒ **动作静默失效**（同类：历史 `ROOK.horses.rotation.x`）。
+        //   改读 `sub` 后，漏同步 `channels` 会被契约 I3b（双向集合等式）当场抓住。
+        //   ⚠ 纪律：`zeroChannels` 只写 rotation —— 经 `_normRotationChannel` 过滤，
+        //   position/scale（如 `DISSOLVE_POSE.translateY`）自动排除，不入集。
+        if (!seg || !seg.sub) continue;
+        for (const sub of Object.keys(seg.sub)) {
+          const props = seg.sub[sub];
+          if (!props || typeof props !== 'object') continue;
+          for (const prop of Object.keys(props)) {
+            const axes = props[prop];
+            if (!axes || typeof axes !== 'object') continue;
+            for (const ax of Object.keys(axes)) {
+              const k = _normRotationChannel(`${sub}.${prop}.${ax}`);
+              if (k) out.add(k);
+            }
+          }
         }
       }
     }

@@ -16,6 +16,9 @@
  *   ⑥ DP-4：`zeroChannels(type) ∩ deriveCombatChannels(type) === ∅`（逐型逐通道）；K 无 `banner.z`
  *   ⑦ DP-4（S0.1 硬门）：`zeroChannels ∩ (move ∪ capture ∪ dissolve ∪ 编排层直写) === ∅`（逐型逐通道）
  *      + move 派生证据（P 的 armL/legL/legR、A 的 arms 已排除出 zeroChannels）；POSE_TABLE.move 三段齐备
+ *   ⑨ P1（M-08d2-b）· 通道定义源收口：`sub` 为真源、`channels` 为被断言的冗余 ——
+ *      I3b 双向集合等式（每型×每态×每 stage，`set(sub 展开) === set(channels)`）；
+ *      I3a 通道子组必须 ∈ `SUBGROUP_JOINTS[type]`（堵 ghost 子组）。
  *   ⑧ S1（M-08c）+ S2（M-08d）人形抽象契约 I1–I6（DP-5）：
  *      I1 标准骨链 16 关节 + 7 型（P/A/N/R/C/K/B）声明树（父存在 + 无环）；
  *      I2 已物化 ⊆ 已声明（7 型）+ spec 只路由到真实子组 + 覆盖子组集钉死 + spec anchor ≡ SUBGROUP_JOINTS
@@ -64,6 +67,9 @@ const j = (v) => JSON.stringify(v);
  * ① anchor 一致性（11 槽位 / 14 子组）
  * ═══════════════════════════════════════════════════════════════ */
 section('① anchor 一致性（SLOT_TABLE.anchor ≡ SUBGROUP_JOINTS）');
+// ⚠ P1 复核（M-08d2-b）：**构造性恒真，非独立校验** —— `SLOT_TABLE[*].anchor` 本就由
+//   `accessories.anchorOf()` 从 `SUBGROUP_JOINTS` 派生（同源读取），故本断言两侧恒等，
+//   只能挡住「有人手工写死 anchor 绕开派生」这种回归，不能独立发现坐标错误。
 let slotCount = 0;
 const seenSubgroups = new Set();
 for (const type of Object.keys(SLOT_TABLE)) {
@@ -126,6 +132,8 @@ for (const type of Object.keys(GOLD_ALL)) {
 }
 chk(goldenAllN === 40, `[②] 全表关节数应为 40，实际 ${goldenAllN}`);
 // 反向：不得有新增/缺失关节
+// ⚠ P1 复核：本「keys 比较」**部分构造性恒真** —— `GOLD_ALL` 的字面量键在 S0 搬移时抄自
+//   同一张表，且 ② 已逐值 pin 全部 40 关节；此处仅作「键集合」的二道钉，独立发现力有限。
 for (const type of Object.keys(SUBGROUP_JOINTS)) {
   const gotKeys = Object.keys(SUBGROUP_JOINTS[type]).sort();
   const wantKeys = Object.keys(GOLD_ALL[type] || {}).sort();
@@ -140,6 +148,9 @@ console.log(`  14 槽位子组锚点 + 全表 ${goldenAllN} 关节逐位校验`)
 section('③ 父链完整性（父存在 + 无环）');
 let edgeCount = 0;
 const GOLD_PARENTS = { P: { spear: 'armR' } };
+// ⚠ P1 复核：`GOLD_PARENTS` 快照把整张父链表钉死为「仅 1 条 P.spear→armR」，
+//   使下方「父存在于同型 joints」循环在构造上恒真（表已固定 ⇒ 父必然存在）。
+//   真正有独立价值的只有**无环检测**（对任意表结构有效）。
 chk(JSON.stringify(SUBGROUP_PARENTS) === JSON.stringify(GOLD_PARENTS),
   `[③] SUBGROUP_PARENTS 全集变化：实际 ${j(SUBGROUP_PARENTS)} 期望 ${j(GOLD_PARENTS)}`);
 for (const type of Object.keys(SUBGROUP_PARENTS)) {
@@ -425,6 +436,8 @@ for (const type of Object.keys(SPECS)) {
   for (const sg of materialized) chk(!!(tree && tree[sg]), `[⑧-I2] ${type}.${sg} 已物化但未在声明树`);
   SPECS[type].forEach((spec, si) => {
     const jointNames = spec.joints.map((jt) => jt.name);
+    // ⚠ P1 复核：本「keys 比较」**构造性弱校验** —— `joints[].name` 与 `grouping` 键同在
+    //   一份 spec 字面量中作者手写，比的是同源两字段（能挡漏写，但非独立几何校验）。
     chk(sortJoin(jointNames) === sortJoin(Object.keys(spec.grouping)), `[⑧-I2] ${type}#${si} grouping 键与 joints 名不一致`);
     const targetGroups = new Set(jointNames.map((n) => spec.grouping[n] || n));
     // (b) spec 只路由到**真实物化子组**（不凭空造子组、不引入新子组）
@@ -469,6 +482,8 @@ for (const n of dofNames) {
     chk(Array.isArray(lim) && lim.length === 2 && lim[0] <= lim[1], `[⑧-I3] ${n}.${ax} 限位非法 ${j(lim)}`);
   }
 }
+// ⚠ P1 复核：**构造性恒真，非独立校验** —— `JOINT_DOF_JSON` 在 `jointDof.ts` 中由
+//   `JSON.stringify(JOINT_DOF)` 生成，故 `parse(JSON)` 与原对象恒等；只能挡住「两者被拆成手工副本」。
 chk(JSON.stringify(JSON.parse(JOINT_DOF_JSON)) === JSON.stringify(JOINT_DOF), '[⑧-I3] JOINT_DOF_JSON 与 JOINT_DOF 不同源');
 console.log(`  I3：JOINT_DOF ${dofNames.length} 关节（human ${dofHuman.length} / horse ${dofNames.filter((n) => JOINT_DOF[n].group === 'horse').length} / chassis ${dofNames.filter((n) => JOINT_DOF[n].group === 'chassis').length}）`);
 
@@ -484,6 +499,9 @@ for (const c of chans) {
 console.log(`  I4：可驱动通道 ${chans.length} 条（格式合法且 ⊆ axisLimits 并集 ${allChanSet.size} 条）`);
 
 // ── I5 · 缺省姿态（派生自 VIGNETTE.baseline）──
+// ⚠ P1 复核：**构造性恒真，非独立校验** —— `deriveBindPose(type)` 内部即读
+//   `VIGNETTE[type].baseline`（见 jointDof.ts:119-126），而此处 `want` 亦由同一字段构造
+//   ⇒ 两侧同源必等。它只能证明「派生链未断」，不能独立校验 baseline 数值。
 for (const type of TYPES) {
   const bp = deriveBindPose(type);
   const def = VIGNETTE[type];
@@ -498,6 +516,89 @@ console.log('  I5：7 型 bindPose 派生自 VIGNETTE.baseline；5 个姿态预�
 console.log('  I6：pivot 校正需渲染几何（GPU/CDP）→ 不在本 CI；基线由 devtools/audit-pieces.mjs（_m06-audit.json）承担，');
 
 /* ═══════════════════════════════════════════════════════════════
+ * ⑨ P1（M-08d2-b）· 通道定义源收口：`sub` 为真源，`channels` 为**被断言的冗余**
+ *
+ *   背景：`deriveCombatChannels` 原只读 `seg.channels`（手工并行维护的冗余副本），
+ *   而运行时按 `seg.sub` 驱动 → 「加 sub 忘加 channels」会漏出战斗集 → 留在
+ *   `deriveZeroChannels` 差集 → `_busy` 每帧归零 ⇒ **动作静默失效**，且旧契约抓不到
+ *   （两边同源自同一份不完整数据 → 构造性恒真）。P1 已把派生源改为 `sub`；本节补断言：
+ *     I3b（双向集合等式）：每型 × 每态 × 每 stage，`set(sub 展开的 rotation 通道) === set(channels)`；
+ *     I3a（子组注册）：每个通道的 `subgroup` 必须 ∈ `SUBGROUP_JOINTS[type]`（堵 ghost 子组）。
+ * ═══════════════════════════════════════════════════════════════ */
+section('⑨ P1 通道定义源收口（I3a 子组注册 / I3b sub≡channels 双向）');
+const STATES = ['idle', 'move', 'capture'];
+const STAGES = ['anticipation', 'action', 'recovery'];
+/** 'sub.rotation.x' → 'sub.x'；'sub.x' → 'sub.x'；position/scale/其它 → null（只认 rotation，与派生态一致） */
+const rotCh = (c) => {
+  const p = String(c).split('.');
+  if (p.length === 2) return c;
+  if (p.length === 3) return p[1] === 'rotation' ? `${p[0]}.${p[2]}` : null;
+  return null;
+};
+/** 由 `seg.sub` 展开 rotation 通道集（与 deriveCombatChannels 同口径） */
+const expandSubRot = (seg) => {
+  const s = new Set();
+  if (!seg || !seg.sub) return s;
+  for (const sub of Object.keys(seg.sub)) {
+    const props = seg.sub[sub];
+    if (!props || typeof props !== 'object') continue;
+    for (const prop of Object.keys(props)) {
+      const axes = props[prop];
+      if (!axes || typeof axes !== 'object') continue;
+      for (const ax of Object.keys(axes)) {
+        const k = rotCh(`${sub}.${prop}.${ax}`);
+        if (k) s.add(k);
+      }
+    }
+  }
+  return s;
+};
+let i3bChecks = 0;
+let i3aChecks = 0;
+for (const type of TYPES) {
+  const joints = SUBGROUP_JOINTS[type] || {};
+  const entry = POSE_TABLE[type];
+  if (!entry) continue;
+  for (const state of STATES) {
+    const st = entry[state];
+    if (!st) continue;
+    for (const stage of STAGES) {
+      const seg = st[stage];
+      if (!seg) continue;
+      const subSet = expandSubRot(seg);
+      const chRaw = Array.isArray(seg.channels) ? seg.channels : [];
+      const chSet = new Set(chRaw.map(rotCh).filter(Boolean));
+      // I3b · sub ⊆ channels（堵「加了 sub 忘加 channels」）
+      for (const ch of subSet) {
+        i3bChecks++;
+        chk(chSet.has(ch),
+          `[⑨-I3b] ${type}.${state}.${stage}: sub 有通道 ${ch} 但 channels 未声明（← 会静默吞掉该动作，须同步 channels）`);
+      }
+      // I3b · channels ⊆ sub（堵「channels 残留 sub 已删的幽灵通道」）
+      for (const ch of chSet) {
+        i3bChecks++;
+        chk(subSet.has(ch),
+          `[⑨-I3b] ${type}.${state}.${stage}: channels 有通道 ${ch} 但 sub 中不存在（幽灵通道）`);
+      }
+      // I3a · 每个通道的子组必须 ∈ SUBGROUP_JOINTS[type]
+      for (const ch of new Set([...subSet, ...chSet])) {
+        i3aChecks++;
+        const sub = ch.slice(0, ch.indexOf('.'));
+        chk(!!joints[sub],
+          `[⑨-I3a] ${type}.${state}.${stage}: 通道 ${ch} 引用未注册子组 ${sub}（ghost 子组）`);
+      }
+      // I3a · raw `sub` 键（含 position/scale）也必须注册
+      if (seg.sub) for (const sub of Object.keys(seg.sub)) {
+        i3aChecks++;
+        chk(!!joints[sub],
+          `[⑨-I3a] ${type}.${state}.${stage}: sub 键 ${sub} 未在 SUBGROUP_JOINTS 注册`);
+      }
+    }
+  }
+}
+console.log(`  I3a 子组注册校验 ${i3aChecks} 项 / I3b 双向集合等式 ${i3bChecks} 项（sub 为真源，channels 为冗余副本）`);
+
+/* ═══════════════════════════════════════════════════════════════
  * 汇总
  * ═══════════════════════════════════════════════════════════════ */
 console.log('\n════════════════════════════════════════════');
@@ -506,6 +607,9 @@ if (fails.length) {
   for (const f of fails) console.log('  ✗ ' + f);
   process.exit(1);
 }
+// ⚠ P1 复核：`pass` = **`chk()` 调用次数**（逐项循环放大：I2 每关节/每 spec、I3a/I3b 每型×每态×每 stage
+//   各记一项、⑥⑦ 每型逐通道…）。**真实「独立不变量」约 25–30 条**，本数字是断言执行量而非覆盖度，
+//   不可当"校验强度"引用（历史 S1 曾据此外报「542 / 1149」口径混淆）。
 console.log(`✓ check-piece-contract 通过：${pass} 项断言全绿`);
 console.log(`  锚点 ${slotCount} 槽位/${seenSubgroups.size} 子组 · 关节 ${goldenAllN} 个 · 父链 ${edgeCount} 条 · 子组名 ${nameN} 个`);
 console.log(`  zeroChannels：${TYPES.map((t) => t + '=' + deriveZeroChannels(t).length).join(' ')}（S0.1：P/A 已剔除 move 通道；K 已剔除 banner.z）`);
